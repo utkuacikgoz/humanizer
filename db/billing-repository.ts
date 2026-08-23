@@ -15,6 +15,12 @@ export interface UserRecord {
   isNew: boolean;
 }
 
+/** Read-only lookup — does not create a row. For checks (e.g. "is this unlocked?") where a never-checked-out visitor shouldn't get a user row just for asking. */
+export async function findUserIdByExternalSubject(db: AppDatabase, externalSubject: string): Promise<string | null> {
+  const [row] = await db.select().from(users).where(eq(users.externalSubject, externalSubject)).limit(1);
+  return row?.id ?? null;
+}
+
 /**
  * Upserts a user by their trusted external identity subject. A neither
  * client-supplied nor guessable email/user ID is ever accepted as proof
@@ -73,9 +79,18 @@ function rowsChanged(result: unknown): number {
  * concurrency, not just a test artifact) can write the identical
  * millisecond value and both wrongly conclude they won. Caught by
  * tests/billing-repository.test.mts's concurrent-claim test.
- * Returns null uniformly for unknown/expired/already-claimed capabilities
- * — never distinguish those cases (docs/SECURITY.md enumeration-oracle
- * control).
+ * Idempotent for retries by the SAME user (e.g. checkout succeeded in
+ * claiming the job but then failed at the Stripe API call — a network
+ * blip, not a security event): if the capability was already consumed
+ * and the job it pointed to is already owned by this same userId, this
+ * returns that jobId again rather than null, so a legitimate retry isn't
+ * permanently locked out just because the one-time capability was
+ * already spent on an earlier, failed attempt. Revealing "you already
+ * own this" to the same authenticated caller who already owns it is not
+ * an oracle leak; it would be if revealed to anyone else, so this still
+ * returns null uniformly for every other case: unknown digest, expired-
+ * and-never-claimed, or claimed by a *different* user (docs/SECURITY.md
+ * enumeration-oracle control).
  */
 export async function claimJobForUser(
   db: AppDatabase,
@@ -90,7 +105,13 @@ export async function claimJobForUser(
       isNull(anonymousSessions.consumedAt),
       gt(anonymousSessions.expiresAt, claimedAt),
     ));
-  if (rowsChanged(updateResult) !== 1) return null;
+
+  if (rowsChanged(updateResult) !== 1) {
+    const [existingSession] = await db.select().from(anonymousSessions).where(eq(anonymousSessions.capabilityDigest, input.capabilityDigest)).limit(1);
+    if (!existingSession?.consumedAt) return null;
+    const [existingJob] = await db.select().from(humanizationJobs).where(eq(humanizationJobs.id, existingSession.jobId)).limit(1);
+    return existingJob?.ownerUserId === input.userId ? { jobId: existingJob.id } : null;
+  }
 
   const [session] = await db
     .select()

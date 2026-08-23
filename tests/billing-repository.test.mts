@@ -88,6 +88,19 @@ test("rejects a second claim attempt after the first already consumed it", async
   assert.equal(second, null);
 });
 
+test("the same user re-claiming an already-consumed capability gets their job back (retry after a failed checkout attempt)", async () => {
+  const db = await createTestDatabase();
+  const job = await persistHumanizationJob(db, baseJobInput);
+  const digest = await digestOf(job.capabilityToken);
+  const { userId } = await getOrCreateUserByExternalSubject(db, { externalSubject: "sub_retry", email: null });
+
+  const first = await claimJobForUser(db, { capabilityDigest: digest, userId });
+  const retry = await claimJobForUser(db, { capabilityDigest: digest, userId });
+  assert.ok(first);
+  assert.ok(retry);
+  assert.equal(retry.jobId, first.jobId);
+});
+
 test("rejects claiming with an unknown capability digest", async () => {
   const db = await createTestDatabase();
   const { userId } = await getOrCreateUserByExternalSubject(db, { externalSubject: "sub_e", email: null });

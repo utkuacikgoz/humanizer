@@ -14,6 +14,8 @@ type Result = {
   naturalness: "Strong" | "Good";
   meaningPreservation: "High" | "Review needed";
   protectedItems: string[];
+  capability?: string;
+  capabilityExpiresAt?: string;
 };
 
 const SAMPLE_TEXT =
@@ -29,6 +31,8 @@ export default function Home() {
   const [result, setResult] = useState<Result | null>(null);
   const [status, setStatus] = useState<"idle" | "working" | "error">("idle");
   const [error, setError] = useState("");
+  const [unlockStatus, setUnlockStatus] = useState<"idle" | "working" | "error">("idle");
+  const [unlockError, setUnlockError] = useState("");
   const hasTrackedText = useRef(false);
   const completedCount = useRef(0);
   const idempotency = useRef<{ request: string; key: string } | null>(null);
@@ -119,6 +123,30 @@ export default function Home() {
       return;
     }
     setStatus("idle");
+  }
+
+  async function unlock(planId: string) {
+    if (!result?.capability || unlockStatus === "working") return;
+    setUnlockError("");
+    setUnlockStatus("working");
+    track("checkout_started", { planId });
+    try {
+      const response = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ capability: result.capability, planId }),
+      });
+      const payload = (await response.json()) as { url?: string; signInPath?: string; error?: string };
+      if (response.status === 401 && payload.signInPath) {
+        window.location.href = payload.signInPath;
+        return;
+      }
+      if (!response.ok || !payload.url) throw new Error(payload.error ?? "Checkout could not be started.");
+      window.location.href = payload.url;
+    } catch (caught) {
+      setUnlockError(caught instanceof Error ? caught.message : "Checkout could not be started.");
+      setUnlockStatus("error");
+    }
   }
 
   return (
@@ -234,8 +262,14 @@ export default function Home() {
                 <span className="lock" aria-hidden="true">●</span>
                 <strong>There’s more to this rewrite</strong>
                 <p>Unlock the complete result, sentence controls, and protected terminology.</p>
-                <button type="button" disabled title="Checkout is not connected in this Phase 0 preview">Unlock full rewrite for ${pricingConfig.plans.starter.monthlyPrice}/mo</button>
-                <small>Phase 0 preview · Checkout is not connected yet</small>
+                {result.capability ? (
+                  <button type="button" onClick={() => unlock("starter")} aria-disabled={unlockStatus === "working"}>
+                    {unlockStatus === "working" ? "Redirecting to checkout…" : `Unlock full rewrite for $${pricingConfig.plans.starter.monthlyPrice}/mo`}
+                  </button>
+                ) : (
+                  <button type="button" disabled title="Checkout isn't available for this result yet">Unlock full rewrite for ${pricingConfig.plans.starter.monthlyPrice}/mo</button>
+                )}
+                {unlockStatus === "error" ? <small role="alert">{unlockError}</small> : null}
               </div>
             </article>
           </div>
