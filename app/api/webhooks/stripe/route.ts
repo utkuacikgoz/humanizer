@@ -119,8 +119,15 @@ export async function POST(request: Request) {
     objectId: extractObjectId(event),
     stripeCreatedAt: new Date(event.created * 1000),
   });
-  if (inboxResult === "duplicate") {
-    // Already recorded; acknowledge without repeating any side effect.
+  if (inboxResult === "already-processed") {
+    // A true duplicate: this exact event already succeeded. Acknowledge
+    // without repeating any side effect.
+    return new Response(null, { status: 200 });
+  }
+  if (inboxResult === "attempts-exhausted") {
+    // Stop asking Stripe to retry a permanently-failing event; it stays
+    // recorded as `failed` for manual investigation (docs/MONETIZATION.md:
+    // "permanent unsupported events are recorded and safely acknowledged").
     return new Response(null, { status: 200 });
   }
 

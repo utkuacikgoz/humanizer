@@ -1,6 +1,9 @@
 // M2-10: Billing Portal. A portal session is created only for the
 // authenticated caller's own mapped Stripe customer — never a
 // client-supplied customer ID (docs/MONETIZATION.md).
+//
+// No app-level CSRF token: see app/api/checkout/route.ts's identical
+// note — this route has the same header-only identity boundary.
 import { resolveChatGPTUserFromHeaders } from "@/src/lib/chatgpt-identity";
 
 export async function POST(request: Request) {

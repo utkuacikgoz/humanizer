@@ -107,13 +107,36 @@ test("rejects claiming with an unknown capability digest", async () => {
   assert.equal(await claimJobForUser(db, { capabilityDigest: "not-a-real-digest", userId }), null);
 });
 
-test("the webhook inbox rejects a duplicate event ID and does not error", async () => {
+test("the webhook inbox skips a true duplicate of an already-processed event", async () => {
   const db = await createTestDatabase();
   const event = { eventId: "evt_123", eventType: "customer.subscription.updated", objectId: "sub_123", stripeCreatedAt: new Date() };
   assert.equal(await recordStripeEvent(db, event), "new");
-  assert.equal(await recordStripeEvent(db, event), "duplicate");
-  // Idempotent: recording an outcome for the original insert still works.
   await markStripeEventOutcome(db, event.eventId, "processed");
+  assert.equal(await recordStripeEvent(db, event), "already-processed");
+});
+
+test("a Stripe retry of a FAILED event is reprocessed, not silently acknowledged as a duplicate", async () => {
+  // This is the actual bug a webhook-retry-storm review finding
+  // surfaced: returning 500 to ask Stripe to retry is pointless if the
+  // retry delivery just gets deduped away without ever re-attempting
+  // the failed processing.
+  const db = await createTestDatabase();
+  const event = { eventId: "evt_456", eventType: "customer.subscription.updated", objectId: "sub_456", stripeCreatedAt: new Date() };
+  assert.equal(await recordStripeEvent(db, event), "new");
+  await markStripeEventOutcome(db, event.eventId, "failed");
+  assert.equal(await recordStripeEvent(db, event), "retry");
+});
+
+test("stops retrying a permanently-failing event once it exhausts its attempt budget", async () => {
+  const db = await createTestDatabase();
+  const event = { eventId: "evt_789", eventType: "customer.subscription.updated", objectId: "sub_789", stripeCreatedAt: new Date() };
+  assert.equal(await recordStripeEvent(db, event), "new");
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await markStripeEventOutcome(db, event.eventId, "failed");
+    assert.equal(await recordStripeEvent(db, event), "retry", `attempt ${attempt} should still be retryable`);
+  }
+  await markStripeEventOutcome(db, event.eventId, "failed"); // 5th failure — attempt budget now exhausted
+  assert.equal(await recordStripeEvent(db, event), "attempts-exhausted");
 });
 
 test("subscription projection is idempotent by Stripe subscription ID and converges to the latest call", async () => {
