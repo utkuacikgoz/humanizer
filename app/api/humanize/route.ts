@@ -24,6 +24,19 @@ type PreviewPayload = PreviewProjection & {
  * directly) or any environment without a configured D1 binding, the
  * dynamic import/getDb() call throws and this quietly no-ops. The preview
  * itself never depends on persistence succeeding.
+ *
+ * Known tradeoff (AQA review, see docs/QA.md's idempotency requirement):
+ * if the in-memory PreviewRequestGuard's replay cache is gone (isolate
+ * recycle) and a genuine duplicate submission reaches here, the unique
+ * index on (client_fingerprint, idempotency_key) rejects the second
+ * insert and this catches it — the caller gets a fresh, correctly
+ * re-derived preview but no capability. That's intentional, not a bug to
+ * silently paper over: only a capability's one-way digest is ever stored
+ * (never the raw token), so there is no raw token to hand back for the
+ * original job. Recovering one would mean minting a second live
+ * capability for the same job, which breaks the "exactly one capability
+ * per job" invariant in docs/ARCHITECTURE.md — a product/security
+ * decision, not something to change here unilaterally.
  */
 async function tryPersist(input: {
   mode: WritingMode;

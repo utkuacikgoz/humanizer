@@ -32,7 +32,18 @@ export default function Home() {
   const hasTrackedText = useRef(false);
   const completedCount = useRef(0);
   const idempotency = useRef<{ request: string; key: string } | null>(null);
+  const resultHeadingRef = useRef<HTMLHeadingElement>(null);
   const wordCount = useMemo(() => countWords(text), [text]);
+
+  // Focus the result heading once a rewrite lands, instead of only
+  // scrolling it into view: a native `disabled` button drops keyboard
+  // focus to <body> when it becomes disabled (browsers force this), which
+  // silently strands keyboard/screen-reader users with no landmark. This
+  // routes focus explicitly to where the result actually appears.
+  useEffect(() => {
+    if (!result) return;
+    resultHeadingRef.current?.focus();
+  }, [result]);
 
   useEffect(() => {
     document.documentElement.classList.add("motion-ready");
@@ -71,6 +82,7 @@ export default function Home() {
   useEffect(() => { track("landing_view"); }, []);
 
   async function humanize() {
+    if (status === "working") return;
     setError("");
     if (wordCount < 12) {
       setError("Add a little more context. At least 12 words works best.");
@@ -101,9 +113,6 @@ export default function Home() {
       track("humanization_completed", { mode, wordCount, issuesImproved: payload.issuesImproved });
       track("preview_viewed", { mode });
       if (completedCount.current === 2) track("second_humanization");
-      window.setTimeout(() => {
-        document.getElementById("result")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 80);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The rewrite could not be completed.");
       setStatus("error");
@@ -180,7 +189,7 @@ export default function Home() {
               </button>
             ))}
           </div>
-          <button className="humanize-button" type="button" onClick={humanize} disabled={status === "working"}>
+          <button className="humanize-button" type="button" onClick={humanize} aria-disabled={status === "working"}>
             {status === "working" ? (
               <>Checking meaning… <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span></>
             ) : (
@@ -200,7 +209,7 @@ export default function Home() {
       {result ? (
         <section className="result" id="result" aria-live="polite">
           <div className="result-heading">
-            <div><span className="step-number">02</span><h2>Your rewrite is ready</h2></div>
+            <div><span className="step-number">02</span><h2 ref={resultHeadingRef} tabIndex={-1}>Your rewrite is ready</h2></div>
             <p>We rewrote the awkward parts and left the meaning alone.</p>
           </div>
           <div className="checks">
