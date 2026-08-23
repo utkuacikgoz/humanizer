@@ -9,7 +9,7 @@ Build a paid-first writing product that turns generic AI-assisted writing into n
 
 The product optimizes together for natural writing, meaning preservation, personal voice, and writing quality. It is not a generic paraphraser and must never promise guaranteed detector bypass.
 
-Internal codename: `humanizer`. Brand name: TBD. Naming work must not block delivery.
+Internal codename: `humanizer`. Brand name: Ownword, at ownword.pro, operated by Bosphorus Elevate LLC. The codename stays as the repository/package name; the brand is served from `src/config/product.ts`.
 
 ## Commercial objective
 

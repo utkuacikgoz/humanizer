@@ -156,7 +156,6 @@ export default function Home() {
         <a className="brand" href="#top" aria-label={`${productConfig.productName} home`}>
           <span className="brand-mark" aria-hidden="true">{productConfig.productName.slice(0, 1)}</span>
           <span>{productConfig.productName}</span>
-          <span className="brand-note">name in progress</span>
         </a>
         <nav aria-label="Primary navigation">
           <a href="#how-it-works">How it works</a>
@@ -291,14 +290,20 @@ export default function Home() {
       <section className="pricing" id="pricing">
         <div data-reveal><p className="eyebrow"><span /> Simple pricing</p><h2>Try the quality.<br />Pay for the full result.</h2></div>
         <article data-reveal style={{ "--reveal-index": 1 } as React.CSSProperties}>
-          <div><span>Starter</span><p>Everything you need to make drafts sound like you meant them.</p></div>
+          <div><span>{pricingConfig.plans.starter.name}</span><p>Everything you need to make drafts sound like you meant them.</p></div>
           <strong><sup>$</sup>{pricingConfig.plans.starter.monthlyPrice}<small>/ month</small></strong>
           <ul>{pricingConfig.plans.starter.features.map((feature) => <li key={feature}>✓ {feature}</li>)}</ul>
           <a href="#top">Try it with your text</a>
         </article>
       </section>
 
-      <footer><span>{productConfig.productName} · {productConfig.productTagline}</span><span>Privacy · Terms · Support</span></footer>
+      <footer>
+        <span>{productConfig.productName} · {productConfig.productTagline}</span>
+        <span>
+          © 2026 {productConfig.legalCompanyName} ·{" "}
+          <a href={`mailto:${productConfig.supportEmail}`}>Support</a>
+        </span>
+      </footer>
     </main>
   );
 }

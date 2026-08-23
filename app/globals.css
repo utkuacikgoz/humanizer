@@ -432,6 +432,7 @@ footer {
   display: flex; justify-content: space-between; color: var(--muted); font-size: 11px;
   border-top: 1px solid var(--line-soft);
 }
+footer a { text-decoration: underline; text-underline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
 @media (max-width: 760px) {
