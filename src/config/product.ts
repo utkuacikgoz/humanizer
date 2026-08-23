@@ -4,7 +4,7 @@ export const productConfig = {
   productTagline: "Writing that still sounds like you.",
   domain: "",
   supportEmail: "support@example.com",
-  legalCompanyName: "TBD",
+  legalCompanyName: "Bosphorus Elevate LLC",
   socialHandles: {} as Record<string, string>,
   billingEnabled: false,
 } as const;
