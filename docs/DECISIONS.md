@@ -1,0 +1,111 @@
+# Decision Log
+
+Last updated: 2026-08-23
+
+Accepted decisions are durable until replaced by a new dated entry. Implementation discoveries should amend this log rather than silently diverge.
+
+## Accepted
+
+### D-001 — V1 is a paid-first single journey
+
+Decision: Ship only the journey in `PRODUCT.md`; no permanent free tier and no Voice DNA in V1.
+Reason: Prove quality, payment, and repeat use before expanding.
+Consequence: New dashboard, collaboration, API, and personalization work is rejected or deferred.
+
+### D-002 — Brand is one configuration source
+
+Decision: Customer-facing identity comes from a typed configuration object containing `productName`, `productTagline`, `domain`, `supportEmail`, `legalCompanyName`, and `socialHandles`. Use `Humanizer` only as the centralized temporary display value and `humanizer` as the internal codename.
+Reason: Naming is TBD and must not block engineering or create a later search-and-replace migration.
+Consequence: Tests should detect customer-facing literals outside the config/assets allowlist.
+
+### D-003 — Pricing and entitlements are a server-owned catalog
+
+Decision: Plans live in one versioned server-owned catalog; UI consumes a public projection and Stripe price IDs come from validated environment bindings.
+Reason: Prevent drift, forged allowances, and scattered plan logic.
+Consequence: Stripe metadata and client parameters are references, never entitlement authority.
+
+### D-004 — Complete first result is generated before purchase
+
+Decision: Run the complete pipeline server-side, then expose only an approved partial representation until server-confirmed payment.
+Reason: Users experience quality before buying while the full product remains paid.
+Consequence: Full text must not enter HTML, RSC payloads, analytics, logs, browser storage, or preview responses.
+
+### D-005 — Server-side job is the checkout continuity anchor
+
+Decision: Store the verified job under an opaque ID; bind it to a high-entropy expiring anonymous capability, then transactionally claim it to the authenticated payer.
+Reason: Preserve the result without forcing signup while preventing enumeration and theft.
+Consequence: Checkout metadata records internal references only; claim tokens are single-use/rotatable and never sufficient to unlock without entitlement.
+
+### D-006 — Subscription and quota state are server-authoritative
+
+Decision: Verified Stripe webhooks update a local entitlement projection. An append-only usage ledger with idempotent reservations/commits controls quota.
+Reason: Redirects, frontend state, and mutable counters are forgeable and fail under concurrency.
+Consequence: Failed verification and system retries commit zero successful words; projections must be rebuildable/reconcilable.
+
+### D-007 — Invalid candidates are never exposed
+
+Decision: Semantic verification and protected-content checks are hard gates before output or preview. Retry only affected sections within configured attempt/time/cost limits.
+Reason: Meaning preservation is the product promise.
+Consequence: Terminal failure produces an honest retry path and zero quota debit.
+
+### D-008 — Provider architecture is model-independent
+
+Decision: Extraction, humanization, verification, and evaluation use separate versioned interfaces and can use different providers/models.
+Reason: Quality, latency, cost, and semantic accuracy need independent benchmarking.
+Consequence: Provider-specific SDK objects do not cross domain interfaces; stored jobs record provider/model/prompt/config versions without storing secret reasoning.
+
+### D-009 — D1 is the initial system of record, subject to a concurrency spike
+
+Decision: Use the starter's Cloudflare/D1 direction for V1 relational state and atomic ledger operations, with object storage only if payload size/retention warrants it. Validate transaction/concurrency semantics before M2.
+Reason: It is the boring path in the current deployment skeleton.
+Consequence: If the spike cannot prove correct quota concurrency, replace the ledger store before billing work rather than weaken the invariant.
+
+### D-010 — Qualitative trust labels, evidence behind them
+
+Decision: Present bounded labels such as Strong/High with issue counts; retain structured evaluation evidence and configurable thresholds internally.
+Reason: Numeric human/detector confidence would imply unjustified scientific precision.
+Consequence: Copy and analytics must not translate rubric results into detector-bypass claims.
+
+### D-011 — Data minimization and no training by default
+
+Decision: Do not train on customer writing without a future explicit, unbundled consent mechanism. Do not log documents. Disclose every AI processor that receives text and expose deletion/retention controls.
+Reason: Writing can be highly sensitive.
+Consequence: Provider settings, contracts, telemetry, support tools, and backups must honor the same boundary.
+
+### D-012 — Benchmarks are a release artifact
+
+Decision: Every material engine change runs the frozen 100+ passage suite and reports semantic, protected-content, quality, latency, and cost metrics by category.
+Reason: Anecdotal prompt tuning hides regressions.
+Consequence: A gain in one metric cannot waive a blocking regression in another.
+
+## Proposed; must resolve before named milestone
+
+### D-P01 — Anonymous/result retention duration (before M1)
+
+Proposal: Expire unclaimed anonymous source/output within 24 hours; default paid history retention is user-controlled with a documented maximum and deletion-on-request workflow. Shorter anonymous retention lowers privacy exposure but can hurt delayed checkout recovery. Legal and Product must ratify exact periods.
+
+### D-P02 — Subscription period usage semantics (before M2)
+
+Proposal: Allowance follows Stripe billing period boundaries; upgrades grant the higher current-period allowance without double-crediting prior usage, downgrades apply next period, and unused words do not roll over. Monetization must validate customer clarity and refund implications.
+
+### D-P03 — Past-due access policy (before M2)
+
+Proposal: Keep previously unlocked results readable during a short configured grace period, block new chargeable generations when entitlement becomes non-active, and follow Stripe recovery state. Do not delete history because of payment failure.
+
+### D-P04 — Source/output storage separation and encryption (before M1)
+
+Proposal: Keep searchable metadata in D1 and encrypted text payloads in a separate storage boundary if platform capabilities and payload sizes justify it; otherwise use D1 with strict access functions and minimized retention. Security owns the decision after a platform spike.
+
+### D-P05 — Provider zero-retention availability (before M4)
+
+Proposal: Prefer providers/settings offering no-training and zero/short retention. If unavailable, surface the exact processor retention in the privacy notice and shorten internal retention. Legal and Security must approve the production provider set.
+
+## Rejected
+
+- Unlocking on a `success=true` query parameter or Checkout redirect.
+- Counting attempted words, failed verification, or system retries against quota.
+- Storing the full paid result in client state to simulate a lock.
+- Using one opaque quality score to combine semantic safety and style.
+- Depending on a single LLM SDK throughout the application.
+- Requiring signup before the first preview.
+- Advertising guaranteed detector evasion.
