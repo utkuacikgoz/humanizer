@@ -5,6 +5,39 @@
 **Updated:** 2026-08-23
 **Product codename:** `humanizer` (customer-facing name and domain remain configuration-driven)
 
+## 0. Current build reality (verified 2026-08-23)
+
+Most of this document describes the target architecture, not what exists in `app/` today. As of this
+verification pass, the only routes that actually exist are `/` (homepage/workspace), `/privacy`, `/terms`,
+`/checkout/success` (private, correctly excluded from indexing), plus `/robots.txt` and `/sitemap.xml`. None
+of the cluster pages in Section 4's information architecture (`/pricing`, `/how-it-works`, `/examples/*`,
+`/ai-writing-patterns`, `/make-ai-writing-sound-natural`, `/meaning-preserving-rewrite`, mode pages, `/compare`,
+`/research`, `/guides`, `/trust/*`) exist yet. Do not read Section 4 as a description of the live site — it is
+the target, gated behind the query-to-page decision rule in Section 3 and the publication-velocity caps in
+Section 7.
+
+Verified working today:
+
+- `app/robots.txt/route.ts` and `app/sitemap.xml/route.ts` gate all output on the request `Host` header
+  matching `productConfig.domain` (`ownword.pro`) exactly (case-insensitive). Off that host — including
+  localhost/staging/preview — robots.txt returns a blanket `Disallow: /` and the sitemap is an empty
+  `<urlset>`. This is enforced by `tests/rendered-html.test.mjs` and is by design (SEO-002), not a defect.
+  On the real `ownword.pro` Host, robots.txt allows crawling (with `/api/`, `/account/`, `/admin/`,
+  `/billing/`, `/checkout/`, `/history/`, `/result/`, `/signin-with-chatgpt` disallowed) and references the
+  sitemap; the sitemap lists only routes that genuinely exist and return 200 (`/`, `/privacy`, `/terms`).
+- Homepage (`app/page.tsx`, COPY-owned) emits `SoftwareApplication` JSON-LD, but **the `Offer` block is
+  conditional on `productConfig.billingEnabled`, which is currently `false`** (`src/config/product.ts`). On a
+  commercial-launch day with a live Starter price and a working `/api/checkout`, this means the structured
+  data will not describe the product as purchasable at all until that flag flips. This is a handoff item, not
+  something SEO can fix — see the report for this session.
+- `/privacy` and `/terms` (SEO-owned, new this session) exist, return 200, and carry their own unique
+  title/description/canonical/robots metadata following the same Host-gated pattern as the root layout. Their
+  content is restricted to what `docs/SECURITY.md` and `docs/DECISIONS.md` actually establish; sections that
+  require a real legal decision (retention duration — D-P01; AI processor identity/retention — D-P05; refund
+  policy; governing law; liability limitation; termination terms; age/eligibility) are explicitly marked
+  `PENDING` rather than invented. **These pages are not a substitute for Legal sign-off (M4-03) before real
+  subscription charges go live** — see Section 13.
+
 ## 1. Outcome and guardrails
 
 SEO is a primary acquisition channel, but it must compound trust rather than trade it away. The first goal is not maximum traffic. It is qualified, non-branded discovery that produces paid users and credible third-party citations.
@@ -354,33 +387,38 @@ Never present rank as the only SEO KPI. A lower-volume page that produces retain
 
 IDs are stable for orchestration. `P0` blocks an SEO-ready public launch; `P1` creates the first acquisition loop; `P2` follows evidence.
 
-| ID | Pri | Task | Owner | Depends on | Acceptance criteria |
-|---|---|---|---|---|---|
-| SEO-001 | P0 | Define canonical domain and brand metadata contract | Engineering + Product | Naming config | One config source supplies product name, domain, logo, support email, social handles, and legal entity; staging cannot emit production canonicals |
-| SEO-002 | P0 | Implement indexation matrix | Engineering + Security | SEO-001 | Automated test proves public pages are indexable and result/history/account/billing/admin pages are `noindex`; no private URL appears in sitemap |
-| SEO-003 | P0 | Implement canonical and redirect policy | Engineering | SEO-001 | HTTP/HTTPS, host, and trailing-slash variants resolve in one redirect; every indexable page self-canonicalizes with an absolute production URL |
-| SEO-004 | P0 | Generate XML sitemap and robots.txt | Engineering | SEO-002 | Sitemap contains only canonical 200 indexable URLs, valid `lastmod`, and is referenced by robots.txt; validator passes |
-| SEO-005 | P0 | Build reusable metadata API | Engineering + Copy | SEO-001 | Every public page renders unique title, description, canonical, OG/Twitter metadata, and configured brand; CI rejects missing fields |
-| SEO-006 | P0 | Add truthful structured data | Engineering + SEO | SEO-001, pricing config | Organization/WebSite/SoftwareApplication JSON-LD matches visible content and current price config; Rich Results Test has no critical errors |
-| SEO-007 | P0 | Protect customer text from discovery/analytics | Security + Engineering | SEO-002 | Test confirms text never appears in URL, metadata, analytics, sitemap, public cache, or unauthorized response; private result access control passes |
-| SEO-008 | P0 | Establish performance budgets | Engineering + Design | Core UI | Mobile p75 budgets are instrumented; build/release report flags regressions; loading states reserve result/paywall layout |
-| SEO-009 | P0 | Verify search-engine consoles | SEO | Production domain | Google and Bing verification complete, sitemap submitted, owners documented, alerts routed to an accountable mailbox |
-| SEO-010 | P0 | Connect organic funnel attribution | Analytics + Engineering | Existing events | Dashboard joins landing page/cluster to paste, preview, checkout, paid, and second use without collecting document content |
-| SEO-011 | P0 | Write responsible claims standard | Legal + Copy + SEO | Product brief | Approved and forbidden claims list covers detector bypass, academic integrity, naturalness, semantic guarantees, testimonials, and comparisons |
-| SEO-012 | P0 | Publish trust proof modules | Humanization + Copy | Benchmark evidence | Semantic verification/protected-content pages use real method and limitations; no fake percentages; each commercial page links to proof |
-| SEO-013 | P1 | Create page-template quality gate | SEO + Engineering | SEO-005 | Template requires intent, unique evidence, author/reviewer, dates, internal links, CTA, claims check, canonical, analytics, and accessibility sign-off |
-| SEO-014 | P1 | Launch AI Writing Pattern Diagnostic | Humanization + Engineering | Privacy review | Tool analyzes stated patterns, does not infer authorship probability, stores no text by default, has an accessible explanation and useful empty/error states |
-| SEO-015 | P1 | Publish field guide | SEO + Copy | SEO-014 | Contains >=12 original annotated examples, counterexamples, source/method notes, stable anchors, and links to the live diagnostic |
-| SEO-016 | P1 | Publish benchmark methodology/results | Humanization + SEO | Benchmark V1 | Page documents corpus, metrics, versions/dates, aggregate results, failures, limitations, provenance, changelog, and downloadable data where licensed |
-| SEO-017 | P1 | Publish Academic mode page | SEO + Legal + Copy | SEO-011, real examples | Distinct academic workflow/example, citation protection proof, visible integrity notice, and zero evasion claims |
-| SEO-018 | P1 | Publish Professional mode page | SEO + Copy | Real examples | Distinct business workflow/example, factual/terminology proof, and product start CTA; not duplicated from core page |
-| SEO-019 | P1 | Publish meaning-preservation checklist | Humanization + SEO | SEO-012 | Web and accessible downloadable versions cover all protected claim classes, cite methodology, and contain no customer text |
-| SEO-020 | P1 | Run crawl/render QA | QA + SEO | SEO-002..008 | Crawler report shows zero orphan pages, broken internal links, canonical conflicts, accidental noindex, schema errors, or private indexable surfaces |
-| SEO-021 | P1 | Create weekly SEO scorecard | SEO + Analytics | SEO-009, SEO-010 | Report includes business, funnel, demand, quality, technical, link, and risk KPIs with 7/28-day comparisons and written decisions |
-| SEO-022 | P2 | Publish category comparison | SEO + Legal | Firsthand test corpus | Dated methodology, real testing, balanced findings, relationship disclosures, correction route, and update owner are visible |
-| SEO-023 | P2 | Build content pruning cadence | SEO | 60 days of data | Monthly review labels each page keep/improve/merge/retire; changes preserve redirects and are tied to traffic/conversion/citation evidence |
-| SEO-024 | P2 | Evaluate localization | SEO + Product | Demand evidence | Decision memo documents demand, product support, translation/review ownership, hreflang design, and why each proposed locale is genuinely useful |
-| SEO-025 | P2 | Agent-friendly product audit | Engineering + SEO | Stable public UI | Public product flow has semantic controls, labels, understandable errors, and stable product/pricing facts; no new protocol adopted without consumer evidence |
+Status values (added 2026-08-23 verification pass): **Done** — acceptance criteria verified against the current
+codebase; **Partial** — some but not all acceptance criteria hold; **Open** — not started or not verifiable
+from this repo; **Blocked** — implementation is not the gap, a human/Legal decision is.
+
+| ID | Pri | Task | Owner | Depends on | Status | Acceptance criteria |
+|---|---|---|---|---|---|---|
+| SEO-001 | P0 | Define canonical domain and brand metadata contract | Engineering + Product | Naming config | Done | One config source supplies product name, domain, logo, support email, social handles, and legal entity; staging cannot emit production canonicals |
+| SEO-002 | P0 | Implement indexation matrix | Engineering + Security | SEO-001 | Partial | Automated test proves public pages are indexable and result/history/account/billing/admin pages are `noindex`; no private URL appears in sitemap. `tests/rendered-html.test.mjs` proves the off-canonical-host default (`noindex`, empty sitemap); there is no history/account/billing surface yet to test against, and no test proves the on-canonical-host allow path since it needs a real Host match |
+| SEO-003 | P0 | Implement canonical and redirect policy | Engineering | SEO-001 | Open | HTTP/HTTPS, host, and trailing-slash variants resolve in one redirect; every indexable page self-canonicalizes with an absolute production URL. Self-canonicalization is verified (root layout + `/privacy` + `/terms`); no www/apex or scheme-redirect logic was found in `vite.config.ts` or elsewhere — ENG should confirm Cloudflare's custom-domain config handles this, or add it |
+| SEO-004 | P0 | Generate XML sitemap and robots.txt | Engineering | SEO-002 | Done | Sitemap contains only canonical 200 indexable URLs, valid `lastmod`, and is referenced by robots.txt; validator passes. Lists exactly `/`, `/privacy`, `/terms` — the only routes that exist and return 200; no `lastmod` field is emitted (nothing tracks per-page last-modified dates yet, so a fabricated one was deliberately not added) |
+| SEO-005 | P0 | Build reusable metadata API | Engineering + Copy | SEO-001 | Partial | Every public page renders unique title, description, canonical, OG/Twitter metadata, and configured brand; CI rejects missing fields. The 3 pages that exist each have unique, correct metadata via a duplicated per-page `generateMetadata` pattern, not a shared reusable API; no CI check enforces required fields |
+| SEO-006 | P0 | Add truthful structured data | Engineering + SEO | SEO-001, pricing config | Partial — defect found | Organization/WebSite/SoftwareApplication JSON-LD matches visible content and current price config; Rich Results Test has no critical errors. `SoftwareApplication` JSON-LD on `/` is schema-valid and the `Offer` price/currency match `pricingConfig` when present, but the `Offer` is gated on `productConfig.billingEnabled`, currently `false` — see Section 0 and this session's report. No `Organization`/`WebSite` JSON-LD exists |
+| SEO-007 | P0 | Protect customer text from discovery/analytics | Security + Engineering | SEO-002 | Partial | Test confirms text never appears in URL, metadata, analytics, sitemap, public cache, or unauthorized response; private result access control passes. Holds for what is built (anonymous preview, `track()` calls); there is no history/account surface yet (M3) for this to apply to |
+| SEO-008 | P0 | Establish performance budgets | Engineering + Design | Core UI | Open | Not verified in this pass; outside SEO's owned files |
+| SEO-009 | P0 | Verify search-engine consoles | SEO | Production domain | Open | Requires live production DNS/hosting access the agent does not have; owner action after this launch |
+| SEO-010 | P0 | Connect organic funnel attribution | Analytics + Engineering | Existing events | Open | Funnel events exist (`track()` calls per `PRODUCT.md`); no GSC-joined dashboard exists |
+| SEO-011 | P0 | Write responsible claims standard | Legal + Copy + SEO | Product brief | Open | Guardrails are stated in this document, `PRODUCT.md`, and `README.md`, but there is no single Legal-approved allowed/forbidden claims list |
+| SEO-012 | P0 | Publish trust proof modules | Humanization + Copy | Benchmark evidence | Open | No `/trust/*` pages exist; homepage carries inline trust copy only |
+| SEO-013 | P1 | Create page-template quality gate | SEO + Engineering | SEO-005 | Open | Template requires intent, unique evidence, author/reviewer, dates, internal links, CTA, claims check, canonical, analytics, and accessibility sign-off |
+| SEO-014 | P1 | Launch AI Writing Pattern Diagnostic | Humanization + Engineering | Privacy review | Open | Tool analyzes stated patterns, does not infer authorship probability, stores no text by default, has an accessible explanation and useful empty/error states |
+| SEO-015 | P1 | Publish field guide | SEO + Copy | SEO-014 | Open | Contains >=12 original annotated examples, counterexamples, source/method notes, stable anchors, and links to the live diagnostic |
+| SEO-016 | P1 | Publish benchmark methodology/results | Humanization + SEO | Benchmark V1 | Open | Page documents corpus, metrics, versions/dates, aggregate results, failures, limitations, provenance, changelog, and downloadable data where licensed |
+| SEO-017 | P1 | Publish Academic mode page | SEO + Legal + Copy | SEO-011, real examples | Open | Distinct academic workflow/example, citation protection proof, visible integrity notice, and zero evasion claims |
+| SEO-018 | P1 | Publish Professional mode page | SEO + Copy | Real examples | Open | Distinct business workflow/example, factual/terminology proof, and product start CTA; not duplicated from core page |
+| SEO-019 | P1 | Publish meaning-preservation checklist | Humanization + SEO | SEO-012 | Open | Web and accessible downloadable versions cover all protected claim classes, cite methodology, and contain no customer text |
+| SEO-020 | P1 | Run crawl/render QA | QA + SEO | SEO-002..008 | Open | Crawler report shows zero orphan pages, broken internal links, canonical conflicts, accidental noindex, schema errors, or private indexable surfaces |
+| SEO-021 | P1 | Create weekly SEO scorecard | SEO + Analytics | SEO-009, SEO-010 | Open | Report includes business, funnel, demand, quality, technical, link, and risk KPIs with 7/28-day comparisons and written decisions |
+| SEO-022 | P2 | Publish category comparison | SEO + Legal | Firsthand test corpus | Open | Dated methodology, real testing, balanced findings, relationship disclosures, correction route, and update owner are visible |
+| SEO-023 | P2 | Build content pruning cadence | SEO | 60 days of data | Open | Monthly review labels each page keep/improve/merge/retire; changes preserve redirects and are tied to traffic/conversion/citation evidence |
+| SEO-024 | P2 | Evaluate localization | SEO + Product | Demand evidence | Open | Decision memo documents demand, product support, translation/review ownership, hreflang design, and why each proposed locale is genuinely useful |
+| SEO-025 | P2 | Agent-friendly product audit | Engineering + SEO | Stable public UI | Open | Public product flow has semantic controls, labels, understandable errors, and stable product/pricing facts; no new protocol adopted without consumer evidence |
+| SEO-026 | P0 | Publish Privacy and Terms routing skeleton | SEO | SEO-001 | Blocked (Legal) | `/privacy` and `/terms` exist, return 200, and carry unique title/description/canonical/robots metadata under the same Host-gated pattern as the root layout. Body content is limited to what `docs/SECURITY.md` and `docs/DECISIONS.md` actually establish (data minimization, no-training-by-default, what is/isn't logged, Stripe holds card data). Every clause that requires a real legal decision — anonymous/paid retention periods (D-P01), AI processor identity and retention (D-P05), refund policy, governing law, liability limitation, termination terms, minimum age/eligibility — is marked `PENDING` rather than invented. **Not closed**: a paid subscription should not launch on `PENDING` liability/governing-law/refund terms; LEGAL must supply real language before M4-03 can be considered satisfied |
 
 ## 12. Operating cadence and decision rules
 
@@ -419,6 +457,8 @@ Pause publishing and investigate when any of these occurs:
 | Indexable user results can leak sensitive writing | Severe privacy and security harm | Private-by-default result architecture, noindex, access controls, and automated crawl tests |
 | Mass content is tempting for this category | Doorway/scaled-content penalties and brand dilution | Enforce query-to-page rule, velocity caps, and pruning cadence |
 | AI referral reporting is incomplete across platforms | GEO performance can be overclaimed | Use Search Console's available reporting, referrer data, third-party citation logs, and clearly label inference |
+| `productConfig.billingEnabled` is `false` while checkout/Stripe is live (verified 2026-08-23) | Homepage `SoftwareApplication` JSON-LD omits the `Offer` entirely, understating the product as not-yet-purchasable to crawlers and any rich-result eligibility right at commercial launch | SEO cannot fix — `app/page.tsx` and `src/config/product.ts` are COPY-owned. Flagged to COPY/MON/PO in this session's handoff; needs the flag flipped (with an accompanying truth check that checkout genuinely works) before launch is complete |
+| `/privacy` and `/terms` ship today with real sections marked `PENDING` (D-P01, D-P05, refund policy, governing law, liability, termination, eligibility) | A $9.99/mo subscription is collecting real payment without finished liability/refund/governing-law terms behind it | Treat as a launch blocker for LEGAL/PO, not a routine backlog item — see SEO-026. Do not silently fill these in without real legal review; do not let the pages sit unfinished indefinitely either |
 
 ## 14. Reference policy baseline
 
