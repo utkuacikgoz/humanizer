@@ -97,7 +97,7 @@ export default function CheckoutSuccessPage() {
 
         {status === "signed-out" ? (
           <p className="error" role="alert" style={{ borderTop: "none" }}>
-            Your sign-in expired. <a href="/signin-with-chatgpt?return_to=%2Fcheckout%2Fsuccess">Sign in again</a> to view your unlocked result.
+            <a href="/signin-with-chatgpt?return_to=%2Fcheckout%2Fsuccess">Sign in</a> to view your unlocked result.
           </p>
         ) : null}
 

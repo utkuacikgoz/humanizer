@@ -261,7 +261,7 @@ export default function Home() {
               <div className="unlock-card">
                 <span className="lock" aria-hidden="true">●</span>
                 <strong>There’s more to this rewrite</strong>
-                <p>Unlock the complete result, sentence controls, and protected terminology.</p>
+                <p>Unlock the complete result.</p>
                 {result.capability ? (
                   <button type="button" onClick={() => unlock("starter")} aria-disabled={unlockStatus === "working"}>
                     {unlockStatus === "working" ? "Redirecting to checkout…" : `Unlock full rewrite for $${pricingConfig.plans.starter.monthlyPrice}/mo`}

@@ -12,6 +12,21 @@ test("rejects a request with no stripe-signature header", async () => {
   assert.equal(response.status, 400);
 });
 
+test("rejects an oversized body before any parsing, even with no signature header at all", async () => {
+  const oversized = "x".repeat(1_000_001);
+  const response = await POST(request(oversized, { "stripe-signature": "t=1,v1=deadbeef" }));
+  assert.equal(response.status, 413);
+});
+
+test("rejects a declared content-length over the cap without reading the body", async () => {
+  const response = await POST(new Request("http://localhost/api/webhooks/stripe", {
+    method: "POST",
+    headers: { "stripe-signature": "t=1,v1=deadbeef", "content-length": "5000000" },
+    body: "{}",
+  }));
+  assert.equal(response.status, 413);
+});
+
 test(
   "returns a retryable 500 (not a silent 200) when Stripe/D1 are unconfigured",
   async () => {
