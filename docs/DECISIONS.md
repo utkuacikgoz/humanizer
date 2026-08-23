@@ -100,6 +100,12 @@ Proposal: Keep searchable metadata in D1 and encrypted text payloads in a separa
 
 Proposal: Prefer providers/settings offering no-training and zero/short retention. If unavailable, surface the exact processor retention in the privacy notice and shorten internal retention. Legal and Security must approve the production provider set.
 
+### D-013 — M2 billing is built now against placeholder business/Stripe details
+
+Decision: Product Orchestrator (user) directed engineering to proceed building the full M2 payment/entitlement backlog today without waiting for real legal company name, support email, domain, or live Stripe credentials — those will be supplied later in this same engagement. All such values are wired through environment/config (`productConfig`, `STRIPE_*` env vars, a versioned Stripe price env-key mapping), never hardcoded, so supplying the real values later is a configuration change, not a code change. Placeholder/missing required config must fail closed at startup/checkout time per the existing `ARCHITECTURE.md` "Configuration and secrets" rule — it must never silently accept a real payment against unset business identity.
+Reason: User-directed acceleration toward a same-day paid launch; this is the explicit tradeoff being made, not an oversight.
+Consequence: The following remain genuinely open and are NOT satisfied by placeholder-driven engineering — they require the user's real values and cannot be closed by code alone: D-P01 (retention duration), D-P04 (payload storage/encryption), D-P05 (provider retention), and M4-03 (Legal disclosure approval). M2-13's payment gate and M4-07's commercial-launch authorization are not self-granted by this decision; PO/SEC/LEGAL sign-off is still required before real customer charges go live, per `AGENTS.md`'s working agreement. This entry exists so a later reviewer sees *why* placeholders are present, rather than mistaking them for an unnoticed gap.
+
 ## Rejected
 
 - Unlocking on a `success=true` query parameter or Checkout redirect.
