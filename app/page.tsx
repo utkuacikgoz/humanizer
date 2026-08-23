@@ -33,6 +33,24 @@ export default function Home() {
   const completedCount = useRef(0);
   const idempotency = useRef<{ request: string; key: string } | null>(null);
   const wordCount = useMemo(() => countWords(text), [text]);
+
+  useEffect(() => {
+    document.documentElement.classList.add("motion-ready");
+    const targets = document.querySelectorAll<HTMLElement>("[data-reveal]");
+    if (!targets.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          entry.target.classList.add("is-visible");
+          observer.unobserve(entry.target);
+        }
+      },
+      { threshold: 0.15, rootMargin: "0px 0px -60px 0px" },
+    );
+    targets.forEach((target) => observer.observe(target));
+    return () => observer.disconnect();
+  }, []);
   const structuredData = {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
@@ -111,11 +129,17 @@ export default function Home() {
       </header>
 
       <section className="hero" id="top">
-        <h1>Keep your meaning.<br /><em>Lose the machine tone.</em></h1>
-        <p className="hero-copy">Turn stiff, generic AI assisted drafts into clear writing that sounds like a person wrote it while keeping the facts intact.</p>
+        <p className="eyebrow reveal-hero d1"><span aria-hidden="true" /> Meaning verified, not guessed</p>
+        <h1 className="reveal-hero d2">Keep your meaning.<br /><em>Lose the machine tone.</em></h1>
+        <p className="hero-copy reveal-hero d3">Turn stiff, generic AI assisted drafts into clear writing that sounds like a person wrote it while keeping the facts intact.</p>
+        <div className="trust-line reveal-hero d4">
+          <span>Checked before you see it</span>
+          <span>Names, numbers &amp; citations protected</span>
+          <span>Cancel anytime</span>
+        </div>
       </section>
 
-      <section className="workspace" aria-labelledby="workspace-title">
+      <section className="workspace reveal-hero d4" aria-labelledby="workspace-title">
         <div className="workspace-topline">
           <div>
             <span className="step-number">01</span>
@@ -157,9 +181,19 @@ export default function Home() {
             ))}
           </div>
           <button className="humanize-button" type="button" onClick={humanize} disabled={status === "working"}>
-            {status === "working" ? "Checking meaning…" : "Humanize"}<span aria-hidden="true">↗</span>
+            {status === "working" ? (
+              <>Checking meaning… <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span></>
+            ) : (
+              <>Humanize <span className="fly-arrow" aria-hidden="true">↗</span></>
+            )}
           </button>
+          {status === "working" ? <div className="progress-track" aria-hidden="true"><div className="progress-fill" /></div> : null}
         </div>
+        {status === "working" ? (
+          <p className="status-line" role="status">
+            <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span> Verifying meaning and protecting your facts…
+          </p>
+        ) : null}
         {error ? <p className="error" role="alert">{error}</p> : null}
       </section>
 
@@ -203,17 +237,17 @@ export default function Home() {
       ) : null}
 
       <section className="how" id="how-it-works">
-        <div className="section-intro"><p className="eyebrow"><span /> How it works</p><h2>Rewrite less.<br />Protect more.</h2></div>
+        <div className="section-intro" data-reveal><p className="eyebrow"><span /> How it works</p><h2>Rewrite less.<br />Protect more.</h2></div>
         <div className="how-grid">
-          <article><b>01</b><h3>Find the stiff parts</h3><p>We flag robotic patterns, filler, repetition, and forced transitions instead of rewriting every sentence.</p></article>
-          <article><b>02</b><h3>Protect what matters</h3><p>Names, numbers, dates, quotes, citations, URLs, and technical terms are tracked before anything changes.</p></article>
-          <article><b>03</b><h3>Check the meaning</h3><p>The rewrite is compared with your original. If a claim changes, that section does not pass.</p></article>
+          <article data-reveal style={{ "--reveal-index": 0 } as React.CSSProperties}><b>01</b><h3>Find the stiff parts</h3><p>We flag robotic patterns, filler, repetition, and forced transitions instead of rewriting every sentence.</p></article>
+          <article data-reveal style={{ "--reveal-index": 1 } as React.CSSProperties}><b>02</b><h3>Protect what matters</h3><p>Names, numbers, dates, quotes, citations, URLs, and technical terms are tracked before anything changes.</p></article>
+          <article data-reveal style={{ "--reveal-index": 2 } as React.CSSProperties}><b>03</b><h3>Check the meaning</h3><p>The rewrite is compared with your original. If a claim changes, that section does not pass.</p></article>
         </div>
       </section>
 
       <section className="pricing" id="pricing">
-        <div><p className="eyebrow"><span /> Simple pricing</p><h2>Try the quality.<br />Pay for the full result.</h2></div>
-        <article>
+        <div data-reveal><p className="eyebrow"><span /> Simple pricing</p><h2>Try the quality.<br />Pay for the full result.</h2></div>
+        <article data-reveal style={{ "--reveal-index": 1 } as React.CSSProperties}>
           <div><span>Starter</span><p>Everything you need to make drafts sound like you meant them.</p></div>
           <strong><sup>$</sup>{pricingConfig.plans.starter.monthlyPrice}<small>/ month</small></strong>
           <ul>{pricingConfig.plans.starter.features.map((feature) => <li key={feature}>✓ {feature}</li>)}</ul>
