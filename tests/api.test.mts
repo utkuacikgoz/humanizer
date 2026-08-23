@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { POST } from "../app/api/humanize/route";
 
-function request(body: unknown, contentType = "application/json") {
+function request(body: unknown, contentType = "application/json", idempotencyKey = crypto.randomUUID()) {
   return new Request("http://localhost/api/humanize", {
     method: "POST",
-    headers: { "content-type": contentType },
+    headers: { "content-type": contentType, "x-idempotency-key": idempotencyKey },
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 }
@@ -21,6 +21,25 @@ test("returns only a partial preview with qualitative trust signals", async () =
   assert.equal("rewritten" in body, false);
   assert.ok(Number(body.hiddenWordCount) > 0);
   assert.doesNotMatch(JSON.stringify(body), /99\.\d+% HUMAN/i);
+});
+
+test("replays duplicate preview requests and rejects idempotency-key reuse", async () => {
+  const key = crypto.randomUUID();
+  const first = await POST(request({ text: validText, mode: "natural" }, "application/json", key));
+  const replay = await POST(request({ text: validText, mode: "natural" }, "application/json", key));
+  assert.equal(first.status, 200);
+  assert.equal(replay.status, 200);
+  assert.equal(first.headers.get("x-idempotent-replay"), "false");
+  assert.equal(replay.headers.get("x-idempotent-replay"), "true");
+  assert.deepEqual(await replay.json(), await first.json());
+
+  const conflict = await POST(request({ text: `${validText} This changes the request.`, mode: "natural" }, "application/json", key));
+  assert.equal(conflict.status, 409);
+});
+
+test("requires a valid idempotency key for an otherwise valid preview", async () => {
+  const response = await POST(request({ text: validText, mode: "natural" }, "application/json", "bad"));
+  assert.equal(response.status, 400);
 });
 
 test("rejects malformed, oversized, and unsupported requests", async () => {

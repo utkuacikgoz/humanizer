@@ -78,6 +78,7 @@ export class DeterministicHumanizationProvider implements HumanizationProvider {
   readonly name = "deterministic-v1";
 
   async rewrite(request: RewriteRequest): Promise<RewriteResponse> {
+    request.signal?.throwIfAborted();
     let candidate = request.text;
     for (const target of [...request.analysis.targets].sort((a, b) => b.start - a.start)) {
       const protectedWithinTarget = request.protectedContent

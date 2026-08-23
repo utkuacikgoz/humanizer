@@ -27,8 +27,8 @@ export async function generateMetadata(): Promise<Metadata> {
     .trim()
     .toLowerCase();
   const canonicalBase = configuredBase && requestHost === configuredBase.host.toLowerCase() ? configuredBase : null;
-  const title = `AI Humanizer for Natural, Meaning-Preserving Rewrites | ${productConfig.productName}`;
-  const description = "Humanize AI-assisted text with targeted rewrites that protect your meaning, facts, terminology, citations, and intended tone.";
+  const title = `AI Humanizer for Natural Rewrites That Preserve Meaning | ${productConfig.productName}`;
+  const description = "Humanize AI assisted text with targeted rewrites that protect your meaning, facts, terminology, citations, and intended tone.";
   const socialImage = canonicalBase
     ? { url: new URL("/og.png", canonicalBase), width: 1733, height: 909, alt: "Keep your meaning. Lose the machine tone." }
     : undefined;

@@ -25,10 +25,10 @@ test("server-renders the paid-first writing experience", async () => {
   assert.match(html, /Lose the machine tone/);
   assert.match(html, /Paste your text/);
   assert.match(html, /Humanize/);
-  assert.match(html, /No signup to try/);
+  assert.doesNotMatch(html, /Meaning-first writing|No signup to try/);
   assert.match(html, /application\/ld\+json/);
   assert.match(html, /SoftwareApplication/);
-  assert.match(html, /AI Humanizer for Natural, Meaning-Preserving Rewrites/);
+  assert.match(html, /AI Humanizer for Natural Rewrites That Preserve Meaning/);
   assert.match(html, /name="robots" content="noindex, nofollow, nocache"/);
   assert.doesNotMatch(html, /rel="canonical"/);
   assert.doesNotMatch(html, /property="og:image"/);

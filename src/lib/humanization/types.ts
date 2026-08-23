@@ -68,6 +68,7 @@ export interface RewriteRequest {
   analysis: WritingAnalysis;
   attempt: number;
   previousFailures: VerificationIssue[];
+  signal?: AbortSignal;
 }
 
 export interface RewriteResponse {
@@ -99,6 +100,7 @@ export interface VerificationRequest {
   original: string;
   candidate: string;
   protectedContent: ProtectedContent[];
+  signal?: AbortSignal;
 }
 
 export interface VerificationResult {
@@ -129,6 +131,7 @@ export interface EvaluationRequest {
   originalAnalysis: WritingAnalysis;
   candidateAnalysis: WritingAnalysis;
   verification: VerificationResult;
+  signal?: AbortSignal;
 }
 
 export interface EvaluationResult {
@@ -154,6 +157,7 @@ export interface HumanizeInput {
   text: string;
   mode?: WritingMode;
   protectedTerms?: string[];
+  signal?: AbortSignal;
 }
 
 export interface UsageMetrics {

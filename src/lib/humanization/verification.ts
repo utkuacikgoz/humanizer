@@ -44,6 +44,7 @@ export class DeterministicVerificationProvider implements VerificationProvider {
   readonly name = "deterministic-semantic-v1";
 
   async verify(request: VerificationRequest): Promise<VerificationResult> {
+    request.signal?.throwIfAborted();
     const issues: VerificationIssue[] = [];
     const protectedItems = uniqueOccurrences(request.protectedContent);
     let preserved = 0;

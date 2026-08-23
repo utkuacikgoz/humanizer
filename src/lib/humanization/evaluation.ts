@@ -32,6 +32,7 @@ export class DeterministicEvaluationProvider implements EvaluationProvider {
   readonly name = "deterministic-quality-v1";
 
   async evaluate(request: EvaluationRequest, thresholds: EvaluationThresholds): Promise<EvaluationResult> {
+    request.signal?.throwIfAborted();
     const originalIssues = request.originalAnalysis.issues.length;
     const candidateIssues = request.candidateAnalysis.issues.length;
     const improvementRatio = originalIssues ? Math.max(0, (originalIssues - candidateIssues) / originalIssues) : 1;

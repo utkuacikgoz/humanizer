@@ -14,9 +14,10 @@ Humanizer is a paid-first writing product that turns generic AI-assisted drafts 
 - 100-fixture deterministic benchmark scaffold across the ten required categories
 - Central brand and plan configuration
 - Cloudflare Worker deployment metadata
+- Bounded per-runtime preview abuse guard with idempotent replay, concurrency/rate ceilings, and a five-second request-path deadline
 - Product, architecture, monetization, security, QA, SEO, and backlink operating documents
 
-The deterministic provider and benchmark fixtures are contract-testing and product-demo baselines, not production quality evidence. The complete rewrite is generated on the server, but the anonymous response exposes only the allowed preview and a hidden-word count; the browser never receives the locked remainder. Durable server-side result persistence is still required before checkout can unlock that remainder. Stripe checkout, anonymous-result storage, webhook projection, quotas, history, and account deletion remain release-blocking milestones documented in the backlog.
+The deterministic provider and benchmark fixtures are contract-testing and product-demo baselines, not production quality evidence. The complete rewrite is generated on the server, but the anonymous response exposes only the allowed preview and a hidden-word count; the browser never receives the locked remainder. The in-memory request guard is defense-in-depth for this prototype; distributed edge/store-backed abuse controls remain mandatory before a paid model is exposed publicly. Durable server-side result persistence is still required before checkout can unlock that remainder. Stripe checkout, anonymous-result storage, webhook projection, quotas, history, and account deletion remain release-blocking milestones documented in the backlog.
 
 ## Local development
 
@@ -38,7 +39,7 @@ npm run lint
 npm run benchmark
 ```
 
-The current test suite covers protected-content extraction, targeted rewriting, verification failure, retry accounting, preview response shaping, hostile input, privacy-safe analytics, benchmark shape, protected benchmark facts, the product example, server rendering, centralized copy, and starter-template removal regressions. The broader suites and release gates in [Quality assurance](docs/QA.md) are planned and are not yet implemented.
+The current test suite covers protected-content extraction, targeted rewriting, verification failure, deadline cancellation, retry accounting, idempotent preview replay, preview response shaping, hostile input, privacy-safe analytics, benchmark shape, protected benchmark facts, the product example, server rendering, centralized copy, and starter-template removal regressions. The broader suites and release gates in [Quality assurance](docs/QA.md) are planned and are not yet implemented.
 
 ## Configuration
 

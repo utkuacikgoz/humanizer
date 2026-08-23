@@ -132,6 +132,23 @@ test("quality thresholds are configurable", async () => {
   );
 });
 
+test("an abort signal stops a provider call that ignores cancellation", async () => {
+  const provider: HumanizationProvider = {
+    name: "never-finishes",
+    async rewrite() {
+      return new Promise(() => undefined);
+    },
+  };
+  const controller = new AbortController();
+  const pending = createHumanizationPipeline({ humanizationProvider: provider }).humanize({
+    text: "Furthermore, this valid passage is long enough to enter the rewrite pipeline safely.",
+    signal: controller.signal,
+  });
+  controller.abort(new DOMException("Deadline exceeded.", "TimeoutError"));
+
+  await assert.rejects(pending, (error: unknown) => error instanceof DOMException && error.name === "TimeoutError");
+});
+
 test("verification catches altered quantities, missing citations, and changed negation", async () => {
   const verifier = new DeterministicVerificationProvider();
   const original = "The API did not exceed 42 requests (Chen, 2025).";

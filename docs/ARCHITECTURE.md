@@ -155,6 +155,7 @@ Thresholds are versioned. Each job records the effective pipeline, prompt, provi
 - Emit structured state transitions, duration, token counts, cost estimates, failure class, and redacted provider status.
 - Use timeouts and bounded retries with jitter for transient external failures; never retry deterministic invalid input.
 - Make checkout creation, humanization submission, webhook effects, and usage operations idempotent.
+- Phase 0 implements a bounded per-runtime preview guard (60-second replay, 12 requests/minute per observed client, two concurrent requests per observed client, and a five-second request-path deadline). The deadline rejects orchestration and propagates an abort signal; provider adapters must honor that signal to stop upstream work. Treat the guard as prototype defense-in-depth and replace it with distributed enforcement before enabling a paid provider.
 - Define a stuck-job sweeper and Stripe reconciliation job before launch.
 - Alert on semantic/protected-content failure spikes, terminal pipeline failures, webhook lag/failure, entitlement drift, quota invariant violations, provider latency/cost, and checkout-to-unlock failures.
 - Keep support tooling least-privileged; viewing customer text requires explicit policy and audit, not ordinary logs.

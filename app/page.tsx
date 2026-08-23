@@ -17,7 +17,7 @@ type Result = {
 };
 
 const SAMPLE_TEXT =
-  "In today’s fast-paced world, it is important to note that clear communication plays a crucial role. Furthermore, teams should leverage simple strategies to collaborate well. These strategies enhance productivity. They also help teams reach long-term goals. In conclusion, thoughtful communication helps people solve problems and do their best work.";
+  "In today’s busy world, it is important to note that clear communication plays a crucial role. Furthermore, teams should leverage simple strategies to collaborate well. These strategies enhance productivity. They also help teams reach lasting goals. In conclusion, thoughtful communication helps people solve problems and do their best work.";
 
 function countWords(value: string) {
   return value.trim() ? value.trim().split(/\s+/).length : 0;
@@ -31,6 +31,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const hasTrackedText = useRef(false);
   const completedCount = useRef(0);
+  const idempotency = useRef<{ request: string; key: string } | null>(null);
   const wordCount = useMemo(() => countWords(text), [text]);
   const structuredData = {
     "@context": "https://schema.org",
@@ -38,7 +39,7 @@ export default function Home() {
     name: productConfig.productName,
     applicationCategory: "BusinessApplication",
     operatingSystem: "Web",
-    description: "A meaning-first writing tool that turns generic AI-assisted drafts into natural writing.",
+    description: "A writing tool that puts meaning first and turns generic AI assisted drafts into natural writing.",
     ...(productConfig.billingEnabled ? {
       offers: {
         "@type": "Offer",
@@ -54,7 +55,7 @@ export default function Home() {
   async function humanize() {
     setError("");
     if (wordCount < 12) {
-      setError("Add a little more context—at least 12 words works best.");
+      setError("Add a little more context. At least 12 words works best.");
       return;
     }
     if (wordCount > 300) {
@@ -66,9 +67,13 @@ export default function Home() {
     track("humanization_started", { mode, wordCount });
     setResult(null);
     try {
+      const requestIdentity = `${mode}\0${text}`;
+      if (idempotency.current?.request !== requestIdentity) {
+        idempotency.current = { request: requestIdentity, key: crypto.randomUUID() };
+      }
       const response = await fetch("/api/humanize", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-idempotency-key": idempotency.current.key },
         body: JSON.stringify({ text, mode }),
       });
       const payload = (await response.json()) as Result & { error?: string };
@@ -106,12 +111,8 @@ export default function Home() {
       </header>
 
       <section className="hero" id="top">
-        <p className="eyebrow"><span /> Meaning-first writing</p>
         <h1>Keep your meaning.<br /><em>Lose the machine tone.</em></h1>
-        <p className="hero-copy">Turn stiff, generic AI-assisted drafts into clear writing that sounds like a person wrote it—without changing the facts.</p>
-        <div className="trust-line" aria-label="Product principles">
-          <span>Meaning checked</span><span>Key details protected</span><span>No signup to try</span>
-        </div>
+        <p className="hero-copy">Turn stiff, generic AI assisted drafts into clear writing that sounds like a person wrote it while keeping the facts intact.</p>
       </section>
 
       <section className="workspace" aria-labelledby="workspace-title">
@@ -137,7 +138,7 @@ export default function Home() {
               track("text_pasted");
             }
           }}
-          placeholder="Paste an AI-assisted draft here…"
+          placeholder="Paste an AI assisted draft here…"
           maxLength={2400}
         />
 
@@ -190,7 +191,7 @@ export default function Home() {
                 <span className="lock" aria-hidden="true">●</span>
                 <strong>There’s more to this rewrite</strong>
                 <p>Unlock the complete result, sentence controls, and protected terminology.</p>
-                <button type="button" disabled title="Checkout is not connected in this Phase 0 preview">Unlock full rewrite — ${pricingConfig.plans.starter.monthlyPrice}/mo</button>
+                <button type="button" disabled title="Checkout is not connected in this Phase 0 preview">Unlock full rewrite for ${pricingConfig.plans.starter.monthlyPrice}/mo</button>
                 <small>Phase 0 preview · Checkout is not connected yet</small>
               </div>
             </article>

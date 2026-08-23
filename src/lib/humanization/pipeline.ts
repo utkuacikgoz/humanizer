@@ -17,6 +17,25 @@ import type {
 } from "./types";
 import { DeterministicVerificationProvider } from "./verification";
 
+function awaitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason ?? new DOMException("Operation aborted.", "AbortError"));
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
+}
+
 export const DEFAULT_HUMANIZATION_CONFIG: Readonly<HumanizationConfig> = {
   maxRetries: 2,
   maxInputCharacters: 50_000,
@@ -77,6 +96,7 @@ export class HumanizationPipeline {
   }
 
   async humanize(input: HumanizeInput): Promise<HumanizationResult> {
+    input.signal?.throwIfAborted();
     const original = input.text.trim();
     if (!original) throw new TypeError("Text is required.");
     if (original.length > this.config.maxInputCharacters) {
@@ -98,22 +118,28 @@ export class HumanizationPipeline {
     for (let attempt = 1; attempt <= this.config.maxRetries + 1; attempt += 1) {
       attemptedWords += wordCount;
       try {
-        const rewrite = await this.humanizationProvider.rewrite({
+        const rewrite = await awaitWithSignal(this.humanizationProvider.rewrite({
           text: original,
           mode,
           protectedContent,
           analysis,
           attempt,
           previousFailures,
-        });
+          signal: input.signal,
+        }), input.signal);
+        input.signal?.throwIfAborted();
         estimatedTokens += rewrite.estimatedTokens ?? 0;
         estimatedCostUsd += rewrite.estimatedCostUsd ?? 0;
-        lastVerification = await this.verificationProvider.verify({ original, candidate: rewrite.text, protectedContent });
-        const candidateAnalysis = analyzeWriting(rewrite.text);
-        lastEvaluation = await this.evaluationProvider.evaluate(
-          { original, candidate: rewrite.text, mode, originalAnalysis: analysis, candidateAnalysis, verification: lastVerification },
-          this.config.thresholds,
+        lastVerification = await awaitWithSignal(
+          this.verificationProvider.verify({ original, candidate: rewrite.text, protectedContent, signal: input.signal }),
+          input.signal,
         );
+        input.signal?.throwIfAborted();
+        const candidateAnalysis = analyzeWriting(rewrite.text);
+        lastEvaluation = await awaitWithSignal(this.evaluationProvider.evaluate(
+          { original, candidate: rewrite.text, mode, originalAnalysis: analysis, candidateAnalysis, verification: lastVerification, signal: input.signal },
+          this.config.thresholds,
+        ), input.signal);
 
         if (lastVerification.passed && lastEvaluation.passed) {
           return {
@@ -140,6 +166,7 @@ export class HumanizationPipeline {
           ? lastVerification.issues
           : lastEvaluation.failedThresholds.map((threshold) => ({ kind: "changed-meaning" as const, message: `Candidate missed the ${threshold} quality threshold.` }));
       } catch (error) {
+        if (input.signal?.aborted) throw error;
         previousFailures = [{ kind: "changed-meaning", message: error instanceof Error ? error.message : "Rewrite provider failed." }];
       }
     }
