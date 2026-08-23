@@ -10,6 +10,11 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Gates a live paid-SaaS deploy behind GitHub Environment protection.
+    # Configure required reviewers under Settings > Environments > production,
+    # and scope the Cloudflare secrets to that environment (SEC finding:
+    # plain repo secrets let any write-access collaborator deploy to prod).
+    environment: production
     env:
       CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

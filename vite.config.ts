@@ -9,8 +9,33 @@ const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
 // Local/dev builds use the placeholder (Miniflare emulates it locally).
 // Production builds (CD) pass the real D1 database_id via env so it never
 // needs to be hardcoded in source.
-const databaseId =
-  process.env.D1_DATABASE_ID?.trim() || SITE_CREATOR_PLACEHOLDER_DATABASE_ID;
+//
+// Fail closed rather than silently falling back: a set-but-unusable value
+// (whitespace, a copy-paste of the placeholder, a malformed id) previously
+// trimmed away to the placeholder and shipped a production build bound to a
+// database that does not exist — live traffic against an empty schema, with
+// no error surfaced anywhere (SEC finding). CD's non-empty secret check
+// cannot catch that on its own, so the build itself has to.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function resolveDatabaseId() {
+  const configured = process.env.D1_DATABASE_ID;
+  if (configured === undefined) return SITE_CREATOR_PLACEHOLDER_DATABASE_ID;
+
+  const trimmed = configured.trim();
+  if (!trimmed) {
+    throw new Error("D1_DATABASE_ID is set but empty. Unset it for a local build, or give it the real D1 database id.");
+  }
+  if (!UUID_PATTERN.test(trimmed)) {
+    throw new Error(`D1_DATABASE_ID is not a valid UUID: ${JSON.stringify(trimmed)}.`);
+  }
+  if (trimmed === SITE_CREATOR_PLACEHOLDER_DATABASE_ID) {
+    throw new Error("D1_DATABASE_ID is the scaffold placeholder, not a real database. Deploying this would bind production to a database that does not exist.");
+  }
+  return trimmed;
+}
+
+const databaseId = resolveDatabaseId();
 
 const { d1, r2 } = hostingConfig;
 
