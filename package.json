@@ -12,7 +12,8 @@
     "test": "npm run build && node --import tsx --test tests/*.test.mjs tests/*.test.mts",
     "benchmark": "node --import tsx scripts/run-benchmark.mts",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "node --import tsx scripts/migrate-local-d1.mts"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
