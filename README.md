@@ -55,7 +55,7 @@ Do not scatter the temporary name, pricing values, or plan rules through applica
 ## CI/CD
 
 - `.github/workflows/ci.yml`: lint, typecheck, test, benchmark on every push/PR.
-- `.github/workflows/deploy.yml`: manual-only (`workflow_dispatch`). Needs `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` repo secrets and a real `wrangler.toml` (not yet added — this repo's deploy target is `.openai/hosting.json`'s hosting platform, whose auto-deploy behavior is unconfirmed). Do not enable auto-deploy-on-merge until that's confirmed, to avoid double-deploying.
+- `.github/workflows/deploy.yml`: manual-only (`workflow_dispatch`). Needs `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_DATABASE_ID` repo secrets — vinext generates `wrangler.json` at build time from `vite.config.ts`. Do not enable auto-deploy-on-merge until it's confirmed whether `.openai/hosting.json`'s hosting platform already auto-deploys, to avoid double-deploying.
 
 ## Documentation
 
