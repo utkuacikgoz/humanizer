@@ -31,6 +31,11 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# local Stripe/D1 secrets for `vinext dev` (Cloudflare Vite plugin reads
+# this, not .env, for local Workers `env` binding values) — never commit
+# real Stripe keys. See .dev.vars.example.
+.dev.vars
+
 # vercel
 .vercel
 

@@ -14,6 +14,8 @@ type Result = {
   naturalness: "Strong" | "Good";
   meaningPreservation: "High" | "Review needed";
   protectedItems: string[];
+  capability?: string;
+  capabilityExpiresAt?: string;
 };
 
 const SAMPLE_TEXT =
@@ -29,10 +31,41 @@ export default function Home() {
   const [result, setResult] = useState<Result | null>(null);
   const [status, setStatus] = useState<"idle" | "working" | "error">("idle");
   const [error, setError] = useState("");
+  const [unlockStatus, setUnlockStatus] = useState<"idle" | "working" | "error">("idle");
+  const [unlockError, setUnlockError] = useState("");
   const hasTrackedText = useRef(false);
   const completedCount = useRef(0);
   const idempotency = useRef<{ request: string; key: string } | null>(null);
+  const resultHeadingRef = useRef<HTMLHeadingElement>(null);
   const wordCount = useMemo(() => countWords(text), [text]);
+
+  // Focus the result heading once a rewrite lands, instead of only
+  // scrolling it into view: a native `disabled` button drops keyboard
+  // focus to <body> when it becomes disabled (browsers force this), which
+  // silently strands keyboard/screen-reader users with no landmark. This
+  // routes focus explicitly to where the result actually appears.
+  useEffect(() => {
+    if (!result) return;
+    resultHeadingRef.current?.focus();
+  }, [result]);
+
+  useEffect(() => {
+    document.documentElement.classList.add("motion-ready");
+    const targets = document.querySelectorAll<HTMLElement>("[data-reveal]");
+    if (!targets.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          entry.target.classList.add("is-visible");
+          observer.unobserve(entry.target);
+        }
+      },
+      { threshold: 0.15, rootMargin: "0px 0px -60px 0px" },
+    );
+    targets.forEach((target) => observer.observe(target));
+    return () => observer.disconnect();
+  }, []);
   const structuredData = {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
@@ -53,6 +86,7 @@ export default function Home() {
   useEffect(() => { track("landing_view"); }, []);
 
   async function humanize() {
+    if (status === "working") return;
     setError("");
     if (wordCount < 12) {
       setError("Add a little more context. At least 12 words works best.");
@@ -83,15 +117,36 @@ export default function Home() {
       track("humanization_completed", { mode, wordCount, issuesImproved: payload.issuesImproved });
       track("preview_viewed", { mode });
       if (completedCount.current === 2) track("second_humanization");
-      window.setTimeout(() => {
-        document.getElementById("result")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 80);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The rewrite could not be completed.");
       setStatus("error");
       return;
     }
     setStatus("idle");
+  }
+
+  async function unlock(planId: string) {
+    if (!result?.capability || unlockStatus === "working") return;
+    setUnlockError("");
+    setUnlockStatus("working");
+    track("checkout_started", { planId });
+    try {
+      const response = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ capability: result.capability, planId }),
+      });
+      const payload = (await response.json()) as { url?: string; signInPath?: string; error?: string };
+      if (response.status === 401 && payload.signInPath) {
+        window.location.href = payload.signInPath;
+        return;
+      }
+      if (!response.ok || !payload.url) throw new Error(payload.error ?? "Checkout could not be started.");
+      window.location.href = payload.url;
+    } catch (caught) {
+      setUnlockError(caught instanceof Error ? caught.message : "Checkout could not be started.");
+      setUnlockStatus("error");
+    }
   }
 
   return (
@@ -111,11 +166,17 @@ export default function Home() {
       </header>
 
       <section className="hero" id="top">
-        <h1>Keep your meaning.<br /><em>Lose the machine tone.</em></h1>
-        <p className="hero-copy">Turn stiff, generic AI assisted drafts into clear writing that sounds like a person wrote it while keeping the facts intact.</p>
+        <p className="eyebrow reveal-hero d1"><span aria-hidden="true" /> Meaning verified, not guessed</p>
+        <h1 className="reveal-hero d2">Keep your meaning.<br /><em>Lose the machine tone.</em></h1>
+        <p className="hero-copy reveal-hero d3">Turn stiff, generic AI assisted drafts into clear writing that sounds like a person wrote it while keeping the facts intact.</p>
+        <div className="trust-line reveal-hero d4">
+          <span>Checked before you see it</span>
+          <span>Names, numbers &amp; citations protected</span>
+          <span>Cancel anytime</span>
+        </div>
       </section>
 
-      <section className="workspace" aria-labelledby="workspace-title">
+      <section className="workspace reveal-hero d4" aria-labelledby="workspace-title">
         <div className="workspace-topline">
           <div>
             <span className="step-number">01</span>
@@ -156,17 +217,27 @@ export default function Home() {
               </button>
             ))}
           </div>
-          <button className="humanize-button" type="button" onClick={humanize} disabled={status === "working"}>
-            {status === "working" ? "Checking meaning…" : "Humanize"}<span aria-hidden="true">↗</span>
+          <button className="humanize-button" type="button" onClick={humanize} aria-disabled={status === "working"}>
+            {status === "working" ? (
+              <>Checking meaning… <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span></>
+            ) : (
+              <>Humanize <span className="fly-arrow" aria-hidden="true">↗</span></>
+            )}
           </button>
+          {status === "working" ? <div className="progress-track" aria-hidden="true"><div className="progress-fill" /></div> : null}
         </div>
+        {status === "working" ? (
+          <p className="status-line" role="status">
+            <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span> Verifying meaning and protecting your facts…
+          </p>
+        ) : null}
         {error ? <p className="error" role="alert">{error}</p> : null}
       </section>
 
       {result ? (
         <section className="result" id="result" aria-live="polite">
           <div className="result-heading">
-            <div><span className="step-number">02</span><h2>Your rewrite is ready</h2></div>
+            <div><span className="step-number">02</span><h2 ref={resultHeadingRef} tabIndex={-1}>Your rewrite is ready</h2></div>
             <p>We rewrote the awkward parts and left the meaning alone.</p>
           </div>
           <div className="checks">
@@ -190,9 +261,15 @@ export default function Home() {
               <div className="unlock-card">
                 <span className="lock" aria-hidden="true">●</span>
                 <strong>There’s more to this rewrite</strong>
-                <p>Unlock the complete result, sentence controls, and protected terminology.</p>
-                <button type="button" disabled title="Checkout is not connected in this Phase 0 preview">Unlock full rewrite for ${pricingConfig.plans.starter.monthlyPrice}/mo</button>
-                <small>Phase 0 preview · Checkout is not connected yet</small>
+                <p>Unlock the complete result.</p>
+                {result.capability ? (
+                  <button type="button" onClick={() => unlock("starter")} aria-disabled={unlockStatus === "working"}>
+                    {unlockStatus === "working" ? "Redirecting to checkout…" : `Unlock full rewrite for $${pricingConfig.plans.starter.monthlyPrice}/mo`}
+                  </button>
+                ) : (
+                  <button type="button" disabled title="Checkout isn't available for this result yet">Unlock full rewrite for ${pricingConfig.plans.starter.monthlyPrice}/mo</button>
+                )}
+                {unlockStatus === "error" ? <small role="alert">{unlockError}</small> : null}
               </div>
             </article>
           </div>
@@ -203,17 +280,17 @@ export default function Home() {
       ) : null}
 
       <section className="how" id="how-it-works">
-        <div className="section-intro"><p className="eyebrow"><span /> How it works</p><h2>Rewrite less.<br />Protect more.</h2></div>
+        <div className="section-intro" data-reveal><p className="eyebrow"><span /> How it works</p><h2>Rewrite less.<br />Protect more.</h2></div>
         <div className="how-grid">
-          <article><b>01</b><h3>Find the stiff parts</h3><p>We flag robotic patterns, filler, repetition, and forced transitions instead of rewriting every sentence.</p></article>
-          <article><b>02</b><h3>Protect what matters</h3><p>Names, numbers, dates, quotes, citations, URLs, and technical terms are tracked before anything changes.</p></article>
-          <article><b>03</b><h3>Check the meaning</h3><p>The rewrite is compared with your original. If a claim changes, that section does not pass.</p></article>
+          <article data-reveal style={{ "--reveal-index": 0 } as React.CSSProperties}><b>01</b><h3>Find the stiff parts</h3><p>We flag robotic patterns, filler, repetition, and forced transitions instead of rewriting every sentence.</p></article>
+          <article data-reveal style={{ "--reveal-index": 1 } as React.CSSProperties}><b>02</b><h3>Protect what matters</h3><p>Names, numbers, dates, quotes, citations, URLs, and technical terms are tracked before anything changes.</p></article>
+          <article data-reveal style={{ "--reveal-index": 2 } as React.CSSProperties}><b>03</b><h3>Check the meaning</h3><p>The rewrite is compared with your original. If a claim changes, that section does not pass.</p></article>
         </div>
       </section>
 
       <section className="pricing" id="pricing">
-        <div><p className="eyebrow"><span /> Simple pricing</p><h2>Try the quality.<br />Pay for the full result.</h2></div>
-        <article>
+        <div data-reveal><p className="eyebrow"><span /> Simple pricing</p><h2>Try the quality.<br />Pay for the full result.</h2></div>
+        <article data-reveal style={{ "--reveal-index": 1 } as React.CSSProperties}>
           <div><span>Starter</span><p>Everything you need to make drafts sound like you meant them.</p></div>
           <strong><sup>$</sup>{pricingConfig.plans.starter.monthlyPrice}<small>/ month</small></strong>
           <ul>{pricingConfig.plans.starter.features.map((feature) => <li key={feature}>✓ {feature}</li>)}</ul>
