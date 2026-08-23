@@ -292,11 +292,11 @@ textarea:focus { background: rgba(36,95,66,.025); }
   transition: transform var(--dur-fast) var(--ease-spring), box-shadow var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
 .humanize-button .fly-arrow { display: inline-block; transition: transform var(--dur-base) var(--ease-spring); }
-.humanize-button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 0 var(--green-dark), var(--glow-green); }
-.humanize-button:hover:not(:disabled) .fly-arrow { transform: translate(3px, -3px); }
-.humanize-button:active:not(:disabled) { transform: translateY(1px); box-shadow: 0 2px 0 var(--green-dark); }
-.humanize-button:disabled { opacity: .85; cursor: wait; box-shadow: 0 4px 0 var(--green-dark); }
-.humanize-button:disabled:hover { transform: none; }
+.humanize-button:hover:not([aria-disabled="true"]) { transform: translateY(-2px); box-shadow: 0 6px 0 var(--green-dark), var(--glow-green); }
+.humanize-button:hover:not([aria-disabled="true"]) .fly-arrow { transform: translate(3px, -3px); }
+.humanize-button:active:not([aria-disabled="true"]) { transform: translateY(1px); box-shadow: 0 2px 0 var(--green-dark); }
+.humanize-button[aria-disabled="true"] { opacity: .85; cursor: wait; box-shadow: 0 4px 0 var(--green-dark); }
+.humanize-button[aria-disabled="true"]:hover { transform: none; }
 .dot-loader { display: inline-flex; gap: 4px; align-items: center; }
 .dot-loader span { width: 5px; height: 5px; border-radius: 50%; background: white; animation: pulseDot 1.1s ease-in-out infinite; }
 .dot-loader span:nth-child(2) { animation-delay: .15s; }
