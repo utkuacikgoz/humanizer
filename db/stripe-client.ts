@@ -22,6 +22,25 @@ export class StripeNotConfiguredError extends Error {
   }
 }
 
+export class StripeConfigInvalidError extends Error {
+  constructor(reason: string) {
+    super(`Stripe configuration is invalid: ${reason}.`);
+    this.name = "StripeConfigInvalidError";
+  }
+}
+
+// Secret keys self-report their mode (sk_test_/sk_live_), so a malformed
+// or wrong-type value is caught here with a clear error instead of a
+// cryptic Stripe API failure downstream. Price IDs and webhook signing
+// secrets do NOT encode test/live mode in their string format, so full
+// cross-field mode-consistency (ARCHITECTURE.md: "Production/test Stripe
+// identifiers cannot be mixed") can't be verified by static inspection —
+// Stripe's own API rejects a live/test mismatch between the secret key
+// and a price/customer/subscription ID at call time, which is already
+// fail-closed by construction (the checkout/webhook routes' generic
+// error responses never leak which side mismatched).
+const SECRET_KEY_PATTERN = /^(sk|rk)_(test|live)_[A-Za-z0-9]+$/;
+
 interface StripeEnv {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
@@ -51,6 +70,12 @@ export function resolveStripeConfig(): StripeConfig {
   }
 
   if (missing.length) throw new StripeNotConfiguredError(missing);
+  if (!SECRET_KEY_PATTERN.test(secretKey!)) {
+    throw new StripeConfigInvalidError("STRIPE_SECRET_KEY does not look like a real Stripe secret key (expected sk_test_... or sk_live_...)");
+  }
+  if (!webhookSecret!.startsWith("whsec_")) {
+    throw new StripeConfigInvalidError("STRIPE_WEBHOOK_SECRET does not look like a real Stripe webhook signing secret (expected whsec_...)");
+  }
   return { secretKey: secretKey!, webhookSecret: webhookSecret!, priceIds };
 }
 
