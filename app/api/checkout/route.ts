@@ -3,6 +3,13 @@
 // specific job and a specific signed-in user server-side; the client
 // supplies neither price, plan allowance, nor its own identity as
 // authority (D-003).
+//
+// No app-level CSRF token: this route has no cookie-based session to
+// forge in the first place. Identity arrives exclusively via
+// oai-authenticated-user-* headers injected by the trusted hosting
+// boundary (app/chatgpt-auth.ts) — a cross-site form/fetch cannot set
+// those. If a cookie-based auth path is ever added, this reasoning no
+// longer holds and CSRF protection becomes required here.
 import { chatGPTSignInPath, resolveChatGPTUserFromHeaders } from "@/src/lib/chatgpt-identity";
 import { isPurchasablePlan } from "@/src/config/stripe";
 

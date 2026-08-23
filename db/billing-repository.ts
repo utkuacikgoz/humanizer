@@ -125,15 +125,31 @@ export async function claimJobForUser(
 }
 
 /**
+ * A permanently-failing event stops being retried after this many
+ * attempts (acknowledged and left `failed` for manual investigation)
+ * rather than retried forever — each attempt re-fetches from the Stripe
+ * API, so an unbounded retry loop is a real, if low-severity, cost.
+ */
+const MAX_STRIPE_EVENT_ATTEMPTS = 5;
+
+/**
  * Webhook inbox insert (M2-05). `stripe_events.id` (the Stripe event ID
- * itself) is the primary key, so a duplicate delivery fails this insert
- * and the caller returns 2xx without side effects, per the inbox pattern
- * in docs/MONETIZATION.md.
+ * itself) is the primary key and the replay defense per the inbox
+ * pattern in docs/MONETIZATION.md — but a duplicate INSERT is not
+ * automatically a duplicate to skip. Stripe retries a webhook delivery
+ * specifically when the previous attempt returned a non-2xx (see
+ * app/api/webhooks/stripe/route.ts's 500 on processing failure); if
+ * every repeat delivery were treated as "already handled," a genuinely
+ * transient failure would only ever get one attempt, and returning 500
+ * to ask for a retry would be a no-op. This distinguishes: a event
+ * already successfully processed (skip, true duplicate), one still
+ * within its retry budget (reprocess), and one that has exhausted it
+ * (stop retrying, but the failure stays recorded).
  */
 export async function recordStripeEvent(
   db: AppDatabase,
   input: { eventId: string; eventType: string; objectId: string | null; stripeCreatedAt: Date },
-): Promise<"new" | "duplicate"> {
+): Promise<"new" | "retry" | "already-processed" | "attempts-exhausted"> {
   try {
     await db.insert(stripeEvents).values({
       id: input.eventId,
@@ -146,7 +162,11 @@ export async function recordStripeEvent(
     });
     return "new";
   } catch {
-    return "duplicate";
+    const [existing] = await db.select().from(stripeEvents).where(eq(stripeEvents.id, input.eventId)).limit(1);
+    if (!existing) return "new"; // insert conflicted but the row is gone — fail open rather than silently drop a real event
+    if (existing.processingStatus === "processed") return "already-processed";
+    if (existing.processingAttempts >= MAX_STRIPE_EVENT_ATTEMPTS) return "attempts-exhausted";
+    return "retry";
   }
 }
 
