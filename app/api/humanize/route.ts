@@ -1,6 +1,7 @@
-import { createHumanizationPipeline, HumanizationFailedError } from "@/src/lib/humanization";
+import { createHumanizationPipeline, HumanizationFailedError, PIPELINE_VERSION } from "@/src/lib/humanization";
 import type { WritingMode } from "@/src/lib/humanization";
 import { PreviewRequestGuard } from "@/src/lib/preview-request-guard";
+import type { PreviewProjection } from "../../../db/repository";
 
 const allowedModes = new Set<WritingMode>(["natural", "professional", "academic", "casual"]);
 const pipeline = createHumanizationPipeline({ config: { maxInputCharacters: 2_400 } });
@@ -8,15 +9,74 @@ const MAX_REQUEST_BYTES = 10_000;
 const MAX_PROCESSING_MS = 5_000;
 const IDEMPOTENCY_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{7,127}$/;
 
-type PreviewPayload = {
+type PreviewPayload = PreviewProjection & {
   original: string;
-  preview: string;
-  hiddenWordCount: number;
-  issuesImproved: number;
-  naturalness: "Strong" | "Good";
-  meaningPreservation: "High" | "Review needed";
-  protectedItems: string[];
+  /** Present only when the job was durably persisted; absent is not an error. */
+  capability?: string;
+  capabilityExpiresAt?: string;
 };
+
+/**
+ * Best-effort persistence: durably stores the succeeded job and issues an
+ * anonymous preview capability (M1-09). `db/index.ts` reaches for the
+ * `cloudflare:workers` binding, which only resolves inside the actual
+ * Workers runtime — under `npm test` (plain Node, importing this route
+ * directly) or any environment without a configured D1 binding, the
+ * dynamic import/getDb() call throws and this quietly no-ops. The preview
+ * itself never depends on persistence succeeding.
+ *
+ * Known tradeoff (AQA review, see docs/QA.md's idempotency requirement):
+ * if the in-memory PreviewRequestGuard's replay cache is gone (isolate
+ * recycle) and a genuine duplicate submission reaches here, the unique
+ * index on (client_fingerprint, idempotency_key) rejects the second
+ * insert and this catches it — the caller gets a fresh, correctly
+ * re-derived preview but no capability. That's intentional, not a bug to
+ * silently paper over: only a capability's one-way digest is ever stored
+ * (never the raw token), so there is no raw token to hand back for the
+ * original job. Recovering one would mean minting a second live
+ * capability for the same job, which breaks the "exactly one capability
+ * per job" invariant in docs/ARCHITECTURE.md — a product/security
+ * decision, not something to change here unilaterally.
+ */
+async function tryPersist(input: {
+  mode: WritingMode;
+  clientFingerprint: string;
+  idempotencyKey: string;
+  contentFingerprint: string;
+  original: string;
+  result: string;
+  successfulWords: number;
+  protectedContent: Array<{ id: string; kind: string; normalizedValue: string; start: number; end: number }>;
+  projection: PreviewProjection;
+}): Promise<{ capability: string; capabilityExpiresAt: string } | undefined> {
+  try {
+    const [{ getDb }, { persistHumanizationJob }] = await Promise.all([
+      import("../../../db/index"),
+      import("../../../db/repository"),
+    ]);
+    const persisted = await persistHumanizationJob(getDb(), {
+      mode: input.mode,
+      clientFingerprint: input.clientFingerprint,
+      idempotencyKey: input.idempotencyKey,
+      contentFingerprint: input.contentFingerprint,
+      inputWordCount: input.original.trim().split(/\s+/).length,
+      successfulWordCount: input.successfulWords,
+      pipelineVersion: PIPELINE_VERSION,
+      original: input.original,
+      result: input.result,
+      protectedContent: input.protectedContent,
+      previewProjection: input.projection,
+    });
+    return { capability: persisted.capabilityToken, capabilityExpiresAt: persisted.capabilityExpiresAt.toISOString() };
+  } catch {
+    // Never log this error: D1/driver error objects can carry bound
+    // statement parameters (including source/result text) in their
+    // message/cause chain, which would violate the no-sensitive-logging
+    // control in docs/SECURITY.md. Best-effort only — the preview response
+    // never depends on persistence succeeding.
+    return undefined;
+  }
+}
 
 const requestGuard = new PreviewRequestGuard<PreviewPayload>();
 
@@ -52,9 +112,13 @@ function partialPreview(text: string) {
   return words.slice(0, visibleWords).join(" ");
 }
 
-async function fingerprint(text: string, mode: WritingMode) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${mode}\0${text}`));
+async function sha256Hex(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function fingerprint(text: string, mode: WritingMode) {
+  return sha256Hex(`${mode}\0${text}`);
 }
 
 export async function POST(request: Request) {
@@ -101,23 +165,35 @@ export async function POST(request: Request) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(new DOMException("Preview deadline exceeded.", "TimeoutError")), MAX_PROCESSING_MS);
     const clientId = request.headers.get("cf-connecting-ip")?.trim() || "anonymous-runtime";
+    const contentFingerprint = await fingerprint(text, mode as WritingMode);
     const guarded = await requestGuard.run({
       clientId,
       idempotencyKey,
-      fingerprint: await fingerprint(text, mode as WritingMode),
+      fingerprint: contentFingerprint,
       execute: async () => {
         try {
           const result = await pipeline.humanize({ text, mode: mode as WritingMode, signal: controller.signal });
           const preview = partialPreview(result.text);
-          return {
-            original: result.original,
+          const projection: PreviewProjection = {
             preview,
             hiddenWordCount: Math.max(0, result.text.trim().split(/\s+/).length - preview.trim().split(/\s+/).length),
             issuesImproved: Math.max(1, result.improvements),
             naturalness: result.evaluation.scores.naturalness >= 0.7 ? "Strong" : "Good",
             meaningPreservation: result.verification.passed ? "High" : "Review needed",
             protectedItems: result.protectedContent.map((item) => item.value),
-          } satisfies PreviewPayload;
+          };
+          const persisted = await tryPersist({
+            mode: mode as WritingMode,
+            clientFingerprint: await sha256Hex(clientId),
+            idempotencyKey,
+            contentFingerprint,
+            original: result.original,
+            result: result.text,
+            successfulWords: result.metrics.successfulWords,
+            protectedContent: result.protectedContent,
+            projection,
+          });
+          return { original: result.original, ...projection, ...persisted } satisfies PreviewPayload;
         } finally {
           clearTimeout(timeout);
         }

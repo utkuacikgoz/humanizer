@@ -40,6 +40,29 @@ test("extracts structured protected content with stable source ranges", () => {
   }
 });
 
+test("does not treat unrelated possessive/contraction apostrophes as a quotation spanning between them", () => {
+  // Regression test: a plain quote character also serves as the
+  // apostrophe in contractions and possessives ("today's", "author's").
+  // The quotation regex previously paired ANY two apostrophes in the
+  // text as an opening/closing delimiter, so two unrelated possessives
+  // anywhere in a passage greedily matched as one "quotation" spanning
+  // everything between them — for a long passage, potentially most of
+  // the text, which then fails verification when a rewrite doesn't
+  // reproduce that huge fabricated "quotation" byte-for-byte. Found via
+  // tests/api.test.mts's word-count boundary tests once they used
+  // realistic multi-sentence prose instead of single-sentence fixtures.
+  const text = "Today's report shows steady growth. The author's conclusion was clear and well supported by the data presented throughout the paper.";
+  const protectedContent = extractProtectedContent(text);
+  assert.equal(protectedContent.filter((item) => item.kind === "quotation").length, 0);
+
+  // A genuine quotation elsewhere in the same text must still be found.
+  const withRealQuote = `${text} She called it 'a turning point' for the team.`;
+  const withQuote = extractProtectedContent(withRealQuote);
+  const quotations = withQuote.filter((item) => item.kind === "quotation");
+  assert.equal(quotations.length, 1);
+  assert.equal(quotations[0].value, "'a turning point'");
+});
+
 test("analysis targets problematic sentences and leaves clean sentences alone", () => {
   const text = "The train arrived before noon. Furthermore, it is important to note that the robust solution will leverage synergy. We walked home.";
   const analysis = analyzeWriting(text);
