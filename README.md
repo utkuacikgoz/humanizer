@@ -52,6 +52,11 @@ The current test suite covers protected-content extraction, targeted rewriting, 
 
 Do not scatter the temporary name, pricing values, or plan rules through application logic.
 
+## CI/CD
+
+- `.github/workflows/ci.yml`: lint, typecheck, test, benchmark on every push/PR.
+- `.github/workflows/deploy.yml`: manual-only (`workflow_dispatch`). Needs `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` repo secrets and a real `wrangler.toml` (not yet added — this repo's deploy target is `.openai/hosting.json`'s hosting platform, whose auto-deploy behavior is unconfirmed). Do not enable auto-deploy-on-merge until that's confirmed, to avoid double-deploying.
+
 ## Documentation
 
 - [Product and milestones](docs/PRODUCT.md)
