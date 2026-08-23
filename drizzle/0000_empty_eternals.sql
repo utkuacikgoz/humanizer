@@ -156,7 +156,7 @@ CREATE TABLE `subscriptions` (
 	`updated_at` integer NOT NULL,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "subscriptions_plan_id_check" CHECK("subscriptions"."plan_id" in ('starter', 'pro')),
-	CONSTRAINT "subscriptions_status_check" CHECK("subscriptions"."status" in ('active', 'trialing', 'past_due', 'unpaid', 'canceled', 'incomplete_expired'))
+	CONSTRAINT "subscriptions_status_check" CHECK("subscriptions"."status" in ('incomplete', 'incomplete_expired', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'paused'))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `subscriptions_stripe_subscription_id_idx` ON `subscriptions` (`stripe_subscription_id`);--> statement-breakpoint

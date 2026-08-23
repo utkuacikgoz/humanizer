@@ -50,6 +50,25 @@ export const PROTECTED_ITEM_KINDS = [
 
 export const PLAN_IDS = ["starter", "pro"] as const;
 
+// Mirrors Stripe's actual subscription status vocabulary faithfully
+// (docs/MONETIZATION.md: "Internal statuses are explicit; raw Stripe
+// status strings are adapted at the boundary" — that adaptation is
+// *access-policy* interpretation of each status, e.g. which ones count
+// as an active entitlement, not lossy renaming/collapsing at storage
+// time). `incomplete`/`paused` are real Stripe statuses beyond the five
+// docs/MONETIZATION.md's "Proposed policy pending D-P03" enumerates.
+export const SUBSCRIPTION_STATUSES = [
+  "incomplete",
+  "incomplete_expired",
+  "trialing",
+  "active",
+  "past_due",
+  "canceled",
+  "unpaid",
+  "paused",
+] as const;
+export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
+
 const id = (columnName: string) => text(columnName).primaryKey();
 const createdAt = (columnName = "created_at") =>
   integer(columnName, { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch('subsec') * 1000)`);
@@ -217,7 +236,7 @@ export const subscriptions = sqliteTable("subscriptions", {
   stripeSubscriptionId: text("stripe_subscription_id").notNull(),
   planId: text("plan_id").notNull(),
   catalogVersion: integer("catalog_version").notNull(),
-  status: text("status").notNull(),
+  status: text("status").notNull().$type<SubscriptionStatus>(),
   currentPeriodStart: integer("current_period_start", { mode: "timestamp_ms" }).notNull(),
   currentPeriodEnd: integer("current_period_end", { mode: "timestamp_ms" }).notNull(),
   cancelAtPeriodEnd: integer("cancel_at_period_end", { mode: "boolean" }).notNull().default(false),
@@ -229,10 +248,7 @@ export const subscriptions = sqliteTable("subscriptions", {
   uniqueIndex("subscriptions_stripe_subscription_id_idx").on(t.stripeSubscriptionId),
   index("subscriptions_user_id_idx").on(t.userId),
   check("subscriptions_plan_id_check", sql`${t.planId} in (${sqlEnumList(PLAN_IDS)})`),
-  check(
-    "subscriptions_status_check",
-    sql`${t.status} in ('active', 'trialing', 'past_due', 'unpaid', 'canceled', 'incomplete_expired')`,
-  ),
+  check("subscriptions_status_check", sql`${t.status} in (${sqlEnumList(SUBSCRIPTION_STATUSES)})`),
 ]);
 
 /** Webhook inbox: event.id uniqueness is the primary replay defense. */
