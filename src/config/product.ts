@@ -3,7 +3,7 @@ export const productConfig = {
   productName: "Ownword",
   productTagline: "Writing that still sounds like you.",
   domain: "ownword.pro",
-  supportEmail: "support@example.com",
+  supportEmail: "support@ownword.pro",
   legalCompanyName: "Bosphorus Elevate LLC",
   socialHandles: {} as Record<string, string>,
   billingEnabled: false,
