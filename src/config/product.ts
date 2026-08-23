@@ -1,8 +1,8 @@
 export const productConfig = {
   codename: "humanizer",
-  productName: "Humanizer",
+  productName: "Ownword",
   productTagline: "Writing that still sounds like you.",
-  domain: "",
+  domain: "ownword.pro",
   supportEmail: "support@example.com",
   legalCompanyName: "Bosphorus Elevate LLC",
   socialHandles: {} as Record<string, string>,
