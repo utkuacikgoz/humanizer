@@ -364,8 +364,9 @@ textarea:focus { background: rgba(36,95,66,.025); }
   box-shadow: var(--glow-orange);
   transition: transform var(--dur-fast) var(--ease-spring);
 }
-.unlock-card button:not(:disabled):hover { transform: translateY(-1px); }
-.unlock-card button:disabled { cursor: not-allowed; filter: saturate(.65); opacity: .75; box-shadow: none; }
+.unlock-card button:not(:disabled):not([aria-disabled="true"]):hover { transform: translateY(-1px); }
+.unlock-card button:disabled,
+.unlock-card button[aria-disabled="true"] { cursor: not-allowed; filter: saturate(.65); opacity: .75; box-shadow: none; }
 .unlock-card small { display: block; margin-top: 10px; color: var(--muted); font-size: 9px; }
 .protected-note { margin: 0; padding: 14px 30px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; animation: rise var(--dur-base) var(--ease-out) both; animation-delay: 260ms; }
 
