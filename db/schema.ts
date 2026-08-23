@@ -120,13 +120,19 @@ export const humanizationJobs = sqliteTable("humanization_jobs", {
  * Restricted-content payload storage, isolated from queryable job metadata.
  * `sourceRef`/`resultRef` hold ciphertext or an object-storage key depending
  * on the D-P04 storage-separation decision; resultRef is set only once the
- * job succeeds.
+ * job succeeds. Full result text lives ONLY here — never inline it onto
+ * humanization_jobs or any other queryable row.
+ * `previewProjection` is different in kind: a small JSON blob of the
+ * already-derived, approved-for-display preview fields (naturalness label,
+ * meaning-preservation label, improvement count, truncated preview text).
+ * It is safe to return from a preview-capability response; resultRef never is.
  */
 export const jobPayloads = sqliteTable("job_payloads", {
   id: id("id"),
   jobId: text("job_id").notNull().references(() => humanizationJobs.id),
   sourceRef: text("source_ref").notNull(),
   resultRef: text("result_ref"),
+  previewProjection: text("preview_projection"),
   encryptionKeyId: text("encryption_key_id"),
   purgedAt: integer("purged_at", { mode: "timestamp_ms" }),
   createdAt: createdAt(),
@@ -145,6 +151,9 @@ export const protectedItems = sqliteTable("protected_items", {
   // securely stored reference, never plaintext inlined elsewhere.
   valueRef: text("value_ref"),
   verificationStatus: text("verification_status").notNull().default("pending"),
+  // Mirrors job_payloads.purgedAt so a deletion job has one tombstone story
+  // to tell for every table that can hold a "securely stored reference".
+  purgedAt: integer("purged_at", { mode: "timestamp_ms" }),
   createdAt: createdAt(),
 }, (t) => [
   uniqueIndex("protected_items_job_item_idx").on(t.jobId, t.itemKey),
@@ -178,7 +187,12 @@ export const jobAttempts = sqliteTable("job_attempts", {
   check("job_attempts_status_check", sql`${t.status} in ('succeeded', 'failed', 'aborted')`),
 ]);
 
-/** Immutable successful output versions; edits/regenerations branch from a parent. */
+/**
+ * Immutable successful output versions; edits/regenerations branch from a
+ * parent. `resultRef` carries the same guarantee as job_payloads.resultRef —
+ * ciphertext or an object-storage key, never inline plaintext restricted
+ * content.
+ */
 export const resultRevisions = sqliteTable("result_revisions", {
   id: id("id"),
   jobId: text("job_id").notNull().references(() => humanizationJobs.id),

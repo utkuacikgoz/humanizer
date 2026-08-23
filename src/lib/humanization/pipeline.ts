@@ -36,6 +36,14 @@ function awaitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<
   });
 }
 
+/**
+ * Bump when a change to extraction, analysis, rewrite, verification, or
+ * evaluation logic could alter output for previously-generated jobs.
+ * Persisted onto humanization_jobs so a stored job's provenance stays
+ * reconstructible (see docs/ARCHITECTURE.md's "Configuration and secrets").
+ */
+export const PIPELINE_VERSION = 1;
+
 export const DEFAULT_HUMANIZATION_CONFIG: Readonly<HumanizationConfig> = {
   maxRetries: 2,
   maxInputCharacters: 50_000,
