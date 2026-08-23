@@ -1,0 +1,22 @@
+# Local Stripe secrets for `npm run dev` (Miniflare, via
+# @cloudflare/vite-plugin). Copy this file to `.dev.vars` (gitignored —
+# never commit real values) and fill in real test-mode Stripe values.
+#
+# These are read at runtime via the Workers `env` binding
+# (db/stripe-client.ts's resolveStripeConfig()) — this file has no effect
+# on a real deployment; that platform's own secret store is authoritative
+# in production (see docs/DECISIONS.md D-013).
+#
+# Where to get each value (Stripe Dashboard, test mode):
+# - STRIPE_SECRET_KEY: Developers -> API keys -> Secret key (starts with sk_test_)
+# - STRIPE_WEBHOOK_SECRET: Developers -> Webhooks -> add an endpoint for
+#   this app's /api/webhooks/stripe route, or `stripe listen --forward-to
+#   localhost:3000/api/webhooks/stripe` for local testing -> signing secret
+#   (starts with whsec_)
+# - STRIPE_PRICE_STARTER: Product catalog -> Starter plan -> Price ID
+#   (starts with price_) — must be a *recurring* (subscription) price to
+#   match app/api/checkout/route.ts's `mode: "subscription"`.
+
+STRIPE_SECRET_KEY=sk_test_replace_me
+STRIPE_WEBHOOK_SECRET=whsec_replace_me
+STRIPE_PRICE_STARTER=price_replace_me

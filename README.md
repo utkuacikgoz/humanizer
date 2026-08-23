@@ -45,8 +45,10 @@ The current test suite covers protected-content extraction, targeted rewriting, 
 
 - Product identity: `src/config/product.ts`
 - Plan catalog: `src/config/pricing.ts`
+- Stripe plan-to-price mapping: `src/config/stripe.ts`
 - Evaluation thresholds: `src/lib/humanization/pipeline.ts`
 - Hosting metadata: `.openai/hosting.json`
+- Local Stripe/D1 secrets: copy `.dev.vars.example` to `.dev.vars` (gitignored) — see that file for where each value comes from. Production secrets are set through the deployment platform's own secret store, not this repo.
 
 Do not scatter the temporary name, pricing values, or plan rules through application logic.
 
