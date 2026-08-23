@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const [{ getDb }, { getStripeClient, StripeNotConfiguredError }, billing] = await Promise.all([
+    const [{ getDb }, { getStripeClient, StripeNotConfiguredError, StripeConfigInvalidError }, billing] = await Promise.all([
       import("../../../../db/index"),
       import("../../../../db/stripe-client"),
       import("../../../../db/billing-repository"),
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     try {
       ({ stripe } = getStripeClient());
     } catch (error) {
-      if (error instanceof StripeNotConfiguredError) {
+      if (error instanceof StripeNotConfiguredError || error instanceof StripeConfigInvalidError) {
         return Response.json({ error: "Billing is not available yet." }, { status: 503, headers: { "cache-control": "no-store" } });
       }
       throw error;
