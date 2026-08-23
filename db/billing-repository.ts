@@ -5,6 +5,7 @@
 // tests/billing-repository.test.mts.
 import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import * as schema from "./schema";
+import type { SubscriptionStatus } from "./schema";
 import type { AppDatabase } from "./repository";
 
 const { users, anonymousSessions, humanizationJobs, subscriptions, stripeEvents } = schema;
@@ -143,7 +144,7 @@ export interface SubscriptionProjection {
   stripeSubscriptionId: string;
   planId: string;
   catalogVersion: number;
-  status: string;
+  status: SubscriptionStatus;
   currentPeriodStart: Date;
   currentPeriodEnd: Date;
   cancelAtPeriodEnd: boolean;
@@ -175,11 +176,11 @@ export async function upsertSubscriptionFromStripe(db: AppDatabase, input: Subsc
   }
 }
 
-const ACTIVE_ENTITLEMENT_STATUSES = new Set(["active", "trialing"]);
+const ACTIVE_ENTITLEMENT_STATUSES: ReadonlySet<SubscriptionStatus> = new Set(["active", "trialing"]);
 
 export interface Entitlement {
   planId: string;
-  status: string;
+  status: SubscriptionStatus;
   currentPeriodEnd: Date;
   stripeCustomerId: string;
 }

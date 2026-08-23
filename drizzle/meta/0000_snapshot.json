@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fd7be254-2cfc-4dfc-9da7-7b4d2e4e9b45",
+  "id": "d78ddb9b-024e-47bf-8806-638df9ec95f4",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "analytics_outbox": {
@@ -1079,7 +1079,7 @@
         },
         "subscriptions_status_check": {
           "name": "subscriptions_status_check",
-          "value": "\"subscriptions\".\"status\" in ('active', 'trialing', 'past_due', 'unpaid', 'canceled', 'incomplete_expired')"
+          "value": "\"subscriptions\".\"status\" in ('incomplete', 'incomplete_expired', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'paused')"
         }
       }
     },
