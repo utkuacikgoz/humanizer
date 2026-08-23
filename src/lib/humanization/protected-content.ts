@@ -11,7 +11,16 @@ const RULES: ExtractionRule[] = [
   { kind: "url", expression: /\bhttps?:\/\/[^\s<>"')\]]+[^\s<>"').,;!?\]}]/gi },
   { kind: "reference", expression: /\b(?:doi:\s*)?10\.\d{4,9}\/[\w.()/:;-]+/gi },
   { kind: "citation", expression: /\((?:[A-Z][\p{L}'’-]+(?:\s+(?:et al\.|&\s+[A-Z][\p{L}'’-]+))?,?\s+)?(?:19|20)\d{2}[a-z]?(?:,\s*p{1,2}\.\s*\d+(?:[-–]\d+)?)?\)|\[(?:\d+(?:[-–,]\s*)?)+\]/gu },
-  { kind: "quotation", expression: /“[^”\n]+”|"[^"\n]+"|‘[^’\n]+’|'[^'\n]+'/g },
+  // The single-quote alternatives require the delimiter not be adjacent to a
+  // letter/digit, since a plain quote character also serves as the
+  // apostrophe in contractions and possessives ("today's", "author's").
+  // Without that guard, two unrelated possessives anywhere in the same text
+  // greedily pair up as one "quotation" spanning everything between them —
+  // a real bug this fix addresses, found via tests/api.test.mts's
+  // word-count boundary tests once they used realistic multi-sentence
+  // prose instead of single-sentence fixtures (no existing benchmark
+  // passage happened to contain two unpaired apostrophes).
+  { kind: "quotation", expression: /“[^”\n]+”|"[^"\n]+"|(?<![\p{L}\d])[‘'][^‘’'\n]+[’'](?![\p{L}\d])/gu },
   { kind: "currency", expression: /(?:[$€£¥]\s?\d\d*(?:,\d{3})*(?:\.\d+)?(?:\s?(?:million|billion|trillion))?|\b\d\d*(?:,\d{3})*(?:\.\d+)?\s?(?:USD|EUR|GBP|JPY)\b)/gi },
   { kind: "percentage", expression: /\b\d+(?:\.\d+)?\s?%/g },
   { kind: "date", expression: /\b(?:19|20)\d{2}-\d{2}-\d{2}\b|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+(?:19|20)\d{2}\b|\b(?:Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+(?:19|20)\d{2}\b/gi },

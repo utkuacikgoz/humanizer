@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { GET } from "../app/api/preview/route";
 
-function request(query: string) {
-  return new Request(`http://localhost/api/preview${query}`);
+function request(query: string, headers: Record<string, string> = {}) {
+  return new Request(`http://localhost/api/preview${query}`, { headers });
 }
 
 async function assertUniformNotFound(response: Response) {
@@ -41,3 +41,15 @@ test(
     await assertUniformNotFound(await GET(request(`?capability=${wellFormedToken}`)));
   },
 );
+
+test("rate-limits rapid redemption attempts from the same client (MQA finding: this endpoint was previously unthrottled)", async () => {
+  const ip = "203.0.113.55"; // dedicated fake IP so this test's window doesn't share budget with the tests above
+  const responses = await Promise.all(
+    Array.from({ length: 13 }, (_, i) =>
+      GET(request(`?capability=${"b".repeat(42)}${i}`, { "cf-connecting-ip": ip }))),
+  );
+  const statuses = responses.map((r) => r.status).sort((a, b) => a - b);
+  assert.ok(statuses.includes(429), `expected at least one 429 among ${JSON.stringify(statuses)}`);
+  const limited = responses.find((r) => r.status === 429);
+  assert.ok(limited?.headers.get("retry-after"));
+});
