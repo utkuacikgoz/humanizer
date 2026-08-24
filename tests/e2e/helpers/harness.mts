@@ -21,9 +21,39 @@ export const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 let cachedBrowser: Browser | null = null;
 let unavailableReason: string | null = null;
 
+/**
+ * Playwright ships a browser build number per release, and the binary has to
+ * match the library. Some environments pre-provision browsers into
+ * PLAYWRIGHT_BROWSERS_PATH rather than downloading them, so the project's
+ * pinned Playwright can be a version whose build is not the one present.
+ *
+ * Prefer the project's copy, and fall back to a globally installed Playwright
+ * whose browser actually exists — otherwise the whole suite silently skips on
+ * a machine that has a perfectly usable Chromium sitting right there.
+ */
+const GLOBAL_PLAYWRIGHT_PATHS = [
+  "/opt/node22/lib/node_modules/playwright",
+  "/usr/lib/node_modules/playwright",
+  "/usr/local/lib/node_modules/playwright",
+];
+
 function loadPlaywright() {
   const require = createRequire(import.meta.url);
-  return require("playwright") as typeof import("playwright");
+  const project = require("playwright") as typeof import("playwright");
+
+  const { existsSync } = require("node:fs") as typeof import("node:fs");
+  if (existsSync(project.chromium.executablePath())) return project;
+
+  for (const candidate of GLOBAL_PLAYWRIGHT_PATHS) {
+    if (!existsSync(candidate)) continue;
+    try {
+      const fallback = require(candidate) as typeof import("playwright");
+      if (existsSync(fallback.chromium.executablePath())) return fallback;
+    } catch {
+      // Not loadable from here; try the next one.
+    }
+  }
+  return project; // Report the project's missing path in the skip message.
 }
 
 /** Why the suite cannot run here, or `null` when it can. Never throws. */
