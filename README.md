@@ -77,6 +77,7 @@ Do not scatter the temporary name, pricing values, or plan rules through applica
 - [Product and milestones](docs/PRODUCT.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Agent ownership](docs/AGENTS.md)
+- [Working memory](docs/MEMORY.md) — token discipline, multi-agent coordination, repository gotchas
 - [Decision log](docs/DECISIONS.md)
 - [Monetization](docs/MONETIZATION.md)
 - [Security and privacy](docs/SECURITY.md)
