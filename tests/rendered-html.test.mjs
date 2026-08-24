@@ -65,9 +65,10 @@ test("publishes one coherent Ownword identity on the canonical host", async () =
   assert.match(html, /<link rel="canonical" href="https:\/\/ownword\.pro"/);
   assert.match(html, /<meta property="og:site_name" content="Ownword"/);
   assert.match(html, /<meta property="og:image:width" content="1731"/);
-  assert.doesNotMatch(html, /Humanizer|Bosphorus Elevate|support@ownword\.pro|favicon\.svg|brand-mark/);
+  assert.doesNotMatch(html, /Humanizer|favicon\.svg|brand-mark/);
   assert.match(sitemap, /<loc>https:\/\/ownword\.pro\/<\/loc>/);
-  assert.doesNotMatch(sitemap, /<loc>https:\/\/ownword\.pro\/(privacy|terms)<\/loc>/);
+  assert.match(sitemap, /<loc>https:\/\/ownword\.pro\/privacy<\/loc>/);
+  assert.match(sitemap, /<loc>https:\/\/ownword\.pro\/terms<\/loc>/);
 });
 
 test("keeps brand and pricing copy centralized", async () => {
@@ -84,23 +85,28 @@ test("keeps brand and pricing copy centralized", async () => {
   assert.doesNotMatch(page, /\$9(\.99)?\/month/);
   assert.match(productConfig, /productName:\s*"Ownword"/);
   assert.match(productConfig, /domain:\s*"ownword\.pro"/);
-  assert.match(productConfig, /supportEmail:\s*null/);
-  assert.match(productConfig, /legalCompanyName:\s*null/);
-  assert.doesNotMatch(`${page}\n${layout}\n${privacy}\n${terms}`, /Bosphorus Elevate|support@ownword\.pro|favicon\.svg|brand-mark/);
+  assert.match(productConfig, /supportEmail:\s*"support@ownword\.pro"/);
+  assert.match(productConfig, /legalCompanyName:\s*"Bosphorus Elevate LLC"/);
+  assert.doesNotMatch(`${page}\n${layout}`, /Bosphorus Elevate|support@ownword\.pro|favicon\.svg|brand-mark/);
+  assert.match(`${privacy}\n${terms}`, /productConfig\.legalCompanyName/);
+  assert.match(`${privacy}\n${terms}`, /productConfig\.supportEmail/);
   assert.doesNotMatch(page, /[—–]/, "landing copy uses sentence punctuation instead of em or en dashes");
   // Anchored: a bare /monthlyPrice:\s*9/ also matches 9.99, so it would
   // silently keep passing across a price change (MON finding).
   assert.match(pricingConfig, /monthlyPrice:\s*9\.99,/);
 });
 
-test("keeps unfinished legal pages out of search", async () => {
+test("indexes completed legal pages only on the canonical host", async () => {
   for (const path of ["/privacy", "/terms"]) {
-    const response = await render(path);
-    assert.equal(response.status, 200);
-    const html = await response.text();
-    assert.match(html, /Draft/);
-    assert.match(html, /name="robots" content="noindex, nofollow, nocache"/);
-    assert.doesNotMatch(html, /Bosphorus Elevate|support@ownword\.pro/);
+    const [offCanonical, canonical] = await Promise.all([render(path), render(path, "ownword.pro")]);
+    assert.equal(offCanonical.status, 200);
+    assert.equal(canonical.status, 200);
+    assert.match(await offCanonical.text(), /name="robots" content="noindex, nofollow, nocache"/);
+    const canonicalHtml = await canonical.text();
+    assert.doesNotMatch(canonicalHtml, /name="robots" content="noindex, nofollow, nocache"/);
+    assert.match(canonicalHtml, new RegExp(`rel="canonical" href="https://ownword\\.pro${path}"`));
+    assert.match(canonicalHtml, /Bosphorus Elevate LLC/);
+    assert.match(canonicalHtml, /support@ownword\.pro/);
   }
 });
 

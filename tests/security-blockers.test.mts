@@ -3,7 +3,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { MIN_HIDDEN_WORDS, projectPreview } from "../src/lib/preview-projection";
+import { MIN_HIDDEN_WORDS, projectPreview, shouldOfferUnlock } from "../src/lib/preview-projection";
+import { isTrustedIdentityHost, resolveChatGPTUserFromHeaders } from "../src/lib/chatgpt-identity";
 
 function words(count: number) {
   return Array.from({ length: count }, (_, i) => `word${i}`).join(" ");
@@ -85,4 +86,44 @@ test("SEC-01: the workers.dev origin stays disabled", () => {
 test("SEC-07: migrations point at the directory drizzle-kit actually writes to", () => {
   const config = readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
   assert.match(config, /migrations_dir:\s*"drizzle"/);
+});
+
+// SEC-01 — identity headers are only honored on the trusted production
+// host. Off it (a *.workers.dev URL, a preview alias) the caller is
+// anonymous, so a forged user id buys nothing.
+
+test("SEC-01: forged identity headers are ignored off the production host", () => {
+  const forged = {
+    "oai-authenticated-user-id": "victim-subject-9001",
+    "oai-authenticated-user-email": "attacker@evil.test",
+  };
+  for (const host of ["ownword.pro.workers.dev", "humanizer.workers.dev", "evil.test", ""]) {
+    const headers = new Headers({ ...forged, ...(host ? { host } : {}) });
+    assert.equal(isTrustedIdentityHost(headers), false, `${host || "(no host)"} must not be trusted`);
+    assert.equal(resolveChatGPTUserFromHeaders(headers), null, `${host || "(no host)"} must resolve no identity`);
+  }
+});
+
+test("SEC-01: the production host and localhost still resolve identity", () => {
+  for (const host of ["ownword.pro", "www.ownword.pro", "OWNWORD.PRO", "ownword.pro:443", "localhost:3000"]) {
+    const headers = new Headers({
+      host,
+      "oai-authenticated-user-id": "real-subject",
+      "oai-authenticated-user-email": "person@example.com",
+    });
+    assert.equal(isTrustedIdentityHost(headers), true, `${host} should be trusted`);
+    assert.equal(resolveChatGPTUserFromHeaders(headers)?.userId, "real-subject");
+  }
+});
+
+// KI-01 — measured improvement and material change must agree before
+// anything is sold.
+
+test("KI-01: a rewrite measured at zero improvements is never sold", () => {
+  assert.equal(shouldOfferUnlock({ preview: "a real preview", hiddenWordCount: 40, issuesImproved: 0 }), false);
+  assert.equal(shouldOfferUnlock({ preview: "a real preview", hiddenWordCount: 40 }), false);
+});
+
+test("KI-01: a genuine rewrite with measured improvements is still sellable", () => {
+  assert.equal(shouldOfferUnlock({ preview: "a real preview", hiddenWordCount: 40, issuesImproved: 3 }), true);
 });

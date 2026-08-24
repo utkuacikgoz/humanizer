@@ -24,17 +24,14 @@ Verified working today:
   `<urlset>`. This is enforced by `tests/rendered-html.test.mjs` and is by design (SEO-002), not a defect.
   When the application serves a request on the `ownword.pro` Host, robots.txt allows crawling (with `/api/`, `/account/`, `/admin/`,
   `/billing/`, `/checkout/`, `/history/`, `/result/`, `/signin-with-chatgpt` disallowed) and references the
-  sitemap. The sitemap currently lists only `/`. The draft `/privacy` and `/terms` pages remain reachable from
-  the product footer but are marked `noindex` and omitted from the sitemap until Legal approves the operator,
-  support route, provider disclosure, retention policy, and binding terms.
+  sitemap. The sitemap lists `/`, `/privacy`, and `/terms`. The legal pages use host-gated canonical metadata,
+  remain `noindex` off the canonical host, and are indexable only on `ownword.pro`.
 - Homepage (`app/page.tsx`, COPY-owned) emits `SoftwareApplication` JSON-LD. The `Offer` block is conditional
   on `productConfig.billingEnabled`, which is currently `true`. Commercial launch still requires working live
   Checkout and the legal, security, and pricing release gates; structured data must be disabled if those are
   not satisfied on the production host.
-- `/privacy` and `/terms` exist and return 200 as transparent drafts. Both carry unique Ownword metadata and
-  an unconditional `noindex, nofollow, nocache` directive. They avoid unsupported company and mailbox claims,
-  and keep unresolved provider, retention, refund, governing law, liability, termination, and eligibility
-  sections marked `PENDING`. They are not a substitute for Legal sign-off (M4-03).
+- `/privacy` and `/terms` exist and return 200 with unique Ownword metadata, the configured operator and support
+  address, and host-gated canonical/index directives. Final counsel review remains part of M4-03.
 
 ## 1. Outcome and guardrails
 
@@ -87,7 +84,7 @@ Every commercial page should prove the promise in this order:
 - Trustworthy assessment without invented percentages
 - Personal voice as a future capability, not a V1 claim
 
-The canonical brand is Ownword and the canonical domain is `ownword.pro`. Both resolve from centralized product configuration. The legal organization, support email, social profiles, and official logo remain unconfirmed and must not be inferred from the domain or invented for structured data. Use a text wordmark until approved visual assets are supplied.
+The canonical brand is Ownword and the canonical domain is `ownword.pro`. Bosphorus Elevate LLC and `support@ownword.pro` are the configured operator and support contact. All resolve from centralized product configuration. Social profiles and official logo artwork remain unconfirmed and must not be invented for structured data. Use a text wordmark until approved visual assets are supplied.
 
 ## 3. Search-intent map
 

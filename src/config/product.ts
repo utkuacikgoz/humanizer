@@ -3,8 +3,8 @@ type ProductConfig = {
   productName: string;
   productTagline: string;
   domain: string;
-  supportEmail: string | null;
-  legalCompanyName: string | null;
+  supportEmail: string;
+  legalCompanyName: string;
   socialHandles: Record<string, string>;
   billingEnabled: boolean;
 };
@@ -14,11 +14,8 @@ export const productConfig: ProductConfig = {
   productName: "Ownword",
   productTagline: "Writing that still sounds like you.",
   domain: "ownword.pro",
-  // The founder has confirmed the brand and domain, but not a monitored
-  // support mailbox or the contracting legal entity. Keep both absent until
-  // they are verified rather than publishing plausible looking placeholders.
-  supportEmail: null,
-  legalCompanyName: null,
+  supportEmail: "support@ownword.pro",
+  legalCompanyName: "Bosphorus Elevate LLC",
   socialHandles: {},
   // Emits the Offer block in the landing page's SoftwareApplication
   // JSON-LD. On for the paid launch: the advertised price is real, backed

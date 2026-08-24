@@ -75,6 +75,7 @@ export interface UnlockDecisionInput {
   unchanged?: boolean;
   preview?: string;
   hiddenWordCount?: number;
+  issuesImproved?: number;
 }
 
 /**
@@ -89,6 +90,11 @@ export function shouldOfferUnlock(result: UnlockDecisionInput | null | undefined
   if (!result) return false;
   if (result.unchanged) return false;
   if (typeof result.preview !== "string" || !result.preview.trim()) return false;
+  // KI-01: material change and measured improvement must agree before
+  // anything is sold. isMateriallyUnchanged only catches a rewrite identical
+  // to the input; a cosmetic-only edit (say, deleting a space before a comma)
+  // differs textually while improving nothing, and was still being paywalled.
+  if ((result.issuesImproved ?? 0) <= 0) return false;
   return (result.hiddenWordCount ?? 0) > 0;
 }
 
