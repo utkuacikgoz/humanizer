@@ -57,6 +57,9 @@
   --mark-fact-rule: #a08a4e;
   --mark-fact-bg: #f2e9cf;
 
+  /* unresolved / draft notice ground, used by /privacy and /terms */
+  --notice-bg: #fbeee3;
+
   /* --- lines ------------------------------------------------ */
   --line: #d9d5c6;
   --line-soft: #e6e2d5;
@@ -78,7 +81,7 @@
   --t-lg: clamp(18px, 1.4vw, 20px);
   --t-xl: clamp(21px, 1.9vw, 25px);
   --t-2xl: clamp(26px, 2.8vw, 34px);
-  --t-3xl: clamp(32px, 4.4vw, 50px);
+  --t-3xl: clamp(30px, 3.4vw, 44px);
   --t-display: clamp(36px, 4.3vw, 56px);
 
   /* --- spacing rhythm (4px base) ---------------------------- */
@@ -162,6 +165,8 @@
     --mark-fact-rule: #d3b877;
     --mark-fact-bg: #33301f;
 
+    --notice-bg: #2a1b14;
+
     --line: #2a3831;
     --line-soft: #1e2a25;
     --line-strong: #4a5b52;
@@ -177,6 +182,16 @@
    ============================================================ */
 
 * { box-sizing: border-box; }
+/* Short pages (the post-purchase surface before the result lands) used to
+   strand the billing strip mid-viewport above a screen of empty ground.
+   `width: 100%` is load-bearing: a column flex item carrying `margin: 0
+   auto` — which every top-level band does, to centre itself in the
+   container — resolves its cross size to fit-content instead of
+   stretching, which collapses the header and the stage to their
+   min-content widths. */
+main { display: flex; flex-direction: column; min-height: 100dvh; }
+main > * { width: 100%; min-width: 0; }
+main > .billing-strip { margin-top: auto; }
 html { scroll-behavior: smooth; }
 html, body { min-height: 100%; }
 body {
@@ -264,10 +279,6 @@ h1, h2, h3 { margin: 0; }
   0%, 80%, 100% { opacity: .28; transform: translateY(0); }
   40%           { opacity: 1; transform: translateY(-2px); }
 }
-@keyframes lockPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(226, 112, 60, .3); }
-  50%      { box-shadow: 0 0 0 8px rgba(226, 112, 60, 0); }
-}
 @keyframes checkPop {
   0%   { scale: .5; opacity: 0; }
   65%  { scale: 1.1; opacity: 1; }
@@ -281,26 +292,24 @@ h1, h2, h3 { margin: 0; }
   to   { background-size: 100% 100%; }
 }
 
+/* The page arrives once, from the top, in the order it is read. Nothing
+   below the fold fades in on scroll: a scroll-reveal is decoration that
+   costs the reader the content until they have earned it, and it leaves
+   the page blank wherever the observer never runs. */
 .reveal-hero { animation: rise var(--dur-slow) var(--ease-fly) both; }
-.reveal-hero.d1 { animation-delay: 40ms; }
-.reveal-hero.d2 { animation-delay: 110ms; }
-.reveal-hero.d3 { animation-delay: 180ms; }
-.reveal-hero.d4 { animation-delay: 250ms; }
-
-html.motion-ready [data-reveal]:not(.is-visible) { opacity: 0; translate: 0 18px; }
-[data-reveal].is-visible {
-  animation: rise 620ms var(--ease-fly) both;
-  animation-delay: calc(var(--reveal-index, 0) * 80ms);
-}
+.reveal-hero.d1 { animation-delay: 30ms; }
+.reveal-hero.d2 { animation-delay: 80ms; }
+.reveal-hero.d3 { animation-delay: 140ms; }
+.reveal-hero.d4 { animation-delay: 200ms; }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after {
     animation-duration: .001ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: .001ms !important;
   }
-  html.motion-ready [data-reveal]:not(.is-visible) { opacity: 1; translate: none; }
 }
 
 /* ============================================================
@@ -337,8 +346,10 @@ html.motion-ready [data-reveal]:not(.is-visible) { opacity: 0; translate: 0 18px
               scale var(--dur-base) var(--ease-spring);
 }
 @media (prefers-color-scheme: dark) {
+  /* Measured: the old #1c503a stop put the glyph at 2.05:1. Both stops now
+     clear AA against it (10.2:1 and 8.3:1). */
   .brand-mark {
-    background: linear-gradient(155deg, var(--green-bright), #1c503a);
+    background: linear-gradient(155deg, var(--green-bright), #4cc088);
     color: #08120e;
   }
 }
@@ -521,6 +532,10 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
   transition: color var(--dur-fast) var(--ease-out);
 }
 .word-meter .over { color: var(--mark-cut-ink); font-weight: 700; }
+/* Under the minimum the meter counts toward the minimum instead of the
+   ceiling, so the number the visitor is actually being held to is the one
+   on screen before they press the button rather than after. */
+.word-meter .under { color: var(--ink-2); font-weight: 700; }
 
 .mode-group {
   display: flex; padding: 3px; gap: 2px;
@@ -553,8 +568,10 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
               filter var(--dur-fast) var(--ease-out);
 }
 @media (prefers-color-scheme: dark) {
+  /* Measured: the old #2a8a5c stop landed at 4.44:1, just under AA. The
+     label now clears it across the whole gradient (10.2:1 → 5.7:1). */
   .humanize-button {
-    background: linear-gradient(158deg, var(--green-bright), #2a8a5c);
+    background: linear-gradient(158deg, var(--green-bright), #349e6b);
     color: #06120d;
     box-shadow: 0 3px 0 #10402c;
   }
@@ -617,41 +634,46 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .result-heading > p {
   max-width: 34ch; margin: 0;
   color: var(--ink-2); font-size: var(--t-sm); line-height: 1.45; text-align: right;
+  text-wrap: balance;
 }
 
-/* Evidence strip: one row, first item weighted, hairline dividers.
-   Deliberately not three identical cards. */
+/* Three readings taken on one rewrite, so they read as one line of
+   findings — a ledger rule, not three dashboard tiles with badges. */
 .checks {
-  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
-  background: var(--surface);
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: var(--s2) var(--s6);
+  padding: var(--s3) var(--s5);
+  background: var(--paper-sunken);
   border-bottom: 1px solid var(--line-soft);
 }
 .checks article {
-  padding: var(--s4) var(--s5);
-  display: flex; gap: var(--s3); align-items: center;
-  border-right: 1px solid var(--line-soft);
+  display: flex; align-items: baseline; gap: var(--s3); min-width: 0;
   animation: rise var(--dur-base) var(--ease-out) both;
 }
-.checks article:nth-child(1) { animation-delay: 40ms; }
-.checks article:nth-child(2) { animation-delay: 110ms; }
-.checks article:nth-child(3) { animation-delay: 180ms; }
-.checks article:last-child { border-right: 0; }
-.check-icon {
-  width: 26px; height: 26px; flex: none; display: grid; place-items: center;
-  border-radius: 50%; background: var(--mint); color: var(--green);
-  animation: checkPop 420ms var(--ease-spring) both; animation-delay: inherit;
-}
-.check-icon.warm { background: var(--clay-soft); color: var(--clay); }
-.checks small, .checks strong { display: block; }
+.checks article:nth-child(2) { animation-delay: 60ms; }
+.checks article:nth-child(3) { animation-delay: 120ms; }
 .checks small {
+  flex: none;
   color: var(--ink-3); font-family: var(--font-mono);
-  font-size: var(--t-2xs); letter-spacing: .09em; text-transform: uppercase;
+  font-size: var(--t-2xs); letter-spacing: .1em; text-transform: uppercase;
 }
-.checks strong { margin-top: 3px; font-size: var(--t-base); font-weight: 620; letter-spacing: -.02em; }
+.checks strong {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--ink); font-size: var(--t-sm); font-weight: 650; letter-spacing: -.01em;
+}
+.checks strong svg {
+  color: var(--green-bright);
+  animation: checkPop 380ms var(--ease-spring) both; animation-delay: inherit;
+}
+.checks .warm strong svg { color: var(--clay); }
 
-.comparison { display: grid; grid-template-columns: 0.92fr 1.08fr; }
+/* Equal columns. A comparison whose two halves are set at different
+   widths and different sizes is not a comparison — the reader cannot
+   tell whether a line broke differently because the words changed or
+   because the column did. */
+.comparison { display: grid; grid-template-columns: 1fr 1fr; align-items: stretch; }
 .comparison > article {
-  position: relative; min-height: 400px;
+  position: relative; min-height: 0;
   padding: var(--s5) var(--s5) var(--s6);
   overflow: hidden;
 }
@@ -670,15 +692,23 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
   color: var(--ink-3); font-family: var(--font-mono);
   font-size: var(--t-2xs); letter-spacing: .1em; text-transform: uppercase;
 }
-.panel-label > span:first-child { color: var(--ink); font-weight: 700; }
+.panel-label > span:first-child {
+  position: relative; color: var(--ink); font-weight: 700;
+}
+/* The rewritten side is the one being judged: it gets the rule under
+   its name, and the panel gets the light ground. */
+.humanized-panel .panel-label { border-bottom-color: var(--green-bright); }
 .humanized-panel .panel-label > span:first-child { color: var(--green); }
 
 .comparison article > p {
   margin: 0; font-family: var(--font-read);
-  font-size: var(--t-base); line-height: 1.78; letter-spacing: .002em;
+  font-size: var(--t-md); line-height: 1.72; letter-spacing: .002em;
+  text-wrap: pretty;
 }
+/* Both panels are set identically; the ground and the label carry the
+   difference, so the only visible change is the writing itself. */
 .comparison > article:first-child > p { color: var(--ink-2); }
-.humanized-panel > p { font-size: var(--t-md); color: var(--ink); }
+.humanized-panel > p { color: var(--ink); }
 
 /* --- diff & fact marks -------------------------------------
    Every mark is carried by shape as well as colour: a cut is
@@ -717,17 +747,19 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .pending-text { color: var(--ink-3); font-style: italic; }
 .comparison article > p.panel-note {
   margin: var(--s5) 0 0; padding-top: var(--s3);
-  border-top: 1px dashed var(--line);
-  color: var(--ink-3); font-family: var(--font-mono);
-  font-size: var(--t-2xs); line-height: 1.7; letter-spacing: .04em;
-  text-transform: uppercase;
+  max-width: 46ch;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3); font-family: var(--font-ui);
+  font-size: var(--t-xs); line-height: 1.55; letter-spacing: 0;
+  text-transform: none;
 }
 
-/* ACT-04 + ACT-08 evidence band. The marks name themselves, and the
-   facts the product held still are listed rather than implied. */
+/* ACT-04 + ACT-08 evidence rail. The claim reads first — these exact
+   facts came through untouched — and the colour key trails it quietly,
+   because a key is how to read the proof, not the proof. */
 .evidence {
-  display: grid; grid-template-columns: auto minmax(0, 1fr);
-  align-items: start; gap: 0 var(--s6);
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center; gap: var(--s3) var(--s6);
   padding: var(--s4) var(--s5);
   border-top: 1px solid var(--line-soft);
   background: var(--paper-sunken);
@@ -743,43 +775,62 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .diff-legend .k-add { background: var(--mark-add-rule); }
 .diff-legend .k-fact { background: var(--mark-fact-rule); }
 
+/* The withheld remainder as shape only: enough to see that the rewrite
+   continues, never enough to read. It fades out downward so it reads as
+   text going out of focus rather than as a loading skeleton. */
 .locked-copy {
-  margin-top: var(--s5); display: flex; flex-wrap: wrap; gap: 12px 7px;
-  opacity: .2; filter: blur(2px); user-select: none;
+  margin-top: var(--s4); display: flex; flex-wrap: wrap; gap: 13px 7px;
+  max-height: 150px; overflow: hidden;
+  opacity: .22; filter: blur(2.5px); user-select: none;
+  -webkit-mask-image: linear-gradient(var(--ink) 25%, transparent);
+  mask-image: linear-gradient(var(--ink) 25%, transparent);
 }
 .locked-copy span { height: 9px; border-radius: 999px; background: var(--ink); }
 
-/* The paywall sits *after* the visible rewrite, never on top of it.
-   An overlay would cover the one thing the visitor came to judge —
-   docs/ACTIVATION.md's AHA — in order to sell it. */
+/* The paywall sits *after* the visible rewrite and after the evidence —
+   never on top of either. An overlay, or a centred poster inside the
+   rewritten panel, would cover the one thing the visitor came to judge
+   (docs/ACTIVATION.md's AHA) in order to sell it. This is a footer to a
+   decision the visitor has already been given everything to make:
+   what is withheld on the left, the price and its full terms on the
+   right, in one band the width of the result. */
 .unlock-card {
-  position: relative; margin-top: var(--s6);
-  padding: var(--s6) var(--s5) var(--s5);
-  border: 1px solid var(--line-strong); border-radius: var(--radius-md);
+  position: relative;
+  padding: var(--s5);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+  column-gap: var(--s7); row-gap: var(--s2);
+  align-items: center;
+  border-top: 1px solid var(--line-soft);
   background: var(--surface);
-  text-align: center; box-shadow: var(--e1);
-  animation: rise var(--dur-slow) var(--ease-fly) both; animation-delay: 200ms;
-}
-.unlock-card .lock {
-  position: absolute; top: 0; left: 50%; translate: -50% -50%;
-  width: 32px; height: 32px; display: grid; place-items: center;
-  border: 1px solid var(--line-strong); border-radius: 50%;
-  background: var(--surface); color: var(--clay);
-  animation: lockPulse 2.6s ease-in-out infinite;
+  animation: rise var(--dur-base) var(--ease-fly) both; animation-delay: 180ms;
 }
 .unlock-card strong {
-  display: block; font-family: var(--font-display); font-weight: 400;
-  font-size: var(--t-xl); letter-spacing: -.02em;
+  grid-column: 1; grid-row: 1;
+  display: flex; align-items: center; gap: var(--s3);
+  font-family: var(--font-display); font-weight: 400;
+  font-size: var(--t-xl); letter-spacing: -.02em; line-height: 1.15;
+}
+.unlock-card .lock {
+  flex: none;
+  width: 26px; height: 26px; display: grid; place-items: center;
+  border: 1px solid color-mix(in srgb, var(--clay) 34%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--clay) 9%, transparent);
+  color: var(--clay);
 }
 .unlock-card > p {
-  margin: var(--s2) auto var(--s4); max-width: 42ch;
-  color: var(--ink-2); font-size: var(--t-sm); line-height: 1.5;
+  grid-column: 1; grid-row: 2;
+  margin: 0; max-width: 48ch;
+  color: var(--ink-2); font-size: var(--t-sm); line-height: 1.55;
 }
 .unlock-card button {
-  position: relative; width: 100%; padding: 14px;
+  grid-column: 2; grid-row: 1;
+  position: relative; width: 100%; padding: 14px 16px;
   border: 0; border-radius: var(--radius-sm);
   background: linear-gradient(158deg, #b8491d, #93380f);
-  color: #fff8f3;             /* 5.1:1 → 7.2:1 across the gradient */ font-size: var(--t-base); font-weight: 650; letter-spacing: -.015em;
+  color: #fff8f3;             /* 5.1:1 → 7.2:1 across the gradient */
+  font-size: var(--t-base); font-weight: 650; letter-spacing: -.015em;
   cursor: pointer; overflow: hidden;
   box-shadow: 0 3px 0 #6b2a0d;
   transition: translate var(--dur-fast) var(--ease-spring), box-shadow var(--dur-fast) var(--ease-out);
@@ -789,17 +840,20 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .unlock-card button:disabled,
 .unlock-card button[aria-disabled="true"] { cursor: not-allowed; filter: saturate(.5); opacity: .7; box-shadow: none; }
 .unlock-terms {
-  display: block; margin-top: var(--s3);
-  color: var(--ink-3); font-size: var(--t-xs); line-height: 1.45;
+  grid-column: 2; grid-row: 2;
+  display: block;
+  color: var(--ink-3); font-size: var(--t-xs); line-height: 1.5;
+  text-wrap: pretty;
 }
 .unlock-card small[role="alert"] {
-  display: block; margin-top: var(--s3);
+  grid-column: 1 / -1;
+  display: block; margin-top: var(--s2);
   color: var(--mark-cut-ink); font-size: var(--t-xs); font-weight: 500;
 }
 
 .protected-note {
-  margin: 0; justify-self: end;
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+  margin: 0; min-width: 0;
+  display: flex; flex-wrap: wrap; align-items: center;
   gap: var(--s2) var(--s3);
   color: var(--ink-2); font-size: var(--t-sm);
   animation: rise var(--dur-base) var(--ease-out) both; animation-delay: 240ms;
@@ -810,12 +864,16 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 }
 .protected-note b svg { color: var(--green); }
 .protected-note ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+/* The chips carry the visitor's own literal strings, so they are set
+   in mono at the same size as the marks in the panel above and are
+   never truncated by CSS — an elided fact is not evidence. */
 .protected-note li {
-  padding: 3px 9px; border-radius: 999px;
+  max-width: 100%; padding: 3px 9px; border-radius: 999px;
   border: 1px solid var(--mark-fact-rule);
   background: var(--mark-fact-bg);
   color: var(--mark-fact-ink);
   font-family: var(--font-mono); font-size: var(--t-2xs); letter-spacing: .02em;
+  overflow-wrap: anywhere;
 }
 .next-action {
   display: inline-flex; align-items: center; gap: var(--s2);
@@ -837,14 +895,17 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 
 .how {
   max-width: var(--container); margin: 0 auto;
-  padding: var(--s8) var(--gutter) var(--s9);
-  display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: var(--s9);
-  align-items: start;
+  padding: var(--s8) var(--gutter);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--s8);
+  /* Centred, not sticky-to-top: with three short items a top-aligned
+     heading left ~320px of empty column under it, which reads as a
+     layout fault rather than as air. */
+  align-items: center;
 }
-.section-intro { position: sticky; top: 108px; }
 .section-intro h2, .pricing-intro h2 {
   font-family: var(--font-display); font-weight: 400;
-  font-size: var(--t-3xl); line-height: 1.02; letter-spacing: -.028em;
+  font-size: var(--t-3xl); line-height: 1.04; letter-spacing: -.028em;
+  text-wrap: balance;
 }
 .how-grid { display: grid; border-top: 1px solid var(--line-strong); }
 .how-grid article {
@@ -870,17 +931,12 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 
 .pricing {
   position: relative;
-  padding: var(--s9) max(var(--gutter), calc((100vw - var(--container)) / 2));
-  display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: var(--s9);
+  padding: var(--s8) max(var(--gutter), calc((100vw - var(--container)) / 2));
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--s8);
   align-items: center;
   background: linear-gradient(168deg, var(--band-2), var(--band));
   color: var(--band-ink);
   overflow: clip;
-}
-.pricing::before {
-  content: ""; position: absolute; z-index: 0;
-  width: 520px; height: 520px; right: -140px; bottom: -200px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 255, 255, .07), transparent 68%);
 }
 .pricing > * { position: relative; z-index: 1; }
 .pricing .eyebrow { color: var(--band-accent); }
@@ -979,6 +1035,83 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .unlock-terms a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 
 /* ============================================================
+   LEGAL DOCUMENTS (/privacy, /terms)
+   ------------------------------------------------------------
+   Both pages used to carry a near-identical inline <style> block
+   with hard-coded light backgrounds, so in dark mode the draft
+   notices rendered light ink on a #fdf1e8 card at 1.1:1. One
+   token-driven rule for both, theme-aware by construction.
+   ============================================================ */
+
+.legal-doc {
+  max-width: 720px; margin: 0 auto;
+  padding: var(--s8) var(--gutter) var(--s9);
+  color: var(--ink);
+}
+.legal-doc a {
+  color: var(--green); text-decoration: underline; text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--green) 40%, transparent);
+}
+.legal-doc a:hover { text-decoration-color: currentColor; }
+.legal-doc .back-link {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  margin-bottom: var(--s6);
+  color: var(--ink-3); font-family: var(--font-mono);
+  font-size: var(--t-2xs); letter-spacing: .12em; text-transform: uppercase;
+  text-decoration: none;
+}
+.legal-doc .back-link:hover { color: var(--ink); }
+.legal-doc h1 {
+  margin: 0 0 var(--s2);
+  font-family: var(--font-display); font-weight: 400; font-size: var(--t-3xl);
+  line-height: 1.02; letter-spacing: -.028em;
+}
+.legal-doc .updated {
+  margin: 0 0 var(--s6);
+  color: var(--ink-3); font-family: var(--font-mono);
+  font-size: var(--t-2xs); letter-spacing: .1em; text-transform: uppercase;
+}
+.legal-doc section { margin-bottom: var(--s6); }
+.legal-doc h2 {
+  margin: 0 0 var(--s3);
+  font-size: var(--t-lg); font-weight: 600; letter-spacing: -.025em;
+}
+.legal-doc p, .legal-doc li {
+  margin: 0 0 var(--s3);
+  color: var(--ink-2); font-size: var(--t-base); line-height: 1.68;
+}
+/* Tailwind preflight strips list markers; a legal document's lists have
+   to read as lists. */
+.legal-doc ul { margin: 0 0 var(--s3); padding-left: var(--s5); list-style: disc; }
+.legal-doc li::marker { color: var(--ink-3); }
+.legal-doc li { margin-bottom: var(--s2); }
+/* Unresolved sections are marked as unresolved, in both themes, rather
+   than dressed to look finished. */
+.legal-doc .notice, .legal-doc .pending {
+  padding: var(--s4) var(--s5); margin-top: var(--s3);
+  background: var(--notice-bg);
+  color: var(--ink);
+  font-size: var(--t-sm); line-height: 1.6;
+}
+.legal-doc .notice {
+  margin: 0 0 var(--s7);
+  border-left: 3px solid var(--clay);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.legal-doc .pending {
+  border: 1px dashed color-mix(in srgb, var(--clay) 55%, transparent);
+  border-radius: var(--radius-sm);
+}
+.legal-doc .notice strong, .legal-doc .pending strong { color: var(--clay); font-weight: 700; }
+.legal-doc .notice p:last-child, .legal-doc .pending p:last-child { margin-bottom: 0; }
+.legal-doc > footer {
+  display: block;
+  margin-top: var(--s8); padding: var(--s5) 0 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3); font-size: var(--t-sm); line-height: 1.6;
+}
+
+/* ============================================================
    FOOTER
    ============================================================ */
 
@@ -1002,8 +1135,14 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   .stage { grid-template-columns: 1fr; gap: var(--s7); padding-bottom: var(--s8); align-items: start; }
   .hero-copy { max-width: 56ch; }
   .trust-line { grid-auto-flow: column; grid-template-columns: none; justify-content: start; gap: var(--s5); }
-  .how, .pricing { grid-template-columns: 1fr; gap: var(--s6); }
-  .section-intro { position: static; }
+  .how, .pricing { grid-template-columns: 1fr; gap: var(--s6); align-items: start; }
+}
+
+@media (max-width: 980px) {
+  .unlock-card { grid-template-columns: minmax(0, 1fr); row-gap: var(--s3); }
+  .unlock-card strong, .unlock-card > p,
+  .unlock-card button, .unlock-card .unlock-terms { grid-column: 1; grid-row: auto; }
+  .unlock-card button { margin-top: var(--s2); }
 }
 
 @media (max-width: 860px) {
@@ -1014,6 +1153,7 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
     animation-name: rise;
   }
   .comparison > article:last-child { animation-name: rise; padding-bottom: var(--s6); }
+  .evidence { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 760px) {
@@ -1029,14 +1169,11 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   .result-heading > p { text-align: left; max-width: none; }
   textarea { min-height: 210px; padding: var(--s5) var(--s4); font-size: var(--t-md); }
   .error, .status-line { padding: var(--s3) var(--s4); }
-  .checks { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: minmax(0, 1fr); }
-  .checks article { padding: var(--s3) var(--s4); border-right: 0; border-bottom: 1px solid var(--line-soft); }
-  .checks article:last-child { border-bottom: 0; }
+  .checks { gap: var(--s2) var(--s5); padding: var(--s3) var(--s4); }
+  .checks article { gap: var(--s2); }
   .comparison > article { padding: var(--s5) var(--s4); }
   .unlock-card { padding: var(--s4); }
   .evidence { grid-template-columns: 1fr; gap: var(--s3); padding: var(--s4); }
-  .protected-note { justify-self: start; justify-content: flex-start; }
-  .diff-legend { order: 2; }
   .no-change-note { padding: var(--s5) var(--s4) var(--s6); }
   .billing-strip { padding: var(--s6) var(--gutter); }
   .billing-strip .manage-billing { width: 100%; }

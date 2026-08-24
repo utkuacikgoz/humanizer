@@ -5,7 +5,7 @@ import Link from "next/link";
 import { MODES, productConfig } from "@/src/config/product";
 import { pricingConfig } from "@/src/config/pricing";
 import { track } from "@/src/lib/analytics";
-import { improvementLabel, shouldOfferUnlock } from "@/src/lib/preview-projection";
+import { improvementLabel, MIN_PAYWALLABLE_INPUT_WORDS, shouldOfferUnlock } from "@/src/lib/preview-projection";
 import { subscriptionDisclosure } from "@/src/lib/subscription-disclosure";
 import { ManageBilling } from "@/src/components/manage-billing";
 import { MarkedText, describeMarks, diffRewrite, selectDisplayFacts } from "@/src/components/rewrite-marks";
@@ -138,23 +138,6 @@ export default function Home() {
     resultHeadingRef.current?.focus();
   }, [result]);
 
-  useEffect(() => {
-    document.documentElement.classList.add("motion-ready");
-    const targets = document.querySelectorAll<HTMLElement>("[data-reveal]");
-    if (!targets.length) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          entry.target.classList.add("is-visible");
-          observer.unobserve(entry.target);
-        }
-      },
-      { threshold: 0.15, rootMargin: "0px 0px -60px 0px" },
-    );
-    targets.forEach((target) => observer.observe(target));
-    return () => observer.disconnect();
-  }, []);
   const structuredData = {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
@@ -177,8 +160,12 @@ export default function Home() {
   async function humanize() {
     if (status === "working") return;
     setError("");
-    if (wordCount < 12) {
-      setError("Add a little more context. At least 12 words works best.");
+    // The server enforces MIN_PAYWALLABLE_INPUT_WORDS as a paywall-integrity
+    // control (SEC-02). The client used to hardcode 12, so a 12-24 word draft
+    // passed this check and came back as a server error the visitor could not
+    // have predicted from anything on screen. One source of truth.
+    if (wordCount < MIN_PAYWALLABLE_INPUT_WORDS) {
+      setError(`Add a little more context. At least ${MIN_PAYWALLABLE_INPUT_WORDS} words works best.`);
       return;
     }
     if (wordCount > 300) {
@@ -280,7 +267,16 @@ export default function Home() {
               <h2 id="workspace-title">Paste your text</h2>
             </div>
             <div className="topline-meta">
-              <p className="word-meter"><span className={wordCount > 300 ? "over" : ""}>{wordCount}</span> / 300 words</p>
+              {/* Below the minimum the meter counts toward the minimum, not
+                  toward the ceiling: the ceiling is not the constraint the
+                  visitor is failing, and a bare "8 / 300" reads as plenty. */}
+              <p className="word-meter">
+                {wordCount < MIN_PAYWALLABLE_INPUT_WORDS ? (
+                  <><span className="under">{wordCount}</span> / {MIN_PAYWALLABLE_INPUT_WORDS} words</>
+                ) : (
+                  <><span className={wordCount > 300 ? "over" : ""}>{wordCount}</span> / 300 words</>
+                )}
+              </p>
               <button className="sample-button" type="button" onClick={() => { setText(SAMPLE_TEXT); setResult(null); }}>Try an example</button>
             </div>
           </div>
@@ -355,14 +351,17 @@ export default function Home() {
               <div><span className="step-number">02</span><h2 ref={resultHeadingRef} tabIndex={-1}>Your rewrite is ready</h2></div>
               <p>We rewrote the awkward parts and left the meaning alone.</p>
             </div>
+            {/* One ledger line, not three dashboard tiles: these are three
+                readings taken on one rewrite, so they read as one row of
+                findings. */}
             <div className="checks">
-              <article><span className="check-icon"><IconCheck /></span><div><small>Naturalness</small><strong>{result.naturalness}</strong></div></article>
-              <article><span className="check-icon"><IconCheck /></span><div><small>Meaning preservation</small><strong>{result.meaningPreservation}</strong></div></article>
+              <article><small>Naturalness</small><strong><IconCheck />{result.naturalness}</strong></article>
+              <article><small>Meaning preservation</small><strong><IconCheck />{result.meaningPreservation}</strong></article>
               {/* ACT-02: the measured count, correctly pluralized, and shown
                   only when there is one to report — never a floored or
                   zero badge sitting next to a price. */}
               {result.issuesImproved > 0 ? (
-                <article><span className="check-icon warm"><IconArrow /></span><div><small>Changes</small><strong>{improvementLabel(result.issuesImproved)}</strong></div></article>
+                <article className="warm"><small>Changes</small><strong><IconArrow />{improvementLabel(result.issuesImproved)}</strong></article>
               ) : null}
             </div>
             <div className="comparison">
@@ -377,47 +376,24 @@ export default function Home() {
                 <div className="panel-label"><span>Humanized</span><small>{modeLabel}</small></div>
                 <p className="sr-only">{describeMarks(marks.result)}</p>
                 <p><MarkedText segments={marks.result} facts={marks.facts} /></p>
+                {/* The withheld remainder, shown as shape only. It stays
+                    inside the panel because it is evidence about *this*
+                    rewrite — the offer to buy it does not. */}
                 {shouldOfferUnlock(result) ? (
-                  <>
-                    <div className="locked-copy" aria-hidden="true">
-                      {Array.from({ length: Math.min(32, Math.max(10, result.hiddenWordCount)) }, (_, index) => (
-                        <span key={index} style={{ width: `${38 + ((index * 17) % 48)}px` }} />
-                      ))}
-                    </div>
-                    <div className="unlock-card">
-                      <span className="lock" aria-hidden="true"><IconLock /></span>
-                      <strong>There’s more to this rewrite</strong>
-                      <p>{result.hiddenWordCount} more words of this rewrite are ready. Unlock the complete result.</p>
-                      {result.capability ? (
-                        <button type="button" onClick={() => unlock(starterPlan.id)} aria-disabled={unlockStatus === "working"}>
-                          {unlockStatus === "working" ? "Redirecting to checkout…" : `Unlock full rewrite for $${starterPlan.monthlyPrice}/mo`}
-                        </button>
-                      ) : (
-                        <button type="button" disabled title="Checkout isn't available for this result yet">Unlock full rewrite for ${starterPlan.monthlyPrice}/mo</button>
-                      )}
-                      {/* ACT-10: the whole offer, before the click — amount,
-                          that it recurs, the included monthly allowance, and
-                          the cancellation path (ACT-09). No countdown, no
-                          scarcity, no preselected upsell. */}
-                      <small className="unlock-terms">
-                        {subscriptionDisclosure(starterPlan)}{" "}
-                        <a href="#manage-billing">Cancel anytime</a> — no cancellation fee.
-                      </small>
-                      {unlockStatus === "error" ? <small role="alert">{unlockError}</small> : null}
-                    </div>
-                  </>
+                  <div className="locked-copy" aria-hidden="true">
+                    {Array.from({ length: Math.min(56, Math.max(10, result.hiddenWordCount)) }, (_, index) => (
+                      <span key={index} style={{ width: `${38 + ((index * 17) % 48)}px` }} />
+                    ))}
+                  </div>
                 ) : null}
               </article>
             </div>
 
             {/* ACT-04 + ACT-08. The marks explain themselves, and the facts
-                the product held still are named rather than implied. */}
+                the product held still are named rather than implied. The
+                proof reads first and the key second: which facts survived is
+                the claim, the colour key is only how to read it. */}
             <div className="evidence">
-              <p className="diff-legend" aria-hidden="true">
-                <span><i className="k-cut" /> Cut</span>
-                <span><i className="k-add" /> Rewritten</span>
-                <span><i className="k-fact" /> Held exactly</span>
-              </p>
               {marks.facts.length ? (
                 <div className="protected-note">
                   <b><IconShield /> Held exactly as you wrote them</b>
@@ -436,27 +412,60 @@ export default function Home() {
                   <em>This passage has no names, dates, numbers, citations or URLs to protect. Paste a draft that does and they will be marked here.</em>
                 </div>
               )}
+              <p className="diff-legend" aria-hidden="true">
+                <span><i className="k-cut" /> Cut</span>
+                <span><i className="k-add" /> Rewritten</span>
+                <span><i className="k-fact" /> Held exactly</span>
+              </p>
             </div>
+
+            {/* The offer sits after the rewrite and after the evidence, at the
+                full width of the result — not stacked on top of the one
+                paragraph the visitor came to judge, and not dressed as a
+                poster. It is a footer to a decision the visitor has already
+                been given everything to make. */}
+            {shouldOfferUnlock(result) ? (
+              <div className="unlock-card">
+                <strong><span className="lock" aria-hidden="true"><IconLock /></span>There’s more to this rewrite</strong>
+                <p>{result.hiddenWordCount} more words of this rewrite are ready — the same protected facts, checked the same way.</p>
+                {result.capability ? (
+                  <button type="button" onClick={() => unlock(starterPlan.id)} aria-disabled={unlockStatus === "working"}>
+                    {unlockStatus === "working" ? "Redirecting to checkout…" : `Unlock full rewrite for $${starterPlan.monthlyPrice}/mo`}
+                  </button>
+                ) : (
+                  <button type="button" disabled title="Checkout isn't available for this result yet">Unlock full rewrite for ${starterPlan.monthlyPrice}/mo</button>
+                )}
+                {/* ACT-10: the whole offer, before the click — amount, that it
+                    recurs, the included monthly allowance, and the cancellation
+                    path (ACT-09). No countdown, no scarcity, no preselected
+                    upsell. */}
+                <small className="unlock-terms">
+                  {subscriptionDisclosure(starterPlan)}{" "}
+                  <a href="#manage-billing">Cancel anytime</a> — no cancellation fee.
+                </small>
+                {unlockStatus === "error" ? <small role="alert">{unlockError}</small> : null}
+              </div>
+            ) : null}
           </section>
         ) : null}
       </div>
 
       <section className="how" id="how-it-works">
-        <div className="section-intro" data-reveal><p className="eyebrow"><span /> How it works</p><h2>Rewrite less.<br />Protect more.</h2></div>
+        <div className="section-intro"><p className="eyebrow"><span /> How it works</p><h2>Rewrite less.<br />Protect more.</h2></div>
         <div className="how-grid">
-          <article data-reveal style={{ "--reveal-index": 0 } as React.CSSProperties}><b>01</b><h3>Find the stiff parts</h3><p>We flag robotic patterns, filler, repetition, and forced transitions instead of rewriting every sentence.</p></article>
-          <article data-reveal style={{ "--reveal-index": 1 } as React.CSSProperties}><b>02</b><h3>Protect what matters</h3><p>Names, numbers, dates, quotes, citations, URLs, and technical terms are tracked before anything changes.</p></article>
-          <article data-reveal style={{ "--reveal-index": 2 } as React.CSSProperties}><b>03</b><h3>Check the meaning</h3><p>The rewrite is compared with your original. If a claim changes, that section does not pass.</p></article>
+          <article><b>01</b><h3>Find the stiff parts</h3><p>We flag robotic patterns, filler, repetition, and forced transitions instead of rewriting every sentence.</p></article>
+          <article><b>02</b><h3>Protect what matters</h3><p>Names, numbers, dates, quotes, citations, URLs, and technical terms are tracked before anything changes.</p></article>
+          <article><b>03</b><h3>Check the meaning</h3><p>The rewrite is compared with your original. If a claim changes, that section does not pass.</p></article>
         </div>
       </section>
 
       <section className="pricing" id="pricing">
-        <div className="pricing-intro" data-reveal>
+        <div className="pricing-intro">
           <p className="eyebrow"><span /> Simple pricing</p>
           <h2>Try the quality.<br />Pay for the full result.</h2>
           <p>Every rewrite is checked before you see it. You only pay once you have read part of the result and judged it for yourself.</p>
         </div>
-        <article data-reveal style={{ "--reveal-index": 1 } as React.CSSProperties}>
+        <article>
           <div><span>{pricingConfig.plans.starter.name}</span><p>Everything you need to make drafts sound like you meant them.</p></div>
           <strong><sup>$</sup>{pricingConfig.plans.starter.monthlyPrice}<small>/ month</small></strong>
           <ul>{pricingConfig.plans.starter.features.map((feature) => <li key={feature}><IconCheck /> {feature}</li>)}</ul>
