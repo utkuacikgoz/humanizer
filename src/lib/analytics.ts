@@ -8,6 +8,9 @@ export const ANALYTICS_EVENTS = [
   "checkout_completed",
   "full_result_unlocked",
   "result_copied",
+  "repeat_preview",
+  // Paid retention only: the customer's second successful entitled rewrite.
+  // Anonymous repetition is `repeat_preview`, never this event.
   "second_humanization",
   "subscription_cancelled",
 ] as const;

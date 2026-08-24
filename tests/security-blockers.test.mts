@@ -39,15 +39,51 @@ test("SEC-02: the preview never contains the entire rewrite", () => {
 });
 
 test("SEC-02: a paywallable rewrite withholds at least the minimum", () => {
-  const split = projectPreview(words(200));
+  const split = projectPreview(`${words(80)}. ${words(120)}.`);
   assert.equal(split.paywallable, true);
   assert.ok(split.hiddenWordCount >= MIN_HIDDEN_WORDS);
   assert.ok(split.preview.length > 0);
 });
 
 test("SEC-02: hidden count plus visible count equals the whole rewrite", () => {
-  const split = projectPreview(words(100));
+  const rewrite = `${words(40)}. ${words(60)}.`;
+  const split = projectPreview(rewrite);
   assert.equal(split.preview.split(/\s+/).length + split.hiddenWordCount, 100);
+});
+
+test("ACT-05: a paywallable preview ends at the last complete sentence inside its safe budget", () => {
+  const first = "Clear writing helps every reader understand the important point quickly.";
+  const second = "A careful editor also removes vague filler and keeps each supporting detail precise.";
+  const third = "The complete rewrite still contains enough additional material to make the locked remainder meaningful for a paying customer.";
+  const split = projectPreview(`${first} ${second} ${third}`);
+
+  assert.equal(split.paywallable, true);
+  assert.equal(split.preview, first);
+  assert.match(split.preview, /[.!?]$/);
+  assert.ok(split.hiddenWordCount >= MIN_HIDDEN_WORDS);
+});
+
+test("ACT-05: sentence-boundary projection preserves original punctuation and whitespace within the visible sentence", () => {
+  const first = "A careful rewrite keeps 2026 figures, names, and deliberate punctuation intact!";
+  const remainder = "The rest of this rewritten passage contains several more useful details for readers who decide to unlock the complete result today.";
+  const split = projectPreview(`  ${first}\n\n${remainder}`);
+
+  assert.equal(split.paywallable, true);
+  assert.equal(split.preview, first);
+  assert.ok(split.hiddenWordCount >= MIN_HIDDEN_WORDS);
+});
+
+test("ACT-05: no preview is exposed when the first complete sentence exceeds the safe visible budget", () => {
+  const longFirstSentence = `${words(35)}.`;
+  const shortSecondSentence = `${words(15)}.`;
+  const split = projectPreview(`${longFirstSentence} ${shortSecondSentence}`);
+
+  assert.deepEqual(split, { preview: "", hiddenWordCount: 0, paywallable: false });
+});
+
+test("ACT-05: an unterminated prefix is never presented as a complete-sentence preview", () => {
+  const split = projectPreview(words(100));
+  assert.deepEqual(split, { preview: "", hiddenWordCount: 0, paywallable: false });
 });
 
 test("SEC-02: chunking a document into minimum-length windows never reconstructs it", () => {

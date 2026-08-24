@@ -13,6 +13,7 @@ test("defines the complete privacy-safe V1 funnel vocabulary", () => {
     "checkout_completed",
     "full_result_unlocked",
     "result_copied",
+    "repeat_preview",
     "second_humanization",
     "subscription_cancelled",
   ]);

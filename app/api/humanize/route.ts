@@ -6,7 +6,10 @@ import {
   previewGuardClientKey,
 } from "@/src/lib/preview-request-guard";
 import { isMateriallyUnchanged, MIN_PAYWALLABLE_INPUT_WORDS, projectPreview } from "@/src/lib/preview-projection";
-import type { PreviewProjection } from "../../../db/repository";
+import { resolveChatGPTUserFromHeaders } from "@/src/lib/chatgpt-identity";
+import { commitPaidUsage, releasePaidUsage, reservePaidUsage } from "@/src/lib/paid-usage";
+import type { PaidUsageReservation } from "@/src/lib/paid-usage";
+import type { AppDatabase, PreviewProjection } from "../../../db/repository";
 
 const allowedModes = new Set<WritingMode>(["natural", "professional", "academic", "casual"]);
 const pipeline = createHumanizationPipeline({ config: { maxInputCharacters: 10_000 } });
@@ -26,7 +29,18 @@ type UnchangedPayload = {
   unchanged: true;
 };
 
-type PreviewPayload =
+type PaidRewritePayload = {
+  original: string;
+  result: string;
+  paid: true;
+  issuesImproved: number;
+  naturalness: "Strong" | "Good";
+  meaningPreservation: "High" | "Review needed";
+  protectedItems: string[];
+  usage: { consumed: number; allowance: number; remaining: number; periodEnd: string; paidUseCount: number };
+};
+
+type HumanizePayload =
   | (PreviewProjection & {
       original: string;
       unchanged?: false;
@@ -34,7 +48,16 @@ type PreviewPayload =
       capability?: string;
       capabilityExpiresAt?: string;
     })
-  | UnchangedPayload;
+  | UnchangedPayload
+  | PaidRewritePayload;
+
+class QuotaExceededError extends Error {
+  constructor(readonly usage: { consumed: number; allowance: number; remaining: number; periodEnd: string }) {
+    super("Monthly word allowance reached.");
+  }
+}
+
+class PaidUsageUnavailableError extends Error {}
 
 /**
  * Best-effort persistence: durably stores the succeeded job and issues an
@@ -98,10 +121,10 @@ async function tryPersist(input: {
   }
 }
 
-const localRequestGuard = new PreviewRequestGuard<PreviewPayload>();
+const localRequestGuard = new PreviewRequestGuard<HumanizePayload>();
 
 type RuntimeGuard = {
-  guard: PreviewRequestGuard<PreviewPayload> | DistributedPreviewRequestGuard<PreviewPayload>;
+  guard: PreviewRequestGuard<HumanizePayload> | DistributedPreviewRequestGuard<HumanizePayload>;
   secret?: string;
   distributed: boolean;
 };
@@ -114,7 +137,7 @@ async function requestGuardForRuntime(): Promise<RuntimeGuard | null> {
     const explicitlyNonProduction = environment === "development" || environment === "local" || environment === "test";
     const secret = runtime.PREVIEW_GUARD_SECRET?.trim();
     if (runtime.DB && secret) {
-      return { guard: new DistributedPreviewRequestGuard<PreviewPayload>(runtime.DB, secret), secret, distributed: true };
+      return { guard: new DistributedPreviewRequestGuard<HumanizePayload>(runtime.DB, secret), secret, distributed: true };
     }
     // A real Workers runtime is production-like unless it explicitly says
     // otherwise. Missing shared storage or its HMAC/encryption secret fails
@@ -237,7 +260,10 @@ export async function POST(request: Request) {
         { status: 503, headers: { "cache-control": "no-store", "retry-after": "2" } },
       );
     }
-    const clientId = trustedIp ?? "local-test-runtime";
+    const authenticatedUser = resolveChatGPTUserFromHeaders(request);
+    const clientId = trustedIp
+      ? authenticatedUser ? `${trustedIp}\0${authenticatedUser.userId}` : trustedIp
+      : "local-test-runtime";
     const contentFingerprint = await fingerprint(text, mode as WritingMode);
     const guarded = await runtimeGuard.guard.run({
       clientId,
@@ -246,7 +272,33 @@ export async function POST(request: Request) {
       execute: async () => {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(new DOMException("Preview deadline exceeded.", "TimeoutError")), MAX_PROCESSING_MS);
+        let paidDb: AppDatabase | null = null;
+        let paidReservation: PaidUsageReservation | null = null;
         try {
+          if (authenticatedUser) {
+            try {
+              const { getDb } = await import("../../../db/index");
+              paidDb = getDb();
+              const admission = await reservePaidUsage(paidDb, {
+                externalSubject: authenticatedUser.userId,
+                idempotencyKey,
+                words: text.trim().split(/\s+/).length,
+              });
+              if (admission.kind === "quota-exceeded") {
+                throw new QuotaExceededError({
+                  consumed: admission.consumed,
+                  allowance: admission.allowance,
+                  remaining: admission.remaining,
+                  periodEnd: admission.periodEnd.toISOString(),
+                });
+              }
+              if (admission.kind === "reserved") paidReservation = admission.reservation;
+            } catch (error) {
+              if (error instanceof QuotaExceededError) throw error;
+              throw new PaidUsageUnavailableError("Paid usage verification is unavailable.");
+            }
+          }
+
           const result = await pipeline.humanize({ text, mode: mode as WritingMode, signal: controller.signal });
 
           // ACT-01: never truncate, price, or persist a rewrite that did
@@ -256,7 +308,26 @@ export async function POST(request: Request) {
           // persistence, or capability minting happens, so no unlock CTA
           // can exist for this outcome anywhere downstream.
           if (isMateriallyUnchanged(result.original, result.text) || result.improvements === 0) {
+            if (paidDb && paidReservation) await releasePaidUsage(paidDb, paidReservation);
             return { original: result.original, unchanged: true } satisfies UnchangedPayload;
+          }
+
+          const evidence = {
+            issuesImproved: result.improvements,
+            naturalness: result.evaluation.scores.naturalness >= 0.7 ? "Strong" as const : "Good" as const,
+            meaningPreservation: result.verification.passed ? "High" as const : "Review needed" as const,
+            protectedItems: result.protectedContent.map((item) => item.value),
+          };
+
+          if (paidDb && paidReservation) {
+            const usage = await commitPaidUsage(paidDb, paidReservation, result.metrics.successfulWords);
+            return {
+              original: result.original,
+              result: result.text,
+              paid: true,
+              ...evidence,
+              usage,
+            } satisfies PaidRewritePayload;
           }
 
           // SEC-02: a rewrite too short to withhold a meaningful remainder
@@ -279,10 +350,7 @@ export async function POST(request: Request) {
             // A floored "1 improvement" is a fabricated evidence claim
             // (docs/MONETIZATION.md), and it was the mechanism that made
             // the ACT-01 no-op look legitimate.
-            issuesImproved: result.improvements,
-            naturalness: result.evaluation.scores.naturalness >= 0.7 ? "Strong" : "Good",
-            meaningPreservation: result.verification.passed ? "High" : "Review needed",
-            protectedItems: result.protectedContent.map((item) => item.value),
+            ...evidence,
           };
           const persisted = await tryPersist({
             mode: mode as WritingMode,
@@ -297,7 +365,12 @@ export async function POST(request: Request) {
             protectedContent: result.protectedContent,
             projection,
           });
-          return { original: result.original, ...projection, ...persisted } satisfies PreviewPayload;
+          return { original: result.original, ...projection, ...persisted } satisfies HumanizePayload;
+        } catch (error) {
+          if (paidDb && paidReservation) {
+            try { await releasePaidUsage(paidDb, paidReservation); } catch { /* fail closed below */ }
+          }
+          throw error;
         } finally {
           clearTimeout(timeout);
         }
@@ -316,6 +389,18 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    if (error instanceof QuotaExceededError) {
+      return Response.json(
+        { error: "You have used this month's word allowance.", usage: error.usage },
+        { status: 429, headers: { "cache-control": "no-store" } },
+      );
+    }
+    if (error instanceof PaidUsageUnavailableError) {
+      return Response.json(
+        { error: "Paid usage could not be verified. No usage was charged; please try again." },
+        { status: 503, headers: { "cache-control": "no-store", "retry-after": "2" } },
+      );
+    }
     if (error instanceof DOMException && error.name === "TimeoutError") {
       return Response.json({ error: "The preview took too long. No usage was charged; please try again." }, { status: 504, headers: { "cache-control": "no-store" } });
     }
