@@ -27,5 +27,9 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  // tests/e2e drives a system-wide Playwright install (not a project
+  // dependency, by design — CI has no browser and never runs these), so
+  // TypeScript cannot resolve `playwright` here. Typechecking it would
+  // fail the build on a module that is intentionally absent.
+  "exclude": ["node_modules", "tests/e2e"]
 }
