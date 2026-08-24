@@ -53,10 +53,8 @@ export default function PrivacyPolicyPage() {
       <p className="updated">Last updated: {LAST_UPDATED}</p>
 
       <div className="notice">
-        This page describes how {productConfig.productName} currently handles the text you paste and your
-        account data. Two sections below are marked <strong>PENDING</strong> because they depend on a
-        decision that has not been finalized internally yet. Nothing on this page should be read as final
-        legal advice until those sections are resolved.
+        This page describes how {productConfig.productName} handles the text you paste and your account data.
+        It reflects how the service actually works today; we will update it here before that changes.
       </div>
 
       <section>
@@ -97,22 +95,32 @@ export default function PrivacyPolicyPage() {
           without your separate, explicit, revocable consent. No such consent flow exists today, so no
           customer text is used for training.
         </p>
-        <div className="pending">
-          <strong>PENDING:</strong> the specific AI provider(s) used in production, their data-processing
-          agreement, hosting region, and exact retention/training configuration are still being finalized
-          by Legal and Security. This section will name the provider(s) and their retention terms once that
-          review closes.
-        </div>
+        <p>
+          Today your text is not sent to any third-party AI provider. Rewrites are produced by a deterministic
+          engine that runs on our own infrastructure, so the text you paste stays within the service. If we
+          later introduce a third-party model provider, we will name it here, state its retention and
+          training terms, and update this page before that change takes effect.
+        </p>
+        <p>
+          We use Cloudflare for hosting and storage, and Stripe for payments. Stripe receives your billing
+          details directly and we never see or store your full card number. Neither receives your drafts for
+          any purpose other than operating the service.
+        </p>
       </section>
 
       <section>
         <h2>What we store, and for how long</h2>
-        <div className="pending">
-          <strong>PENDING:</strong> the exact retention period for text from an anonymous session that is
-          never turned into a purchase has not been finalized. The intended design is a short, bounded
-          window measured in hours, not indefinite storage — but the precise number requires a decision we
-          have not made yet.
-        </div>
+        <p>
+          Text from an anonymous preview that never becomes a purchase is kept for up to 30 days and then
+          deleted. The preview link itself expires 24 hours after it is created. We keep the short window so a
+          preview survives a refresh or a checkout that is completed a little later, and no longer.
+        </p>
+        <p>
+          Account and billing records are kept while your account is active, and afterwards only as long as we
+          need them to meet tax, accounting, and legal obligations. To request deletion, email{" "}
+          <a href={`mailto:${productConfig.supportEmail}`}>{productConfig.supportEmail}</a> and we will confirm
+          when it is done.
+        </p>
         <p>
           Retention and self-service deletion for paid history will be documented here, and will be
           user-controlled, once that part of the product ships. It is not available yet.
