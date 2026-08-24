@@ -33,6 +33,36 @@ jobs:
 
       - run: npm ci
 
+      - name: Resolve the account that owns D1
+        if: ${{ env.CF_API_TOKEN != '' && env.CF_D1_ID != '' }}
+        run: |
+          configured_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/d1/database/$CF_D1_ID" \
+            --header "Authorization: Bearer $CF_API_TOKEN")"
+          if [ "$configured_status" = "200" ]; then
+            exit 0
+          fi
+
+          accounts="$(curl --fail-with-body --silent --show-error \
+            'https://api.cloudflare.com/client/v4/accounts?per_page=50' \
+            --header "Authorization: Bearer $CF_API_TOKEN")"
+          resolved=""
+          while IFS= read -r account_id; do
+            status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$CF_D1_ID" \
+              --header "Authorization: Bearer $CF_API_TOKEN")"
+            if [ "$status" = "200" ]; then
+              resolved="$account_id"
+              break
+            fi
+          done < <(printf '%s' "$accounts" | jq -r '.result[].id')
+
+          if [ -z "$resolved" ]; then
+            echo "::error::The Cloudflare token cannot access the configured D1 database in any visible account. Replace the token or D1 database ID."
+            exit 1
+          fi
+          echo "CF_ACCOUNT_ID=$resolved" >> "$GITHUB_ENV"
+
       # vinext generates dist/server/wrangler.json from vite.config.ts,
       # baking in D1_DATABASE_ID (see vite.config.ts).
       - run: npm run build
