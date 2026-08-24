@@ -22,6 +22,7 @@
   --ink: #12211a;            /* primary text        15.4:1 on paper */
   --ink-2: #4b5850;          /* secondary text       6.5:1 on paper */
   --ink-3: #6f7a71;          /* meta / disabled      4.6:1 on paper */
+  --muted: var(--ink-3);     /* compat alias: app/privacy, app/terms */
 
   /* --- brand ------------------------------------------------ */
   --green: #1f5a3d;          /* brand ink            7.2:1 on paper */
@@ -70,7 +71,7 @@
   --t-xl: clamp(21px, 1.9vw, 25px);
   --t-2xl: clamp(26px, 2.8vw, 34px);
   --t-3xl: clamp(32px, 4.4vw, 50px);
-  --t-display: clamp(38px, 5.9vw, 74px);
+  --t-display: clamp(37px, 4.9vw, 62px);
 
   /* --- spacing rhythm (4px base) ---------------------------- */
   --s1: 4px;
@@ -361,9 +362,9 @@ nav a:not(.sign-in):hover::after { right: 0; }
 .stage {
   position: relative;
   max-width: var(--container); margin: 0 auto;
-  padding: var(--s8) var(--gutter) var(--s9);
-  display: grid; gap: var(--s7) var(--s9);
-  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+  padding: var(--s8) var(--gutter) var(--s8);
+  display: grid; gap: var(--s7) var(--s8);
+  grid-template-columns: minmax(0, 0.88fr) minmax(0, 1.12fr);
   align-items: center;
 }
 .stage::before {
@@ -372,6 +373,11 @@ nav a:not(.sign-in):hover::after { right: 0; }
   border-radius: 50%; filter: blur(70px); opacity: .5;
   background: radial-gradient(circle, color-mix(in srgb, var(--green-bright) 26%, transparent), transparent 68%);
 }
+
+/* Single-column stage: the post-purchase surface has no pitch beside
+   it, only the result the customer just paid for. */
+.stage-single { grid-template-columns: minmax(0, 1fr); padding-top: var(--s7); }
+.stage-single .workspace { max-width: 940px; width: 100%; margin: 0 auto; }
 
 .hero { position: relative; }
 .hero h1 {
@@ -423,20 +429,17 @@ nav a:not(.sign-in):hover::after { right: 0; }
 .workspace:focus-within {
   box-shadow: var(--e1), 0 0 0 4px color-mix(in srgb, var(--green-bright) 16%, transparent);
 }
+/* The AHA lands inside the stage, spanning both columns directly under
+   the workspace that produced it — not in a separate band further down
+   the page where the visitor has to go looking for it. */
 .result {
-  max-width: var(--container);
-  margin: 0 auto var(--s9);
-  scroll-margin-top: var(--s9);
+  grid-column: 1 / -1;
+  align-self: start;
+  margin-top: var(--s4);
+  scroll-margin-top: 88px;
   animation: scaleIn var(--dur-slow) var(--ease-fly) both;
 }
 
-.panel-head {
-  min-height: 68px; padding: var(--s4) var(--s5);
-  display: flex; align-items: center; justify-content: space-between; gap: var(--s4);
-  border-bottom: 1px solid var(--line-soft);
-}
-.panel-head > div { display: flex; align-items: center; gap: var(--s3); min-width: 0; }
-.workspace-topline, .result-heading { composes: panel-head; }
 .workspace-topline, .result-heading {
   min-height: 68px; padding: var(--s4) var(--s5);
   display: flex; align-items: center; justify-content: space-between; gap: var(--s4);
@@ -501,7 +504,7 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
   animation: shimmer 1.3s linear infinite;
 }
 .word-meter {
-  color: var(--ink-3); font-family: var(--font-mono);
+  white-space: nowrap; color: var(--ink-3); font-family: var(--font-mono);
   font-size: var(--t-2xs); letter-spacing: .07em; text-transform: uppercase;
   transition: color var(--dur-fast) var(--ease-out);
 }
@@ -588,7 +591,7 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 /* Evidence strip: one row, first item weighted, hairline dividers.
    Deliberately not three identical cards. */
 .checks {
-  display: grid; grid-template-columns: repeat(3, 1fr);
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
   background: var(--surface);
   border-bottom: 1px solid var(--line-soft);
 }
@@ -682,15 +685,22 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .comparison ins mark.fact { box-shadow: inset 0 -1px 0 var(--mark-fact-rule); }
 .pending-text { color: var(--ink-3); opacity: .6; }
 
-.diff-legend {
-  display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4);
-  margin-top: var(--s5); padding-top: var(--s4);
+/* ACT-04 + ACT-08 evidence band. The marks name themselves, and the
+   facts the product held still are listed rather than implied. */
+.evidence {
+  display: grid; grid-template-columns: auto minmax(0, 1fr);
+  align-items: start; gap: 0 var(--s6);
+  padding: var(--s4) var(--s5);
   border-top: 1px solid var(--line-soft);
+  background: var(--paper-sunken);
+}
+.diff-legend {
+  margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4);
   color: var(--ink-3); font-family: var(--font-mono);
   font-size: var(--t-2xs); letter-spacing: .06em; text-transform: uppercase;
 }
-.diff-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.diff-legend i { width: 12px; height: 3px; border-radius: 2px; font-style: normal; }
+.diff-legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.diff-legend i { width: 13px; height: 3px; border-radius: 2px; font-style: normal; }
 .diff-legend .k-cut { background: var(--mark-cut-ink); }
 .diff-legend .k-add { background: var(--mark-add-rule); }
 .diff-legend .k-fact { background: var(--mark-fact-rule); }
@@ -701,18 +711,20 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 }
 .locked-copy span { height: 9px; border-radius: 999px; background: var(--ink); }
 
+/* The paywall sits *after* the visible rewrite, never on top of it.
+   An overlay would cover the one thing the visitor came to judge —
+   docs/ACTIVATION.md's AHA — in order to sell it. */
 .unlock-card {
-  position: absolute; left: var(--s5); right: var(--s5); bottom: var(--s5);
-  padding: var(--s5);
+  position: relative; margin-top: var(--s6);
+  padding: var(--s6) var(--s5) var(--s5);
   border: 1px solid var(--line-strong); border-radius: var(--radius-md);
-  background: var(--surface-veil);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  text-align: center; box-shadow: var(--e2);
+  background: var(--surface);
+  text-align: center; box-shadow: var(--e1);
   animation: rise var(--dur-slow) var(--ease-fly) both; animation-delay: 200ms;
 }
 .unlock-card .lock {
-  width: 30px; height: 30px; display: grid; place-items: center;
-  margin: calc(-1 * var(--s5) - 15px) auto var(--s3);
+  position: absolute; top: 0; left: 50%; translate: -50% -50%;
+  width: 32px; height: 32px; display: grid; place-items: center;
   border: 1px solid var(--line-strong); border-radius: 50%;
   background: var(--surface); color: var(--clay);
   animation: lockPulse 2.6s ease-in-out infinite;
@@ -748,10 +760,9 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 }
 
 .protected-note {
-  margin: 0; padding: var(--s4) var(--s5);
-  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3);
-  border-top: 1px solid var(--line-soft);
-  background: var(--surface);
+  margin: 0; justify-self: end;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+  gap: var(--s2) var(--s3);
   color: var(--ink-2); font-size: var(--t-sm);
   animation: rise var(--dur-base) var(--ease-out) both; animation-delay: 240ms;
 }
@@ -768,7 +779,19 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
   color: var(--mark-fact-ink);
   font-family: var(--font-mono); font-size: var(--t-2xs); letter-spacing: .02em;
 }
-.protected-note em { color: var(--ink-3); font-style: normal; font-size: var(--t-xs); }
+.next-action {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  padding: 10px 18px; border-radius: 999px;
+  border: 1px solid var(--line-strong); background: var(--surface);
+  color: var(--ink); font-size: var(--t-sm); font-weight: 600;
+  text-decoration: none;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              translate var(--dur-fast) var(--ease-spring);
+}
+.next-action:hover { background: var(--ink); color: var(--paper); translate: 0 -1px; }
+
+.protected-note em { max-width: 46ch; color: var(--ink-3); font-style: normal; font-size: var(--t-xs); line-height: 1.5; }
 
 /* ============================================================
    HOW IT WORKS — editorial, asymmetric, not a card wall
@@ -869,6 +892,12 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
    no blur, no price and no CTA — there is nothing withheld.
    ============================================================ */
 
+.result-plain { border-color: color-mix(in srgb, var(--green-bright) 40%, var(--line)); }
+.result-plain .step-number {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green-bright) 34%, transparent);
+  background: color-mix(in srgb, var(--green-bright) 9%, transparent);
+}
 .no-change-note {
   margin: 0; padding: var(--s6) var(--s5) var(--s7);
   max-width: 62ch;
@@ -918,12 +947,14 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 
 footer {
   padding: var(--s6) max(var(--gutter), calc((100vw - var(--container)) / 2));
-  display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--s3) var(--s5);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s3) var(--s5);
   border-top: 1px solid var(--line-soft);
   color: var(--ink-3); font-size: var(--t-xs);
 }
-footer nav { gap: var(--s4); font-size: var(--t-xs); }
-footer a { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line); }
+.footer-brand { display: inline-flex; align-items: center; gap: var(--s2); color: var(--ink-2); }
+.footer-brand .brand-mark { width: 20px; height: 20px; font-size: 11px; }
+footer nav { gap: var(--s5); font-size: var(--t-xs); }
+footer a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line); }
 footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
 
 /* ============================================================
@@ -936,7 +967,6 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   .trust-line { grid-auto-flow: column; grid-template-columns: none; justify-content: start; gap: var(--s5); }
   .how, .pricing { grid-template-columns: 1fr; gap: var(--s6); }
   .section-intro { position: static; }
-  .result { margin-left: var(--gutter); margin-right: var(--gutter); }
 }
 
 @media (max-width: 860px) {
@@ -947,11 +977,6 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
     animation-name: rise;
   }
   .comparison > article:last-child { animation-name: rise; padding-bottom: var(--s6); }
-  /* The unlock card stops floating once the panel is a full-width
-     column: absolute positioning over stacked text hides the rewrite
-     it is selling. */
-  .unlock-card { position: static; margin-top: var(--s6); left: auto; right: auto; bottom: auto; }
-  .unlock-card .lock { margin-top: 0; }
 }
 
 @media (max-width: 760px) {
@@ -962,7 +987,6 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   .hero-copy { margin: var(--s4) 0 var(--s5); font-size: var(--t-base); }
   .trust-line { grid-auto-flow: row; gap: var(--s2); padding-top: var(--s4); }
   .workspace, .result { border-radius: var(--radius-md); }
-  .result { margin: 0 var(--gutter) var(--s8); }
   .workspace-topline, .result-heading { padding: var(--s4); min-height: 0; }
   .result-heading { flex-wrap: wrap; }
   .result-heading > p { text-align: left; max-width: none; }
@@ -973,12 +997,14 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   .mode-group button { flex: 1; white-space: nowrap; }
   .humanize-button { order: 2; width: 100%; }
   .error, .status-line { padding: var(--s3) var(--s4); }
-  .checks { grid-template-columns: 1fr; }
+  .checks { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: minmax(0, 1fr); }
   .checks article { padding: var(--s3) var(--s4); border-right: 0; border-bottom: 1px solid var(--line-soft); }
   .checks article:last-child { border-bottom: 0; }
   .comparison > article { padding: var(--s5) var(--s4); }
   .unlock-card { padding: var(--s4); }
-  .protected-note { padding: var(--s4); }
+  .evidence { grid-template-columns: 1fr; gap: var(--s3); padding: var(--s4); }
+  .protected-note { justify-self: start; justify-content: flex-start; }
+  .diff-legend { order: 2; }
   .no-change-note { padding: var(--s5) var(--s4) var(--s6); }
   .billing-strip { padding: var(--s6) var(--gutter); }
   .billing-strip .manage-billing { width: 100%; }
