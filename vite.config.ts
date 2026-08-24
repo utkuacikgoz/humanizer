@@ -1,6 +1,7 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json" with { type: "json" };
+import { productConfig } from "./src/config/product";
 import { sites } from "./build/sites-vite-plugin.ts";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
@@ -54,11 +55,31 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 // is containment, not a fix: the header-trust model itself still needs to be
 // replaced with something that verifies provenance (see SEC-01's
 // remediation). Do not re-enable workers_dev while that remains true.
+// With workers_dev disabled the Worker has no origin at all until a route
+// binds one, so a production deploy without this is live and unreachable.
+// The apex and www are bound as custom domains, which also makes the Host
+// gate in src/lib/chatgpt-identity.ts meaningful: identity is honored only
+// on these hostnames.
+//
+// Prerequisite: ownword.pro must exist as a zone in the same Cloudflare
+// account the deploy authenticates to. If it does not, `wrangler deploy`
+// fails naming the missing zone rather than silently publishing nothing.
+// Local builds get no routes, so `npm run dev` is unaffected.
+function productionRoutes() {
+  const domain = productConfig.domain.trim().toLowerCase();
+  if (!domain) return [];
+  return [
+    { pattern: domain, custom_domain: true },
+    { pattern: `www.${domain}`, custom_domain: true },
+  ];
+}
+
 function workerBindingConfig(environment: "local" | "production") {
   return {
     main: "./worker/index.ts",
     compatibility_flags: ["nodejs_compat"],
     workers_dev: false,
+    ...(environment === "production" ? { routes: productionRoutes() } : {}),
     // The route allows isolate-memory abuse protection only when this value is
     // explicitly non-production. Only Vite's development server is marked
     // local; every build artifact fails closed unless D1 and its guard secret
