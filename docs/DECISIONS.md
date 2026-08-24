@@ -14,9 +14,11 @@ Consequence: New dashboard, collaboration, API, and personalization work is reje
 
 ### D-002 — Brand is one configuration source
 
-Decision: Customer-facing identity comes from a typed configuration object containing `productName`, `productTagline`, `domain`, `supportEmail`, `legalCompanyName`, and `socialHandles`. Use `Humanizer` only as the centralized temporary display value and `humanizer` as the internal codename.
-Reason: Naming is TBD and must not block engineering or create a later search-and-replace migration.
-Consequence: Tests should detect customer-facing literals outside the config/assets allowlist.
+Decision: The canonical customer-facing identity is Ownword at `ownword.pro`, operated by Bosphorus Elevate LLC with `support@ownword.pro` as its support address. It comes from a typed configuration object containing `productName`, `productTagline`, `domain`, `supportEmail`, `legalCompanyName`, and `socialHandles`. Use `humanizer` only as the internal codename or a generic search-category term.
+
+Reason: The founder confirmed the brand and domain on 2026-08-24. The concurrent commercial-terms work on `main` confirms the operator and support address. Social profiles and official logo artwork are not confirmed.
+
+Consequence: Public UI, metadata, structured data, legal pages, and documentation use Ownword consistently. Use a text wordmark and no custom favicon until approved brand assets exist. Tests detect stale display identity and prevent operator details from leaking into unrelated landing copy.
 
 ### D-003 — Pricing and entitlements are a server-owned catalog
 
@@ -106,9 +108,9 @@ Proposal: Keep searchable metadata in D1 and encrypted text payloads in a separa
 
 Proposal: Prefer providers/settings offering no-training and zero/short retention. If unavailable, surface the exact processor retention in the privacy notice and shorten internal retention. Legal and Security must approve the production provider set.
 
-### D-013 — M2 billing is built now against placeholder business/Stripe details
+### D-013 — M2 billing is built while production Stripe details remain pending
 
-Decision: Product Orchestrator (user) directed engineering to proceed building the full M2 payment/entitlement backlog today without waiting for real legal company name, support email, domain, or live Stripe credentials — those will be supplied later in this same engagement. All such values are wired through environment/config (`productConfig`, `STRIPE_*` env vars, a versioned Stripe price env-key mapping), never hardcoded, so supplying the real values later is a configuration change, not a code change. Placeholder/missing required config must fail closed at startup/checkout time per the existing `ARCHITECTURE.md` "Configuration and secrets" rule — it must never silently accept a real payment against unset business identity.
+Decision: Product Orchestrator directed engineering to proceed with the M2 payment and entitlement backlog before every commercial detail was available. Ownword, `ownword.pro`, Bosphorus Elevate LLC, and `support@ownword.pro` are now configured. Official visual assets and live Stripe credentials remain pending. Values stay centralized through `productConfig`, `STRIPE_*` environment variables, and the versioned Stripe price mapping. Missing required payment configuration must fail closed.
 Reason: User-directed acceleration toward a same-day paid launch; this is the explicit tradeoff being made, not an oversight.
 Consequence: The following remain genuinely open and are NOT satisfied by placeholder-driven engineering — they require the user's real values and cannot be closed by code alone: D-P01 (retention duration), D-P04 (payload storage/encryption), D-P05 (provider retention), and M4-03 (Legal disclosure approval). M2-13's payment gate and M4-07's commercial-launch authorization are not self-granted by this decision; PO/SEC/LEGAL sign-off is still required before real customer charges go live, per `AGENTS.md`'s working agreement. This entry exists so a later reviewer sees *why* placeholders are present, rather than mistaking them for an unnoticed gap.
 

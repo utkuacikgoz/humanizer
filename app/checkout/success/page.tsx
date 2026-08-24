@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { productConfig } from "@/src/config/product";
 import { pricingConfig } from "@/src/config/pricing";
@@ -24,6 +24,7 @@ const STATUS_HEADINGS = {
   confirming: "Confirming your payment",
   unlocked: "Your full rewrite is unlocked",
   delayed: "Still confirming your payment",
+  missing: "We need your result link",
   "signed-out": "Sign-in needed",
 } as const;
 
@@ -32,12 +33,19 @@ function readJobIdFromLocation(): string | null {
   return new URLSearchParams(window.location.search).get("job");
 }
 
+const subscribeToLocation = () => () => {};
+const clientIsHydrated = () => true;
+const serverIsHydrated = () => false;
+const noServerJobId = () => null;
+
 export default function CheckoutSuccessPage() {
-  const [jobId] = useState<string | null>(readJobIdFromLocation);
-  const [status, setStatus] = useState<"confirming" | "unlocked" | "delayed" | "signed-out">("confirming");
+  const hydrated = useSyncExternalStore(subscribeToLocation, clientIsHydrated, serverIsHydrated);
+  const jobId = useSyncExternalStore(subscribeToLocation, readJobIdFromLocation, noServerJobId);
+  const [status, setStatus] = useState<"confirming" | "unlocked" | "delayed" | "missing" | "signed-out">("confirming");
   const [result, setResult] = useState<UnlockedResult | null>(null);
   const attempts = useRef(0);
   const marks = useMemo(() => (result ? diffRewrite(result.original, result.result) : null), [result]);
+  const visibleStatus = hydrated && !jobId ? "missing" : status;
 
   // Hydration marker, matching the landing page. The post-purchase surface
   // fires no analytics beacon, so this client-only effect is the single
@@ -81,7 +89,6 @@ export default function CheckoutSuccessPage() {
     <main>
       <header className="site-header">
         <Link className="brand" href="/" aria-label={`${productConfig.productName} home`}>
-          <span className="brand-mark" aria-hidden="true">{productConfig.productName.slice(0, 1)}</span>
           <span>{productConfig.productName}</span>
         </Link>
       </header>
@@ -91,32 +98,38 @@ export default function CheckoutSuccessPage() {
         <div className="workspace-topline">
           <div>
             <span className="step-number">03</span>
-            <h2 id="checkout-status-title">{STATUS_HEADINGS[status]}</h2>
+            <h2 id="checkout-status-title">{STATUS_HEADINGS[visibleStatus]}</h2>
           </div>
         </div>
 
-        {status === "confirming" ? (
+        {visibleStatus === "confirming" ? (
           <p className="status-line" role="status" style={{ borderTop: "none" }}>
             <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span>
             {" "}We&apos;re confirming your payment with Stripe. This usually takes a few seconds.
           </p>
         ) : null}
 
-        {status === "delayed" ? (
+        {visibleStatus === "delayed" ? (
           <p className="status-line" role="status" style={{ borderTop: "none" }}>
-            Your payment is still being confirmed — this can take a little longer than usual.
+            Your payment is still being confirmed. This can take a little longer than usual.
             Refresh this page in a moment, or check{" "}
             <Link href="/">the homepage</Link>. You will not be charged again, and nothing is lost.
           </p>
         ) : null}
 
-        {status === "signed-out" ? (
+        {visibleStatus === "signed-out" ? (
           <p className="error" role="alert" style={{ borderTop: "none" }}>
             <a href="/signin-with-chatgpt?return_to=%2Fcheckout%2Fsuccess">Sign in</a> to view your unlocked result.
           </p>
         ) : null}
 
-        {status === "unlocked" && result && marks ? (
+        {visibleStatus === "missing" ? (
+          <p className="error" role="alert" style={{ borderTop: "none" }}>
+            This link does not include a result reference. Return to <Link href="/">the homepage</Link> to open your draft or start another rewrite.
+          </p>
+        ) : null}
+
+        {visibleStatus === "unlocked" && result && marks ? (
           <>
             <div className="comparison">
               <article>
@@ -130,7 +143,7 @@ export default function CheckoutSuccessPage() {
               </article>
             </div>
             {/* ACT-15: the paid screen carries the same evidence as the
-                free preview did, over the complete text — and a way back
+                free preview did over the complete text, plus a way back
                 into the workspace, because nothing else invites a second
                 draft. */}
             <div className="evidence">
@@ -152,7 +165,7 @@ export default function CheckoutSuccessPage() {
         <div>
           <h2 id="manage-billing-title">Your subscription</h2>
           <p>
-            {subscriptionDisclosure(pricingConfig.plans.starter)} Cancel or change it at any time — the
+            {subscriptionDisclosure(pricingConfig.plans.starter)} Cancel or change it at any time. The
             billing portal shows the exact effective date before you confirm.
           </p>
         </div>

@@ -27,17 +27,16 @@ export async function generateMetadata(): Promise<Metadata> {
     .trim()
     .toLowerCase();
   const canonicalBase = configuredBase && requestHost === configuredBase.host.toLowerCase() ? configuredBase : null;
-  const title = `AI Humanizer for Natural Rewrites That Preserve Meaning | ${productConfig.productName}`;
-  const description = "Humanize AI assisted text with targeted rewrites that protect your meaning, facts, terminology, citations, and intended tone.";
+  const title = `${productConfig.productName} | Natural AI Rewrites That Preserve Meaning`;
+  const description = `${productConfig.productName} turns generic AI assisted drafts into natural writing while protecting your meaning, facts, terminology, citations, and intended tone.`;
   const socialImage = canonicalBase
-    ? { url: new URL("/og.png", canonicalBase), width: 1733, height: 909, alt: "Keep your meaning. Lose the machine tone." }
+    ? { url: new URL("/og.png", canonicalBase), width: 1731, height: 909, alt: "Keep your meaning. Lose the machine tone." }
     : undefined;
 
   return {
     metadataBase: canonicalBase ?? undefined,
     title,
     description,
-    icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
     alternates: canonicalBase ? { canonical: canonicalBase } : undefined,
     robots: canonicalBase
       ? { index: true, follow: true, nocache: false }

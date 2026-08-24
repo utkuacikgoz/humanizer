@@ -32,6 +32,18 @@ type PreviewResult = {
 type UnchangedResult = { original: string; unchanged: true };
 type Result = PreviewResult | UnchangedResult;
 
+class UserFacingRequestError extends Error {}
+
+async function readJsonResponse<T extends object>(response: Response): Promise<Partial<T>> {
+  if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) return {};
+  try {
+    const value: unknown = await response.json();
+    return value && typeof value === "object" ? value as Partial<T> : {};
+  } catch {
+    return {};
+  }
+}
+
 const starterPlan = pricingConfig.plans.starter;
 
 // ACT-06. The fastest path into the product has to demonstrate the one
@@ -74,22 +86,6 @@ function IconShield() {
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M8 1.8 13.2 4v4c0 3.1-2.1 5.3-5.2 6.2C4.9 13.3 2.8 11.1 2.8 8V4Z" />
       <path d="M5.9 8.1 7.4 9.6l2.9-3.2" />
-    </svg>
-  );
-}
-function IconEye() {
-  return (
-    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M1.4 8S3.9 3.6 8 3.6 14.6 8 14.6 8 12.1 12.4 8 12.4 1.4 8 1.4 8Z" />
-      <circle cx="8" cy="8" r="1.9" />
-    </svg>
-  );
-}
-function IconRepeat() {
-  return (
-    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M2.4 6.6a5.8 5.8 0 0 1 9.9-2.3l1.3 1.3M13.6 9.4a5.8 5.8 0 0 1-9.9 2.3l-1.3-1.3" />
-      <path d="M13.9 2.3v3.3h-3.3M2.1 13.7v-3.3h3.3" />
     </svg>
   );
 }
@@ -155,8 +151,8 @@ export default function Home() {
     } : {}),
   };
 
-  // Hydration marker. `motion-ready` no longer gates any animation — the
-  // scroll-reveal it was built for is gone — but it remains the documented
+  // Hydration marker. `motion-ready` no longer gates any animation. The
+  // scroll reveal it was built for is gone, but it remains the documented
   // "this page is interactive" signal every automated check waits on
   // (tests/e2e/helpers/harness.mts), and it is the cheapest honest one:
   // it can only appear once a client effect has actually run.
@@ -193,16 +189,18 @@ export default function Home() {
         headers: { "content-type": "application/json", "x-idempotency-key": idempotency.current.key },
         body: JSON.stringify({ text, mode }),
       });
-      const payload = (await response.json()) as Result & { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "The rewrite could not be completed.");
+      const payload = await readJsonResponse<Result & { error?: string }>(response);
+      if (!response.ok) throw new UserFacingRequestError(payload.error ?? "The rewrite could not be completed. Please try again.");
+      if (!("original" in payload)) throw new UserFacingRequestError("The rewrite could not be completed. Please try again.");
+      const nextResult = payload as Result;
       setResultMode(mode);
-      setResult(payload);
+      setResult(nextResult);
       completedCount.current += 1;
-      track("humanization_completed", { mode, wordCount, issuesImproved: payload.unchanged ? 0 : payload.issuesImproved });
+      track("humanization_completed", { mode, wordCount, issuesImproved: nextResult.unchanged ? 0 : nextResult.issuesImproved });
       track("preview_viewed", { mode });
       if (completedCount.current === 2) track("second_humanization");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The rewrite could not be completed.");
+      setError(caught instanceof UserFacingRequestError ? caught.message : "The connection was interrupted. Please check your connection and try again.");
       setStatus("error");
       return;
     }
@@ -211,9 +209,14 @@ export default function Home() {
 
   async function unlock(planId: string) {
     // ACT-01: an unchanged result has no capability and never reaches
-    // checkout — this narrows the union as well as guarding re-entry.
-    if (!result || result.unchanged || !result.capability || unlockStatus === "working") return;
+    // checkout. This narrows the union as well as guarding reentry.
+    if (!result || result.unchanged || unlockStatus === "working") return;
     setUnlockError("");
+    if (!result.capability) {
+      setUnlockError("Checkout is temporarily unavailable for this preview. Please try the rewrite again in a moment.");
+      setUnlockStatus("error");
+      return;
+    }
     setUnlockStatus("working");
     track("checkout_started", { planId });
     try {
@@ -222,15 +225,15 @@ export default function Home() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ capability: result.capability, planId }),
       });
-      const payload = (await response.json()) as { url?: string; signInPath?: string; error?: string };
+      const payload = await readJsonResponse<{ url?: string; signInPath?: string; error?: string }>(response);
       if (response.status === 401 && payload.signInPath) {
         window.location.href = payload.signInPath;
         return;
       }
-      if (!response.ok || !payload.url) throw new Error(payload.error ?? "Checkout could not be started.");
+      if (!response.ok || !payload.url) throw new UserFacingRequestError(payload.error ?? "Checkout could not be started. Please try again.");
       window.location.href = payload.url;
     } catch (caught) {
-      setUnlockError(caught instanceof Error ? caught.message : "Checkout could not be started.");
+      setUnlockError(caught instanceof UserFacingRequestError ? caught.message : "The connection was interrupted. Please check your connection and try again.");
       setUnlockStatus("error");
     }
   }
@@ -242,7 +245,6 @@ export default function Home() {
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} />
       <header className="site-header">
         <a className="brand" href="#top" aria-label={`${productConfig.productName} home`}>
-          <span className="brand-mark" aria-hidden="true">{productConfig.productName.slice(0, 1)}</span>
           <span>{productConfig.productName}</span>
         </a>
         <nav aria-label="Primary navigation">
@@ -253,18 +255,11 @@ export default function Home() {
       </header>
 
       {/* The pitch and the tool share the first screen. The workspace is
-          the focal point — the hero sets it up, it does not replace it. */}
+          the focal point. The hero sets it up; it does not replace it. */}
       <div className="stage" id="top">
         <section className="hero" aria-labelledby="hero-title">
-          <p className="eyebrow reveal-hero d1"><span aria-hidden="true" /> Meaning verified, not guessed</p>
           <h1 className="reveal-hero d2" id="hero-title">Keep your meaning.<br /><em>Lose the machine tone.</em></h1>
           <p className="hero-copy reveal-hero d3">Turn stiff, generic AI assisted drafts into clear writing that sounds like a person wrote it while keeping the facts intact.</p>
-          <div className="trust-line reveal-hero d4">
-            <span><IconEye /> Checked before you see it</span>
-            <span><IconShield /> Names, numbers &amp; citations protected</span>
-            {/* ACT-09: the claim links to the path that honours it. */}
-            <span><IconRepeat /> <a href="#manage-billing">Cancel anytime</a></span>
-          </div>
         </section>
 
         <section className="workspace reveal-hero d4" aria-labelledby="workspace-title">
@@ -303,11 +298,10 @@ export default function Home() {
               }
             }}
             placeholder="Paste an AI assisted draft here…"
-            maxLength={2400}
           />
 
           <div className="editor-footer">
-            <div className="mode-group" aria-label="Writing mode">
+            <div className="mode-group" role="group" aria-label="Writing mode">
               {MODES.map((item) => (
                 <button
                   type="button"
@@ -336,24 +330,25 @@ export default function Home() {
           {error ? <p className="error" role="alert">{error}</p> : null}
         </section>
 
+        <div className="result-announcer" aria-live="polite" aria-atomic="false">
         {result?.unchanged ? (
           // ACT-01. Terminal, honest, and unsellable: no preview, no lock,
           // no improvement count, no price. Nothing here can be paid for,
           // because nothing was withheld.
-          <section className="result result-plain" id="result" aria-live="polite">
+          <section className="result result-plain" id="result">
             <div className="result-heading">
               <div><span className="step-number">02</span><h2 ref={resultHeadingRef} tabIndex={-1}>No rewrite needed</h2></div>
               <p>Nothing to unlock, and nothing to pay for.</p>
             </div>
             <p className="no-change-note">
-              This draft already reads naturally — we found nothing worth rewriting, so we left every word as you wrote it.
+              This draft already reads naturally. We found nothing worth rewriting, so we left every word as you wrote it.
               Try another draft, or a different writing mode if you want a change in tone.
             </p>
           </section>
         ) : null}
 
         {result && !result.unchanged && marks ? (
-          <section className="result" id="result" aria-live="polite">
+          <section className="result" id="result">
             <div className="result-heading">
               <div><span className="step-number">02</span><h2 ref={resultHeadingRef} tabIndex={-1}>Your rewrite is ready</h2></div>
               <p>We rewrote the awkward parts and left the meaning alone.</p>
@@ -365,7 +360,7 @@ export default function Home() {
               <article><small>Naturalness</small><strong><IconCheck />{result.naturalness}</strong></article>
               <article><small>Meaning preservation</small><strong><IconCheck />{result.meaningPreservation}</strong></article>
               {/* ACT-02: the measured count, correctly pluralized, and shown
-                  only when there is one to report — never a floored or
+                  only when there is one to report, never a floored or
                   zero badge sitting next to a price. */}
               {result.issuesImproved > 0 ? (
                 <article className="warm"><small>Changes</small><strong><IconArrow />{improvementLabel(result.issuesImproved)}</strong></article>
@@ -385,7 +380,7 @@ export default function Home() {
                 <p><MarkedText segments={marks.result} facts={marks.facts} /></p>
                 {/* The withheld remainder, shown as shape only. It stays
                     inside the panel because it is evidence about *this*
-                    rewrite — the offer to buy it does not. */}
+                    rewrite. The offer to buy it does not. */}
                 {shouldOfferUnlock(result) ? (
                   <div className="locked-copy" aria-hidden="true">
                     {Array.from({ length: Math.min(56, Math.max(10, result.hiddenWordCount)) }, (_, index) => (
@@ -427,34 +422,31 @@ export default function Home() {
             </div>
 
             {/* The offer sits after the rewrite and after the evidence, at the
-                full width of the result — not stacked on top of the one
+                full width of the result, not stacked on top of the one
                 paragraph the visitor came to judge, and not dressed as a
                 poster. It is a footer to a decision the visitor has already
                 been given everything to make. */}
             {shouldOfferUnlock(result) ? (
               <div className="unlock-card">
                 <strong><span className="lock" aria-hidden="true"><IconLock /></span>There’s more to this rewrite</strong>
-                <p>{result.hiddenWordCount} more words of this rewrite are ready — the same protected facts, checked the same way.</p>
-                {result.capability ? (
-                  <button type="button" onClick={() => unlock(starterPlan.id)} aria-disabled={unlockStatus === "working"}>
-                    {unlockStatus === "working" ? "Redirecting to checkout…" : `Unlock full rewrite for $${starterPlan.monthlyPrice}/mo`}
-                  </button>
-                ) : (
-                  <button type="button" disabled title="Checkout isn't available for this result yet">Unlock full rewrite for ${starterPlan.monthlyPrice}/mo</button>
-                )}
-                {/* ACT-10: the whole offer, before the click — amount, that it
+                <p>{result.hiddenWordCount} more words of this rewrite are ready. The same protected facts were checked in the same way.</p>
+                <button type="button" onClick={() => unlock(starterPlan.id)} aria-disabled={unlockStatus === "working"}>
+                  {unlockStatus === "working" ? "Redirecting to checkout…" : `Unlock full rewrite for $${starterPlan.monthlyPrice}/mo`}
+                </button>
+                {/* ACT-10: the whole offer before the click includes the amount, that it
                     recurs, the included monthly allowance, and the cancellation
                     path (ACT-09). No countdown, no scarcity, no preselected
                     upsell. */}
                 <small className="unlock-terms">
                   {subscriptionDisclosure(starterPlan)}{" "}
-                  <a href="#manage-billing">Cancel anytime</a> — no cancellation fee.
+                  <a href="#manage-billing">Cancel anytime</a>. No cancellation fee.
                 </small>
                 {unlockStatus === "error" ? <small role="alert">{unlockError}</small> : null}
               </div>
             ) : null}
           </section>
         ) : null}
+        </div>
       </div>
 
       <section className="how" id="how-it-works">
@@ -494,15 +486,13 @@ export default function Home() {
 
       <footer>
         <span className="footer-brand">
-          <span className="brand-mark" aria-hidden="true">{productConfig.productName.slice(0, 1)}</span>
           {productConfig.productName} · {productConfig.productTagline}
         </span>
         <nav aria-label="Legal and support">
           <Link href="/privacy">Privacy</Link>
           <Link href="/terms">Terms</Link>
-          <a href={`mailto:${productConfig.supportEmail}`}>Support</a>
         </nav>
-        <span>© 2026 {productConfig.legalCompanyName}</span>
+        <span>{productConfig.productName} at {productConfig.domain}</span>
       </footer>
     </main>
   );

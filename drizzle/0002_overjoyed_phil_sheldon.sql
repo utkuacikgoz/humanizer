@@ -1,0 +1,1 @@
+ALTER TABLE `preview_guard_requests` ADD `lease_token` text NOT NULL;
