@@ -42,15 +42,36 @@ const { d1, r2 } = hostingConfig;
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
+// SEC-01 (docs/SECURITY.md, 2026-08-24): this app has no middleware and
+// resolves identity purely from `oai-authenticated-user-*` request headers,
+// which are trustworthy ONLY because the hosting boundary injects them and
+// strips any client-supplied copy. A `*.workers.dev` origin bypasses that
+// boundary entirely, so on such an origin the app has no authentication at
+// all — anyone could forge those headers and read another customer's paid
+// result or open their billing portal.
+//
+// Disabling the workers.dev origin removes that unauthenticated path. This
+// is containment, not a fix: the header-trust model itself still needs to be
+// replaced with something that verifies provenance (see SEC-01's
+// remediation). Do not re-enable workers_dev while that remains true.
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
+  workers_dev: false,
   d1_databases: d1
     ? [
         {
           binding: d1,
           database_name: "site-creator-d1",
           database_id: databaseId,
+          // SEC-07: the generated default pointed at ../../migrations, a
+          // directory that does not exist — drizzle-kit writes to drizzle/.
+          // `wrangler d1 migrations apply` silently had nothing to apply, so
+          // a fresh production database would have no tables and no customer
+          // could complete a purchase. vinext re-relativizes this against
+          // dist/server/ (where it emits wrangler.json), so pass the bare
+          // repo-root directory name and let it prepend the ../../ itself.
+          migrations_dir: "drizzle",
         },
       ]
     : [],

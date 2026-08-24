@@ -1,7 +1,7 @@
 import { createHumanizationPipeline, HumanizationFailedError, PIPELINE_VERSION } from "@/src/lib/humanization";
 import type { WritingMode } from "@/src/lib/humanization";
 import { PreviewRequestGuard } from "@/src/lib/preview-request-guard";
-import { isMateriallyUnchanged } from "@/src/lib/preview-projection";
+import { isMateriallyUnchanged, MIN_PAYWALLABLE_INPUT_WORDS, projectPreview } from "@/src/lib/preview-projection";
 import type { PreviewProjection } from "../../../db/repository";
 
 const allowedModes = new Set<WritingMode>(["natural", "professional", "academic", "casual"]);
@@ -122,12 +122,6 @@ async function readLimitedBody(request: Request) {
   return new TextDecoder("utf-8", { fatal: true }).decode(body);
 }
 
-function partialPreview(text: string) {
-  const words = text.split(/\s+/);
-  const visibleWords = Math.min(90, Math.max(8, Math.floor(words.length * 0.46)));
-  return words.slice(0, visibleWords).join(" ");
-}
-
 async function sha256Hex(value: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -162,8 +156,16 @@ export async function POST(request: Request) {
   }
 
   const { text, mode } = payload as { text?: unknown; mode?: unknown };
-  if (typeof text !== "string" || text.trim().split(/\s+/).length < 12) {
-    return Response.json({ error: "Add a little more context. At least 12 words works best." }, { status: 400 });
+  // SEC-02: the minimum is a paywall-integrity control, not just a quality
+  // hint. Below roughly this length the rewrite is too short to withhold a
+  // meaningful remainder, which is what let a document be chunked into tiny
+  // windows and reconstructed for free. Keep this at or above
+  // MIN_PAYWALLABLE_INPUT_WORDS.
+  if (typeof text !== "string" || text.trim().split(/\s+/).length < MIN_PAYWALLABLE_INPUT_WORDS) {
+    return Response.json(
+      { error: `Add a little more context. At least ${MIN_PAYWALLABLE_INPUT_WORDS} words works best.` },
+      { status: 400 },
+    );
   }
   if (text.length > 2_400 || text.trim().split(/\s+/).length > 300) {
     return Response.json({ error: "Keep this first pass to 300 words or fewer." }, { status: 413 });
@@ -200,10 +202,20 @@ export async function POST(request: Request) {
             return { original: result.original, unchanged: true } satisfies UnchangedPayload;
           }
 
-          const preview = partialPreview(result.text);
+          // SEC-02: a rewrite too short to withhold a meaningful remainder
+          // must never be returned whole with a purchase CTA over it. The
+          // input minimum above normally prevents this; if a rewrite shrinks
+          // past it anyway, withhold everything rather than leak it. This is
+          // deliberately NOT the ACT-01 `unchanged` path — the text really
+          // was rewritten, and claiming otherwise would be its own dishonesty.
+          const split = projectPreview(result.text);
+          if (!split.paywallable) {
+            throw new HumanizationFailedError("The rewrite was too short to preview.", result.metrics, result.verification, result.evaluation);
+          }
+
           const projection: PreviewProjection = {
-            preview,
-            hiddenWordCount: Math.max(0, result.text.trim().split(/\s+/).length - preview.trim().split(/\s+/).length),
+            preview: split.preview,
+            hiddenWordCount: split.hiddenWordCount,
             // ACT-02: the measured count, with no `Math.max(1, …)` floor.
             // A floored "1 improvement" is a fabricated evidence claim
             // (docs/MONETIZATION.md), and it was the mechanism that made
