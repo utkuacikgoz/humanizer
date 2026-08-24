@@ -4,7 +4,7 @@
 
 Ownword is a paid-first writing product at [ownword.pro](https://ownword.pro) that turns generic AI-assisted drafts into natural writing while preserving the author's meaning. The customer-facing name and domain live in one configuration source (`src/config/product.ts`); `humanizer` remains the internal codename and repository name.
 
-The legal company name and support mailbox are not yet confirmed. The configuration keeps both values unset, and the draft legal pages are excluded from search, so the application does not publish plausible looking placeholders as business facts. The public brand uses a text wordmark until the founder supplies an approved logo and favicon.
+The confirmed operator is Bosphorus Elevate LLC and the monitored support address is `support@ownword.pro`. Ownword uses a text wordmark until the founder supplies approved logo and favicon artwork.
 
 ## Current foundation
 
@@ -16,12 +16,12 @@ The legal company name and support mailbox are not yet confirmed. The configurat
 - 100-fixture deterministic benchmark scaffold across the ten required categories
 - Central brand and plan configuration
 - Cloudflare Worker deployment metadata
-- Bounded per-runtime preview abuse guard with idempotent replay, concurrency/rate ceilings, and a five-second request-path deadline
+- D1 backed preview abuse guard with encrypted idempotent replay, shared concurrency and rate ceilings, and a five-second request-path deadline
 - Product, architecture, monetization, security, QA, SEO, and backlink operating documents
 
 Stripe checkout, anonymous-result persistence, verified webhook projection, server-authoritative unlock, and the billing portal are implemented (M2-01 through M2-06 and M2-08 through M2-10).
 
-Still open and release-blocking: the deterministic provider and benchmark fixtures are contract-testing and product-demo baselines, not production quality evidence. The in-memory request guard is defense-in-depth only; distributed edge/store-backed abuse controls remain mandatory before the paid model is exposed publicly. The usage ledger (M2-07) is deliberately unimplemented pending a concurrency-safety spike — see D-013 in the decision log. Quotas, history, and account deletion remain backlog milestones.
+Still open and release-blocking: the deterministic provider and benchmark fixtures are contract-testing and product-demo baselines, not production quality evidence. Production deployment must apply the D1 guard migrations, configure `PREVIEW_GUARD_SECRET`, and add an edge/WAF layer for network rotation and shared NAT behavior. The usage ledger (M2-07) is deliberately unimplemented pending a concurrency-safety spike — see D-013 in the decision log. Quotas, history, and account deletion remain backlog milestones.
 
 The complete rewrite is generated on the server, but the anonymous response exposes only the allowed preview and a hidden-word count; the browser never receives the locked remainder.
 

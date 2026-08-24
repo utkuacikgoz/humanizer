@@ -107,8 +107,12 @@ test("ACT-01: shouldOfferUnlock refuses every shape that withholds nothing", () 
   assert.equal(shouldOfferUnlock(undefined), false);
   assert.equal(shouldOfferUnlock({ unchanged: true }), false);
   assert.equal(shouldOfferUnlock({ preview: "", hiddenWordCount: 9 }), false);
-  assert.equal(shouldOfferUnlock({ preview: "a rewrite", hiddenWordCount: 0 }), false);
-  assert.equal(shouldOfferUnlock({ preview: "a rewrite", hiddenWordCount: 4 }), true);
+  assert.equal(shouldOfferUnlock({ preview: "a rewrite", hiddenWordCount: 0, issuesImproved: 2 }), false);
+  // KI-01: withholding text is necessary but not sufficient — the engine must
+  // also have measured a real improvement.
+  assert.equal(shouldOfferUnlock({ preview: "a rewrite", hiddenWordCount: 4, issuesImproved: 0 }), false);
+  assert.equal(shouldOfferUnlock({ preview: "a rewrite", hiddenWordCount: 4 }), false);
+  assert.equal(shouldOfferUnlock({ preview: "a rewrite", hiddenWordCount: 4, issuesImproved: 2 }), true);
 });
 
 // ---------------------------------------------------------------------
@@ -179,8 +183,8 @@ test("ACT-09: every portal failure is an honest, actionable state rather than a 
   assert.match(noAccount.message, /no subscription/i);
 
   const unconfigured = describePortalFailure(503, "Billing is not available yet.");
-  assert.equal(unconfigured.action.kind, "none");
-  assert.doesNotMatch(unconfigured.message, /email/i, "do not publish an unverified support mailbox");
+  assert.equal(unconfigured.action.kind, "email");
+  assert.ok(unconfigured.action.kind === "email" && unconfigured.action.href === "mailto:support@ownword.pro");
 
   const failed = describePortalFailure(502, "Billing portal could not be opened. Please try again.");
   assert.match(failed.message, /could not be opened/i);

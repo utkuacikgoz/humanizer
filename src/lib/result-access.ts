@@ -59,7 +59,7 @@ export async function buildResultResponse(
   const jobId = new URL(request.url).searchParams.get("job")?.trim() ?? "";
   if (!JOB_ID.test(jobId)) return notFound();
 
-  const user = resolveChatGPTUserFromHeaders(request.headers);
+  const user = resolveChatGPTUserFromHeaders(request);
   if (!user) {
     return Response.json({ error: "Sign in to view this result." }, { status: 401, headers: NO_STORE });
   }

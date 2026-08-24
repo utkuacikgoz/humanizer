@@ -7,7 +7,7 @@
 import { resolveChatGPTUserFromHeaders } from "@/src/lib/chatgpt-identity";
 
 export async function POST(request: Request) {
-  const user = resolveChatGPTUserFromHeaders(request.headers);
+  const user = resolveChatGPTUserFromHeaders(request);
   if (!user) {
     return Response.json({ error: "Sign in to manage billing." }, { status: 401, headers: { "cache-control": "no-store" } });
   }

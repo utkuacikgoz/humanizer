@@ -46,7 +46,7 @@ No browser request directly calls an AI provider, D1, R2, or Stripe privileged A
 Maintain two typed projections from one source:
 
 - Public brand: confirmed product name, tagline, and domain, plus only verified support and social details.
-- Server brand/legal: a nullable legal company name and operational metadata not needed by clients. Null means unconfirmed and must never render as placeholder copy.
+- Server brand/legal: the configured legal company name and operational metadata not needed by clients. Identity values remain centralized and must not be duplicated as literals in product components.
 
 Pricing follows the same pattern: one server-owned catalog and a deliberately safe public view. Do not mix brand or price definitions into components.
 

@@ -265,7 +265,9 @@ export async function POST(request: Request) {
           // past it anyway, withhold everything rather than leak it. This is
           // deliberately NOT the ACT-01 `unchanged` path — the text really
           // was rewritten, and claiming otherwise would be its own dishonesty.
-          const split = projectPreview(result.text);
+          // KI-01: a rewrite the engine measured at zero improvements is not
+          // sellable, however much text it withheld.
+          const split = result.improvements > 0 ? projectPreview(result.text) : { preview: "", hiddenWordCount: 0, paywallable: false };
           if (!split.paywallable) {
             throw new HumanizationFailedError("The rewrite was too short to preview.", result.metrics, result.verification, result.evaluation);
           }
