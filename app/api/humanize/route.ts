@@ -6,6 +6,7 @@ import {
   previewGuardClientKey,
 } from "@/src/lib/preview-request-guard";
 import { isMateriallyUnchanged, MIN_PAYWALLABLE_INPUT_WORDS, projectPreview } from "@/src/lib/preview-projection";
+import { billableWords, reserveQuota } from "@/src/lib/quota-gate";
 import type { PreviewProjection } from "../../../db/repository";
 
 const allowedModes = new Set<WritingMode>(["natural", "professional", "academic", "casual"]);
@@ -222,6 +223,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Send a valid x-idempotency-key with each preview request." }, { status: 400 });
   }
 
+  let settle: (successfulWords: number) => Promise<void> = async () => {};
   try {
     const runtimeGuard = await requestGuardForRuntime();
     if (!runtimeGuard) {
@@ -239,7 +241,32 @@ export async function POST(request: Request) {
     }
     const clientId = trustedIp ?? "local-test-runtime";
     const contentFingerprint = await fingerprint(text, mode as WritingMode);
+
+
+    // D-006/M2-07: a subscriber's monthly allowance is enforced here, before
+    // any work is done. Anonymous previews are unmetered — see quota-gate.ts.
+    const quota = await reserveQuota(request, billableWords(text));
+    if (quota.metered && !quota.admitted) {
+      return Response.json(
+        {
+          error: `You have used your ${quota.allowance.toLocaleString()} words for this billing period. Your allowance resets on ${quota.periodEnd.toISOString().slice(0, 10)}.`,
+          quotaExceeded: true,
+          allowance: quota.allowance,
+          remaining: quota.remaining,
+          resetsAt: quota.periodEnd.toISOString(),
+        },
+        { status: 429, headers: { "cache-control": "no-store" } },
+      );
+    }
+    let settled = false;
+    settle = async (successfulWords: number) => {
+      if (settled || !quota.metered || !quota.admitted) return;
+      settled = true;
+      await quota.settle(successfulWords);
+    };
+
     const guarded = await runtimeGuard.guard.run({
+
       clientId,
       idempotencyKey,
       fingerprint: contentFingerprint,
@@ -297,6 +324,9 @@ export async function POST(request: Request) {
             protectedContent: result.protectedContent,
             projection,
           });
+          // Only successful words are charged (README guardrail). Every
+          // other exit below releases the whole reservation.
+          await settle(result.metrics.successfulWords);
           return { original: result.original, ...projection, ...persisted } satisfies PreviewPayload;
         } finally {
           clearTimeout(timeout);
@@ -304,6 +334,7 @@ export async function POST(request: Request) {
       },
     });
     if (!guarded.ok) {
+      await settle(0);
       const headers: Record<string, string> = { "cache-control": "no-store" };
       if (guarded.retryAfterSeconds) headers["retry-after"] = String(guarded.retryAfterSeconds);
       return Response.json({ error: guarded.error }, { status: guarded.status, headers });
@@ -316,6 +347,8 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    // A failed or timed-out attempt costs the customer nothing.
+    await settle(0);
     if (error instanceof DOMException && error.name === "TimeoutError") {
       return Response.json({ error: "The preview took too long. No usage was charged; please try again." }, { status: 504, headers: { "cache-control": "no-store" } });
     }
