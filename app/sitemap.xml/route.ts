@@ -23,8 +23,8 @@ function requestHost(request: Request) {
 // because it's planned — see docs/SEO.md's backlog for what's still open.
 const INDEXABLE_ROUTES: Array<{ path: string; changefreq: string; priority: string }> = [
   { path: "/", changefreq: "weekly", priority: "1.0" },
-  { path: "/privacy", changefreq: "yearly", priority: "0.3" },
-  { path: "/terms", changefreq: "yearly", priority: "0.3" },
+  { path: "/privacy", changefreq: "yearly", priority: "0.2" },
+  { path: "/terms", changefreq: "yearly", priority: "0.2" },
 ];
 
 export function GET(request: Request) {

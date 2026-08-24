@@ -133,6 +133,14 @@ test("word-count boundaries: exactly 300 words passes validation, 301 is rejecte
   assert.match((await justOver.json() as { error: string }).error, /300 words or fewer/i);
 });
 
+test("a 300-word draft is not silently constrained by an unrelated character limit", async () => {
+  const longWords = Array.from({ length: 300 }, (_, index) => index % 10 === 9 ? "communication." : "communication").join(" ");
+  assert.ok(longWords.length > 2_400);
+
+  const response = await POST(request({ text: longWords, mode: "natural" }));
+  assert.notEqual(response.status, 413);
+});
+
 test("idempotency key length boundaries: 7 chars rejected, 8 accepted, 128 accepted, 129 rejected", async () => {
   // Word-count validation runs before the idempotency-key check, so the
   // 400/rejected cases below never reach the pipeline — the minimum-length fixture's

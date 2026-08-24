@@ -1,12 +1,16 @@
 import { createHumanizationPipeline, HumanizationFailedError, PIPELINE_VERSION } from "@/src/lib/humanization";
 import type { WritingMode } from "@/src/lib/humanization";
-import { PreviewRequestGuard } from "@/src/lib/preview-request-guard";
+import {
+  DistributedPreviewRequestGuard,
+  PreviewRequestGuard,
+  previewGuardClientKey,
+} from "@/src/lib/preview-request-guard";
 import { isMateriallyUnchanged, MIN_PAYWALLABLE_INPUT_WORDS, projectPreview } from "@/src/lib/preview-projection";
 import { billableWords, reserveQuota } from "@/src/lib/quota-gate";
 import type { PreviewProjection } from "../../../db/repository";
 
 const allowedModes = new Set<WritingMode>(["natural", "professional", "academic", "casual"]);
-const pipeline = createHumanizationPipeline({ config: { maxInputCharacters: 2_400 } });
+const pipeline = createHumanizationPipeline({ config: { maxInputCharacters: 10_000 } });
 const MAX_REQUEST_BYTES = 10_000;
 const MAX_PROCESSING_MS = 5_000;
 const IDEMPOTENCY_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{7,127}$/;
@@ -95,7 +99,46 @@ async function tryPersist(input: {
   }
 }
 
-const requestGuard = new PreviewRequestGuard<PreviewPayload>();
+const localRequestGuard = new PreviewRequestGuard<PreviewPayload>();
+
+type RuntimeGuard = {
+  guard: PreviewRequestGuard<PreviewPayload> | DistributedPreviewRequestGuard<PreviewPayload>;
+  secret?: string;
+  distributed: boolean;
+};
+
+async function requestGuardForRuntime(): Promise<RuntimeGuard | null> {
+  try {
+    const { env } = await import("cloudflare:workers");
+    const runtime = env as Cloudflare.Env;
+    const environment = runtime.ENVIRONMENT?.trim().toLowerCase();
+    const explicitlyNonProduction = environment === "development" || environment === "local" || environment === "test";
+    const secret = runtime.PREVIEW_GUARD_SECRET?.trim();
+    if (runtime.DB && secret) {
+      return { guard: new DistributedPreviewRequestGuard<PreviewPayload>(runtime.DB, secret), secret, distributed: true };
+    }
+    // A real Workers runtime is production-like unless it explicitly says
+    // otherwise. Missing shared storage or its HMAC/encryption secret fails
+    // closed; silently dropping to isolate memory would reopen the abuse gap.
+    return explicitlyNonProduction ? { guard: localRequestGuard, distributed: false } : null;
+  } catch {
+    // Plain Node route tests do not provide the cloudflare:workers module.
+    return { guard: localRequestGuard, distributed: false };
+  }
+}
+
+function trustedConnectingIp(request: Request) {
+  const value = request.headers.get("cf-connecting-ip")?.trim();
+  if (!value || value.length > 64 || /[\s,]/.test(value)) return null;
+  const octets = value.split(".");
+  if (octets.length === 4 && octets.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255 && String(Number(part)) === part)) return value;
+  if (!value.includes(":")) return null;
+  try {
+    return new URL(`http://[${value}]/`).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
 
 class PayloadTooLargeError extends Error {}
 
@@ -168,7 +211,7 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  if (text.length > 2_400 || text.trim().split(/\s+/).length > 300) {
+  if (text.trim().split(/\s+/).length > 300) {
     return Response.json({ error: "Keep this first pass to 300 words or fewer." }, { status: 413 });
   }
   if (typeof mode !== "string" || !allowedModes.has(mode as WritingMode)) {
@@ -182,16 +225,28 @@ export async function POST(request: Request) {
 
   let settle: (successfulWords: number) => Promise<void> = async () => {};
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(new DOMException("Preview deadline exceeded.", "TimeoutError")), MAX_PROCESSING_MS);
-    const clientId = request.headers.get("cf-connecting-ip")?.trim() || "anonymous-runtime";
+    const runtimeGuard = await requestGuardForRuntime();
+    if (!runtimeGuard) {
+      return Response.json(
+        { error: "Preview protection is temporarily unavailable. Please try again shortly." },
+        { status: 503, headers: { "cache-control": "no-store", "retry-after": "2" } },
+      );
+    }
+    const trustedIp = trustedConnectingIp(request);
+    if (runtimeGuard.distributed && !trustedIp) {
+      return Response.json(
+        { error: "Preview protection is temporarily unavailable. Please try again shortly." },
+        { status: 503, headers: { "cache-control": "no-store", "retry-after": "2" } },
+      );
+    }
+    const clientId = trustedIp ?? "local-test-runtime";
     const contentFingerprint = await fingerprint(text, mode as WritingMode);
+
 
     // D-006/M2-07: a subscriber's monthly allowance is enforced here, before
     // any work is done. Anonymous previews are unmetered — see quota-gate.ts.
     const quota = await reserveQuota(request, billableWords(text));
     if (quota.metered && !quota.admitted) {
-      clearTimeout(timeout);
       return Response.json(
         {
           error: `You have used your ${quota.allowance.toLocaleString()} words for this billing period. Your allowance resets on ${quota.periodEnd.toISOString().slice(0, 10)}.`,
@@ -210,11 +265,14 @@ export async function POST(request: Request) {
       await quota.settle(successfulWords);
     };
 
-    const guarded = await requestGuard.run({
+    const guarded = await runtimeGuard.guard.run({
+
       clientId,
       idempotencyKey,
       fingerprint: contentFingerprint,
       execute: async () => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(new DOMException("Preview deadline exceeded.", "TimeoutError")), MAX_PROCESSING_MS);
         try {
           const result = await pipeline.humanize({ text, mode: mode as WritingMode, signal: controller.signal });
 
@@ -224,7 +282,7 @@ export async function POST(request: Request) {
           // `improvements` — and returned before any preview projection,
           // persistence, or capability minting happens, so no unlock CTA
           // can exist for this outcome anywhere downstream.
-          if (isMateriallyUnchanged(result.original, result.text)) {
+          if (isMateriallyUnchanged(result.original, result.text) || result.improvements === 0) {
             return { original: result.original, unchanged: true } satisfies UnchangedPayload;
           }
 
@@ -255,7 +313,9 @@ export async function POST(request: Request) {
           };
           const persisted = await tryPersist({
             mode: mode as WritingMode,
-            clientFingerprint: await sha256Hex(clientId),
+            clientFingerprint: runtimeGuard.secret
+              ? await previewGuardClientKey(runtimeGuard.secret, clientId)
+              : await sha256Hex(clientId),
             idempotencyKey,
             contentFingerprint,
             original: result.original,
@@ -273,7 +333,6 @@ export async function POST(request: Request) {
         }
       },
     });
-    clearTimeout(timeout);
     if (!guarded.ok) {
       await settle(0);
       const headers: Record<string, string> = { "cache-control": "no-store" };

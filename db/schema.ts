@@ -8,7 +8,7 @@
 // synchronous in-memory pipeline (src/lib/humanization/pipeline.ts) does not
 // yet write through these tables.
 import { sql } from "drizzle-orm";
-import { check, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // Mirrors src/lib/humanization/types.ts WritingMode without importing app
 // code into the schema module.
@@ -76,6 +76,49 @@ const createdAt = (columnName = "created_at") =>
 // `sql` templates bind an interpolated array as one parameter, not a SQL
 // list, so CHECK ... IN (...) constraints build their literal list here.
 const sqlEnumList = (values: readonly string[]) => sql.raw(values.map((value) => `'${value}'`).join(", "));
+
+/**
+ * Privacy-safe, fixed-window counters for anonymous preview admission. The
+ * client key is an HMAC of Cloudflare's trusted connecting IP, never the raw
+ * address. Admission triggers in the migration serialize the limit check and
+ * increment with the request-row write.
+ */
+export const previewGuardWindows = sqliteTable("preview_guard_windows", {
+  clientKey: text("client_key").notNull(),
+  windowStart: integer("window_start").notNull(),
+  requestCount: integer("request_count").notNull().default(0),
+  updatedAt: integer("updated_at").notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.clientKey, t.windowStart] }),
+  index("preview_guard_windows_start_idx").on(t.windowStart),
+  check("preview_guard_windows_count_check", sql`${t.requestCount} >= 0`),
+]);
+
+/**
+ * Distributed idempotency and active-work leases. Keys/fingerprints are HMACs;
+ * the short-lived replay payload is AES-GCM ciphertext. No raw IP or customer
+ * writing is queryable from this table.
+ */
+export const previewGuardRequests = sqliteTable("preview_guard_requests", {
+  requestKey: text("request_key").primaryKey(),
+  clientKey: text("client_key").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  windowStart: integer("window_start").notNull(),
+  status: text("status").notNull(),
+  // Fencing token prevents an expired/stale Worker from completing a lease
+  // that a newer Worker has already reclaimed.
+  leaseToken: text("lease_token").notNull(),
+  leaseExpiresAt: integer("lease_expires_at").notNull(),
+  responseCiphertext: text("response_ciphertext"),
+  responseIv: text("response_iv"),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (t) => [
+  index("preview_guard_requests_client_active_idx").on(t.clientKey, t.status, t.leaseExpiresAt),
+  index("preview_guard_requests_expires_idx").on(t.expiresAt),
+  check("preview_guard_requests_status_check", sql`${t.status} in ('active', 'succeeded', 'failed')`),
+]);
 
 /** Trusted external identity subject; contact/legal display data only. */
 export const users = sqliteTable("users", {

@@ -336,24 +336,6 @@ h1, h2, h3 { margin: 0; }
   font-size: var(--t-md); font-weight: 640; letter-spacing: -.035em;
   text-decoration: none;
 }
-.brand-mark {
-  width: 28px; height: 28px; display: grid; place-items: center;
-  border-radius: 50%;
-  background: linear-gradient(155deg, var(--green-bright), var(--green-dark));
-  color: #fffdf8; font-family: var(--font-display); font-style: italic;
-  font-size: 15px; line-height: 1;
-  transition: rotate var(--dur-base) var(--ease-spring),
-              scale var(--dur-base) var(--ease-spring);
-}
-@media (prefers-color-scheme: dark) {
-  /* Measured: the old #1c503a stop put the glyph at 2.05:1. Both stops now
-     clear AA against it (10.2:1 and 8.3:1). */
-  .brand-mark {
-    background: linear-gradient(155deg, var(--green-bright), #4cc088);
-    color: #08120e;
-  }
-}
-.brand:hover .brand-mark { rotate: -9deg; scale: 1.07; }
 
 nav { display: flex; align-items: center; gap: var(--s5); font-size: var(--t-sm); }
 nav a:not(.sign-in) { position: relative; text-decoration: none; padding-bottom: 2px; color: var(--ink-2); }
@@ -420,17 +402,6 @@ nav a:not(.sign-in):hover::after { right: 0; }
   max-width: 44ch; margin: var(--s5) 0 var(--s6);
   color: var(--ink-2); font-size: var(--t-md); line-height: 1.55; letter-spacing: -.011em;
 }
-.trust-line {
-  display: grid; gap: var(--s3);
-  padding-top: var(--s5);
-  border-top: 1px solid var(--line);
-  color: var(--ink-2); font-size: var(--t-sm); letter-spacing: -.005em;
-}
-.trust-line span { display: inline-flex; align-items: center; gap: var(--s3); }
-.trust-line a { color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
-.trust-line a:hover { color: var(--ink); text-decoration-color: currentColor; }
-.trust-line svg { color: var(--green); }
-
 /* ============================================================
    WORKSPACE + RESULT — the two primary surfaces
    ============================================================ */
@@ -445,6 +416,7 @@ nav a:not(.sign-in):hover::after { right: 0; }
   transition: box-shadow var(--dur-base) var(--ease-out);
 }
 .workspace { min-width: 0; container-type: inline-size; container-name: ws; }
+.result-announcer { grid-column: 1 / -1; min-width: 0; }
 .workspace:focus-within {
   box-shadow: var(--e1), 0 0 0 4px color-mix(in srgb, var(--green-bright) 16%, transparent);
 }
@@ -452,7 +424,6 @@ nav a:not(.sign-in):hover::after { right: 0; }
    the workspace that produced it — not in a separate band further down
    the page where the visitor has to go looking for it. */
 .result {
-  grid-column: 1 / -1;
   align-self: start;
   margin-top: var(--s4);
   scroll-margin-top: 88px;
@@ -1122,7 +1093,6 @@ footer {
   color: var(--ink-3); font-size: var(--t-xs);
 }
 .footer-brand { display: inline-flex; align-items: center; gap: var(--s2); color: var(--ink-2); }
-.footer-brand .brand-mark { width: 20px; height: 20px; font-size: 11px; }
 footer nav { gap: var(--s5); font-size: var(--t-xs); }
 footer a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line); }
 footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
@@ -1134,7 +1104,6 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
 @media (max-width: 1080px) {
   .stage { grid-template-columns: 1fr; gap: var(--s7); padding-bottom: var(--s8); align-items: start; }
   .hero-copy { max-width: 56ch; }
-  .trust-line { grid-auto-flow: column; grid-template-columns: none; justify-content: start; gap: var(--s5); }
   .how, .pricing { grid-template-columns: 1fr; gap: var(--s6); align-items: start; }
 }
 
@@ -1162,7 +1131,6 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   .stage { padding: var(--s6) var(--gutter) var(--s7); gap: var(--s6); }
   .hero h1 { letter-spacing: -.04em; }
   .hero-copy { margin: var(--s4) 0 var(--s5); font-size: var(--t-base); }
-  .trust-line { grid-auto-flow: row; gap: var(--s2); padding-top: var(--s4); }
   .workspace, .result { border-radius: var(--radius-md); }
   .workspace-topline, .result-heading { padding: var(--s4); min-height: 0; }
   .result-heading { flex-wrap: wrap; }

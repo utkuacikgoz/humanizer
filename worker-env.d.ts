@@ -15,5 +15,9 @@ declare namespace Cloudflare {
     STRIPE_SECRET_KEY?: string;
     STRIPE_WEBHOOK_SECRET?: string;
     STRIPE_PRICE_STARTER?: string;
+    /** Required outside explicit local/test environments; >=32 random bytes. */
+    PREVIEW_GUARD_SECRET?: string;
+    /** Set to `production`, `development`, `local`, or `test`. */
+    ENVIRONMENT?: string;
   }
 }

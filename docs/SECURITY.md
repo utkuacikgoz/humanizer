@@ -112,6 +112,32 @@ The current stack points to Cloudflare D1, not Supabase. Therefore Supabase RLS 
 - Production logs sampled under adversarial inputs contain no source/output/provider payload/secrets.
 - CSP and security headers are verified on production-like responses.
 
+## Anonymous preview abuse enforcement
+
+Production preview admission is shared through D1. The fixed window permits 12
+new executions per trusted Cloudflare connecting IP per 60 seconds and at most
+2 active executions. Active rows carry 15-second expiring leases; the route's
+pipeline deadline remains 5 seconds. Successful idempotent responses are
+replayable for 10 minutes, encrypted with AES-GCM. Failed request records expire
+after 30 seconds. Opportunistic cleanup removes at most 100 expired request rows
+and 100 old window rows per admission so cleanup work is bounded.
+
+`PREVIEW_GUARD_SECRET` is required in production and must contain at least 32
+random bytes. It keys HMAC-SHA-256 client/request/content identifiers and derives
+the replay-encryption key. D1 stores no raw IP, idempotency key, content hash, or
+plaintext replay payload. `cf-connecting-ip` is trusted only at the Cloudflare
+Worker boundary; missing or malformed identity fails closed. The isolate-memory
+fallback is allowed only under explicit `local`, `development`, or `test`
+configuration.
+
+Admission checks and counter increments are implemented by SQLite triggers on
+the request-row insert/reactivation. D1 serializes writes, so the limit check,
+lease creation, and counter increment are one database transaction. A random
+lease fencing token prevents a timed-out Worker from overwriting a reclaimed
+request. Residual caveat: this depends on D1's single-primary serialized-write
+semantics and migration triggers; deployments must apply the migrations before
+traffic and must not route admission reads/writes through a read replica.
+
 ## Incident and key-response minimums
 
 Before launch, assign an incident owner and document how to disable a provider/preview/checkout through server-side flags, rotate AI and Stripe secrets, stop webhook processing without losing the inbox, reconcile subscriptions/usage, invalidate anonymous capabilities, notify affected users as legally required, and preserve content-free forensic evidence. A rollback must not re-expose deleted content or revert entitlement corrections.
@@ -120,7 +146,15 @@ Before launch, assign an incident owner and document how to disable a provider/p
 
 Release is blocked by any unresolved critical/high issue involving cross-user access, full-result leakage, semantic-gate bypass, forged entitlements, quota overcharge, webhook spoofing/replay side effects, prompt-driven secret/data exfiltration, stored/reflected XSS, exposed secrets, unbounded economically material abuse, misleading deletion, or undisclosed/unapproved provider use. Medium risks require owner, mitigation, target date, and explicit Security/Product acceptance.
 
-The Phase 0 preview currently validates idempotency keys, coalesces/replays duplicates for 60 seconds, caps each observed client at 12 requests per minute and two concurrent requests, bounds the replay cache, and rejects request-path orchestration after five seconds while propagating an abort signal. Provider adapters must honor that signal to stop upstream work. These controls live inside one Worker runtime and are not a distributed security boundary. Before connecting a paid provider, move rate/concurrency enforcement to an edge or durable store, define trusted client identity at the hosting boundary, and test cross-isolate and degraded-store behavior.
+The Phase 0 preview validates idempotency keys, replays encrypted successful
+responses for 10 minutes, and enforces 12 new executions per 60 seconds plus
+two active executions through shared D1 admission triggers. Production fails
+closed if D1, the guard secret, or the trusted Cloudflare connecting address is
+unavailable. Request-path orchestration has a five-second deadline and
+propagates an abort signal; provider adapters must honor that signal to stop
+upstream work. Before connecting a paid provider, verify the D1 triggers under
+real cross-colo concurrency and degraded-store conditions and layer an edge/WAF
+control over IP-only identity.
 
 ---
 
@@ -231,22 +265,30 @@ $ curl -s -X POST /api/humanize -H 'x-idempotency-key: …' \
 
 **Remediation.** Replace the constant visible floor with a fixed transparent fraction plus a *hidden*-word floor that scales with input: never expose more than ~40%, never hide fewer than N words, and refuse inputs short enough to make the policy meaningless. Treat any response that would carry `hiddenWordCount: 0` from the paid path as a bug, not as a preview. `ARCHITECTURE.md` already assigns "Partial preview selection" to PO + DES before M1-10; this finding is the security reason that decision cannot be deferred past launch.
 
-### SEC-03 — High — Abuse controls are per-isolate and in-memory, and three routes have none at all
+### SEC-03 — High, partially remediated — Preview admission is shared; paid-adjacent routes remain unguarded
 
-**Where.** `src/lib/preview-request-guard.ts:57` keys the replay cache `${clientId}:${idempotencyKey}`; line 77 keys the rate-limit window on `clientId` alone; both live in plain `Map`s inside one isolate. `app/api/humanize/route.ts:183` and `app/api/preview/route.ts:33` both derive `clientId` as `request.headers.get("cf-connecting-ip")?.trim() || "anonymous-runtime"`.
+**Current state.** `/api/humanize` now uses `DistributedPreviewRequestGuard` in
+production. HMAC-keyed client/request/content identifiers, trigger-serialized
+fixed-window and active-lease checks, encrypted replay, fencing tokens, and
+fail-closed binding/identity handling remove the per-isolate bypass described
+below. Isolate memory remains an explicitly non-production fallback only.
 
-**Observed.** Against the dev server, 20 rapid `/api/humanize` requests from one client produced `200 200 429 429 …` — the limiter works. Then eight requests carrying rotating `cf-connecting-ip: 10.9.9.1 … 10.9.9.8` all returned **200**. Separately, 30 consecutive `/api/result` requests (each returning a full paid rewrite) all returned 200, and 15 consecutive `/api/billing/portal` requests all reached the Stripe branch. Neither route is throttled at all.
+**Historical observation.** Before the D1 guard, 20 rapid `/api/humanize`
+requests against the dev server produced `200 200 429 429 …`; rotating a
+client-supplied `cf-connecting-ip` bypassed that local-only control. Separately,
+30 consecutive `/api/result` requests all returned 200, and 15 consecutive
+`/api/billing/portal` requests all reached the Stripe branch. The latter route
+coverage gap remains.
 
 **Honest reading of the header-rotation result.** On real Cloudflare, `CF-Connecting-IP` is set by the edge and any client-supplied value is overwritten, so the rotation bypass observed above is a **dev-server artifact and is not by itself a production finding**. The 2026-08-23 draft claimed it as a live spoofing risk; that claim is withdrawn. What survives, and is enough on its own:
 
-- **Per-isolate state.** Workers isolates are many and ephemeral. The real ceiling is `12 × (live isolates)`, and the replay cache — the *idempotency guarantee* — evaporates whenever an isolate recycles. `app/api/humanize/route.ts:41-56` already documents that consequence honestly. An attacker distributing requests across colos or simply opening many concurrent connections gets many isolates for free.
-- **Shared-bucket collapse.** If the Worker sits behind the ChatGPT proxy and Cloudflare therefore sees the *proxy's* address, every customer in the world collapses into one bucket of 12 requests/minute and two concurrent requests, per isolate. One user's normal activity throttles everyone else. Which branch applies is **unverified** — it depends on whether the platform forwards the end-user address, which cannot be determined from this repository.
-- **A missing signal is a shared constant, not a failure.** `|| "anonymous-runtime"` puts every request with no client signal into one bucket rather than failing closed.
+- **Shared-bucket collapse.** If the Worker sits behind the ChatGPT proxy and Cloudflare therefore sees the *proxy's* address, every customer in the world collapses into one shared bucket of 12 requests/minute and two concurrent requests. One user's normal activity throttles everyone else. Which branch applies is **unverified** — it depends on whether the platform forwards the end-user address, which cannot be determined from this repository.
 - **Zero coverage where money is.** `/api/checkout`, `/api/result`, `/api/billing/portal`, and `/api/events` have no guard whatsoever. Combined with SEC-01, an unauthenticated attacker can drive unbounded Stripe API calls through `/api/billing/portal` with rotating forged identities.
 
-`README.md` states outright that "distributed edge/store-backed abuse controls remain mandatory before the paid model is exposed publicly." That is this finding, in the project's own words.
-
-**Remediation.** Move rate and concurrency enforcement to a Durable Object, KV, or Cloudflare's Rate Limiting binding. Derive client identity at the hosting boundary and treat a missing signal as fail-closed. Extend coverage to the result and billing routes.
+**Remediation remaining.** Confirm the identity signal on the actual production
+path, exercise D1 admission against real cross-colo contention, add an edge/WAF
+layer for IP rotation and volumetric attacks, and extend appropriate protection
+to checkout, result, billing, and event routes.
 
 ### SEC-04 — High — `/api/checkout` never checks for an existing subscription, so a returning customer is charged twice
 
@@ -385,7 +427,7 @@ Verified in this review and recorded deliberately, so a later reviewer does not 
 
 Recorded so the two documents are not read as disagreeing by accident.
 
-- **Withdrawn:** the claim that `cf-connecting-ip` rotation is a production rate-limit bypass. Cloudflare sets that header at its edge and overwrites inbound copies; the rotation observed against the dev server is a dev-runtime artifact. SEC-03 stands on per-isolate state, shared-bucket collapse, and the entirely unguarded billing/result routes.
+- **Withdrawn:** the claim that `cf-connecting-ip` rotation is a direct header-spoof bypass in production. Cloudflare sets that header at its edge and overwrites inbound copies; the rotation observed against the dev server is a dev-runtime artifact. The later D1 guard closes the per-isolate portion of SEC-03; shared-bucket collapse and unguarded paid-adjacent routes remain.
 - **Strengthened:** SEC-01 moved from "two forged headers move every route to the authenticated branch" to a proven end-to-end retrieval of another user's paid rewrite, plus confirmation that the billing-portal path resolves the victim's Stripe customer before failing on unconfigured Stripe.
 - **Strengthened:** SEC-02 — the previous draft reported 67% of the paid output exposed. The observed worst case is 100%, with `hiddenWordCount: 0`.
 - **New:** SEC-04 (double-charge), which the previous review did not identify.

@@ -86,11 +86,6 @@ export default function PrivacyPolicyPage() {
       <section>
         <h2>AI processing</h2>
         <p>
-          Your pasted text is sent to a third-party AI provider so we can identify what needs to be protected
-          (names, dates, numbers, citations, terminology, and similar details), generate the rewrite, and
-          verify that its meaning matches your original before you see it.
-        </p>
-        <p>
           We do not use your text to train our own models, and we do not permit a provider to train on it,
           without your separate, explicit, revocable consent. No such consent flow exists today, so no
           customer text is used for training.

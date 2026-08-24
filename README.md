@@ -2,7 +2,9 @@
 
 `PROJECT_CODENAME=humanizer`
 
-Ownword is a paid-first writing product that turns generic AI-assisted drafts into natural writing while preserving the author's meaning. The customer-facing name lives in one configuration source (`src/config/product.ts`); `humanizer` remains the internal codename and repository name.
+Ownword is a paid-first writing product at [ownword.pro](https://ownword.pro) that turns generic AI-assisted drafts into natural writing while preserving the author's meaning. The customer-facing name and domain live in one configuration source (`src/config/product.ts`); `humanizer` remains the internal codename and repository name.
+
+The confirmed operator is Bosphorus Elevate LLC and the monitored support address is `support@ownword.pro`. Ownword uses a text wordmark until the founder supplies approved logo and favicon artwork.
 
 ## Current foundation
 
@@ -14,12 +16,13 @@ Ownword is a paid-first writing product that turns generic AI-assisted drafts in
 - 100-fixture deterministic benchmark scaffold across the ten required categories
 - Central brand and plan configuration
 - Cloudflare Worker deployment metadata
-- Bounded per-runtime preview abuse guard with idempotent replay, concurrency/rate ceilings, and a five-second request-path deadline
+- D1 backed preview abuse guard with encrypted idempotent replay, shared concurrency and rate ceilings, and a five-second request-path deadline
+- Append-only usage ledger with concurrency-safe admission control, enforcing each plan's word allowance (M2-07, D-015)
 - Product, architecture, monetization, security, QA, SEO, and backlink operating documents
 
 Stripe checkout, anonymous-result persistence, verified webhook projection, server-authoritative unlock, and the billing portal are implemented (M2-01 through M2-06 and M2-08 through M2-10).
 
-Still open and release-blocking: the deterministic provider and benchmark fixtures are contract-testing and product-demo baselines, not production quality evidence. The in-memory request guard is defense-in-depth only; distributed edge/store-backed abuse controls remain mandatory before the paid model is exposed publicly. The usage ledger (M2-07) is deliberately unimplemented pending a concurrency-safety spike — see D-013 in the decision log. Quotas, history, and account deletion remain backlog milestones.
+Still open and release-blocking: the deterministic provider and benchmark fixtures are contract-testing and product-demo baselines, not production quality evidence. Production deployment must apply the D1 guard migrations, configure `PREVIEW_GUARD_SECRET`, and add an edge/WAF layer for network rotation and shared NAT behavior. History and account deletion remain backlog milestones.
 
 The complete rewrite is generated on the server, but the anonymous response exposes only the allowed preview and a hidden-word count; the browser never receives the locked remainder.
 
@@ -52,6 +55,14 @@ The current test suite covers protected-content extraction, targeted rewriting, 
 - Stripe plan-to-price mapping: `src/config/stripe.ts`
 - Evaluation thresholds: `src/lib/humanization/pipeline.ts`
 - Hosting metadata: `.openai/hosting.json`
+- Anonymous preview abuse protection: D1 migrations plus `PREVIEW_GUARD_SECRET`
+
+Production deploys must set `PREVIEW_GUARD_SECRET` to at least 32 random bytes
+with `wrangler secret put PREVIEW_GUARD_SECRET`, set `D1_DATABASE_ID`, and apply
+all `drizzle/*.sql` migrations before serving traffic. The in-memory request
+guard is used only by plain-Node tests and builds explicitly marked `local`,
+`development`, or `test`; production fails closed when D1 or the secret is
+unavailable.
 - Local Stripe/D1 secrets: copy `.dev.vars.example` to `.dev.vars` (gitignored) — see that file for where each value comes from. Production secrets are set through the deployment platform's own secret store, not this repo.
 
 Do not scatter the temporary name, pricing values, or plan rules through application logic.
