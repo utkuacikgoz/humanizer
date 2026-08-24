@@ -9,7 +9,6 @@ import { track } from "@/src/lib/analytics";
 import type { BillingReadiness } from "@/src/lib/billing-readiness";
 import { improvementLabel, MIN_PAYWALLABLE_INPUT_WORDS, shouldOfferUnlock } from "@/src/lib/preview-projection";
 import { subscriptionDisclosure } from "@/src/lib/subscription-disclosure";
-import { ManageBilling } from "@/src/components/manage-billing";
 import { MarkedText, describeMarks, diffRewrite, selectDisplayFacts } from "@/src/components/rewrite-marks";
 
 type Mode = (typeof MODES)[number]["id"];
@@ -326,6 +325,15 @@ export default function Home() {
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} />
       <header className="site-header">
         <a className="brand" href="#top" aria-label={`${productConfig.productName} home`}>
+          <svg className="brand-icon" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+            <rect width="64" height="64" rx="14" fill="var(--green)" />
+            <path
+              d="M32 13.5a18.5 18.5 0 1 1 0 37 18.5 18.5 0 0 1 0-37Z"
+              fill="none" stroke="var(--paper)" strokeWidth="7.5" strokeLinecap="round"
+              strokeDasharray="86 30" transform="rotate(-32 32 32)"
+            />
+            <rect x="38.5" y="28.6" width="14.5" height="6.8" rx="3.4" fill="var(--band-accent)" />
+          </svg>
           <span>{productConfig.productName}</span>
         </a>
         <nav aria-label="Primary navigation">
@@ -549,7 +557,7 @@ export default function Home() {
                 <small className="unlock-terms">
                   <span role="status">{billingReadiness?.message ?? "Checking checkout availability before you continue."}</span><br />
                   {subscriptionDisclosure(starterPlan)}{" "}
-                  <a href="#manage-billing">Cancel anytime</a>. No cancellation fee.
+                  <Link href="/terms#manage-billing">Cancel anytime</Link>. No cancellation fee.
                 </small>
                 {unlockStatus === "error" ? <small role="alert">{unlockError}</small> : null}
               </div>
@@ -559,8 +567,53 @@ export default function Home() {
         </div>
       </div>
 
+      <section className="why" id="why">
+        <div className="section-intro">
+          <h2>Careful with your meaning.<br />Quick with everything else.</h2>
+          <p className="why-lede">
+            Most rewriting tools hand back a paragraph and ask you to trust it. This one shows
+            you what it changed, what it deliberately left alone, and whether your meaning
+            survived, before you decide it is any good.
+          </p>
+        </div>
+        <div className="why-grid">
+          <article>
+            <h3>It changes less than you expect</h3>
+            <p>
+              Only the sentences that actually read as machine-written are rewritten. Your good
+              paragraphs come back untouched, so the draft still sounds like you rather than
+              like a different writer.
+            </p>
+          </article>
+          <article>
+            <h3>Your facts are held, not hoped for</h3>
+            <p>
+              Names, numbers, dates, quotes, citations, and technical terms are identified before
+              a single word moves, then checked again afterwards. A rewrite that damages one of
+              them does not reach you.
+            </p>
+          </article>
+          <article>
+            <h3>Every change is visible</h3>
+            <p>
+              Cuts and rewrites are marked in the text side by side with your original. You are
+              never asked to accept a black box, and you can see the evidence before you pay for
+              anything.
+            </p>
+          </article>
+          <article>
+            <h3>Paste and go</h3>
+            <p>
+              No account, no setup, no prompt to write. Paste a draft, pick a tone, and read the
+              result. Four modes cover most of what people actually need, and switching is one
+              click.
+            </p>
+          </article>
+        </div>
+      </section>
+
       <section className="how" id="how-it-works">
-        <div className="section-intro"><p className="eyebrow"><span /> How it works</p><h2>Rewrite less.<br />Protect more.</h2></div>
+        <div className="section-intro"><h2>Rewrite less.<br />Protect more.</h2></div>
         <div className="how-grid">
           <article><b>01</b><h3>Find the stiff parts</h3><p>We flag robotic patterns, filler, repetition, and forced transitions instead of rewriting every sentence.</p></article>
           <article><b>02</b><h3>Protect what matters</h3><p>Names, numbers, dates, quotes, citations, URLs, and technical terms are tracked before anything changes.</p></article>
@@ -570,7 +623,6 @@ export default function Home() {
 
       <section className="pricing" id="pricing">
         <div className="pricing-intro">
-          <p className="eyebrow"><span /> Simple pricing</p>
           <h2>Try the quality.<br />Pay for the full result.</h2>
           <p>Every rewrite is checked before you see it. You only pay once you have read part of the result and judged it for yourself.</p>
         </div>
@@ -583,17 +635,9 @@ export default function Home() {
       </section>
 
       {/* ACT-09: the hero promises "Cancel anytime", so the path has to
-          exist on the product surface. One click opens the Stripe Billing
-          Portal for the signed-in customer; every failure the route can
-          return is surfaced with what to do next. */}
-      <section className="billing-strip" id="manage-billing" aria-labelledby="manage-billing-title">
-        <div>
-          <h2 id="manage-billing-title">Already subscribed?</h2>
-          <p>Change your plan, update your card, or cancel your subscription. The billing portal shows the exact effective date before you confirm anything.</p>
-        </div>
-        <ManageBilling returnTo="/#manage-billing" />
-      </section>
-
+          exist. The Billing Portal control lives on /terms beside the
+          cancellation clause it belongs to, rather than mid-funnel where it
+          advertised cancelling to people who have not bought anything. */}
       <footer>
         <span className="footer-brand">
           {productConfig.productName} · {productConfig.productTagline}
