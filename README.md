@@ -1,8 +1,8 @@
-# Humanizer
+# Ownword
 
 `PROJECT_CODENAME=humanizer`
 
-Humanizer is a paid-first writing product that turns generic AI-assisted drafts into natural writing while preserving the author's meaning. The customer-facing name is temporary and comes from one configuration source.
+Ownword is a paid-first writing product that turns generic AI-assisted drafts into natural writing while preserving the author's meaning. The customer-facing name lives in one configuration source (`src/config/product.ts`); `humanizer` remains the internal codename and repository name.
 
 ## Current foundation
 
@@ -17,7 +17,11 @@ Humanizer is a paid-first writing product that turns generic AI-assisted drafts 
 - Bounded per-runtime preview abuse guard with idempotent replay, concurrency/rate ceilings, and a five-second request-path deadline
 - Product, architecture, monetization, security, QA, SEO, and backlink operating documents
 
-The deterministic provider and benchmark fixtures are contract-testing and product-demo baselines, not production quality evidence. The complete rewrite is generated on the server, but the anonymous response exposes only the allowed preview and a hidden-word count; the browser never receives the locked remainder. The in-memory request guard is defense-in-depth for this prototype; distributed edge/store-backed abuse controls remain mandatory before a paid model is exposed publicly. Durable server-side result persistence is still required before checkout can unlock that remainder. Stripe checkout, anonymous-result storage, webhook projection, quotas, history, and account deletion remain release-blocking milestones documented in the backlog.
+Stripe checkout, anonymous-result persistence, verified webhook projection, server-authoritative unlock, and the billing portal are implemented (M2-01 through M2-06 and M2-08 through M2-10).
+
+Still open and release-blocking: the deterministic provider and benchmark fixtures are contract-testing and product-demo baselines, not production quality evidence. The in-memory request guard is defense-in-depth only; distributed edge/store-backed abuse controls remain mandatory before the paid model is exposed publicly. The usage ledger (M2-07) is deliberately unimplemented pending a concurrency-safety spike — see D-013 in the decision log. Quotas, history, and account deletion remain backlog milestones.
+
+The complete rewrite is generated on the server, but the anonymous response exposes only the allowed preview and a hidden-word count; the browser never receives the locked remainder.
 
 ## Local development
 
@@ -51,6 +55,11 @@ The current test suite covers protected-content extraction, targeted rewriting, 
 - Local Stripe/D1 secrets: copy `.dev.vars.example` to `.dev.vars` (gitignored) — see that file for where each value comes from. Production secrets are set through the deployment platform's own secret store, not this repo.
 
 Do not scatter the temporary name, pricing values, or plan rules through application logic.
+
+## CI/CD
+
+- `.github/workflows/ci.yml`: lint, typecheck, test, benchmark on every push/PR.
+- `.github/workflows/deploy.yml`: manual-only (`workflow_dispatch`). Needs `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_DATABASE_ID` repo secrets — vinext generates `wrangler.json` at build time from `vite.config.ts`. Do not enable auto-deploy-on-merge until it's confirmed whether `.openai/hosting.json`'s hosting platform already auto-deploys, to avoid double-deploying.
 
 ## Documentation
 

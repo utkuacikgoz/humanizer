@@ -5,7 +5,7 @@ export const pricingConfig = {
     starter: {
       id: "starter",
       name: "Starter",
-      monthlyPrice: 9,
+      monthlyPrice: 9.99,
       interval: "month",
       availability: "active",
       wordLimit: 50_000,

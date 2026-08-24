@@ -26,6 +26,8 @@ Owners:
 - TOK — Token Optimization
 - MEM — Project Memory
 
+Token/context discipline (D-014, TOK-owned): terse replies, minimal comments, cheap-model delegation for mechanical work, no redundant re-reads. Applies to all agents.
+
 Agents update relevant memory documents when a decision or verified implementation changes. SEO and backlink work remains parallel and must not block core-product milestones. BL owns the operating system and acquisition backlog in `BACKLINKS.md`; SEO retains authority over indexable-page strategy and technical search requirements.
 
 ## Atomic backlog
