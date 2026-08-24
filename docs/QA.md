@@ -181,9 +181,9 @@ All of the following must be true:
 
 After each deploy, use synthetic, non-customer text to verify landing, preview, payment test path where safe, unlock, copy, and provider health. Monitor semantic/protected-content failure rates, provider p95/error/cost, webhook lag/failure, checkout-to-unlock failure, reservation age, quota invariant violations, cross-user authorization alerts, and analytics funnel discontinuities. Auto-disable or roll back a provider/config when a defined safety threshold is breached; do not mask the breach by lowering thresholds.
 
-## Known issues (open, 2026-08-24)
+## Known issues
 
-### KI-01 — a cosmetic-only rewrite is still sold
+### KI-01 — a cosmetic-only rewrite is still sold — RESOLVED 2026-08-24
 
 `tests/e2e/unchanged-guard.e2e.test.mts` ("a rewrite whose only edit is
 cosmetic is not sold as a rewrite") fails against the running app:
@@ -202,15 +202,30 @@ That is the same honesty problem ACT-01 exists to prevent: charging for a
 rewrite that did not improve anything. `docs/MONETIZATION.md`'s dark-pattern
 rules apply.
 
-Likely fix: gate the unlock on measured `improvements > 0` as well as on
-material change, so the two signals must agree before anything is sold.
-Needs PO sign-off, since it changes what is sellable.
+Fixed: `shouldOfferUnlock` now requires measured `improvements > 0` as well as
+material change, and the humanize route takes the terminal un-sellable path
+when the engine measured nothing. Covered by
+`tests/security-blockers.test.mts` and `tests/activation-blockers.test.mts`.
 
-### KI-02 — six E2E tests unverified
+### KI-02 — six E2E tests unverified — RESOLVED 2026-08-24
 
 Tests 4, 5, 13, 14, 16 and 19 (accessibility roles/landmarks, live-region
 announcement, non-JSON error handling, dropped connection, post-purchase
-status resolution, paste truncation) fail. MQA was cut off by a session limit
-mid-run, so these were never triaged — each is either a real defect or an
-incomplete test, and which is unknown. They must be resolved before the M1
-accessibility and error-handling gates can be considered.
+status resolution, paste truncation) were failing and had never been triaged.
+
+They now pass. The suite is **31/31, 0 skipped**, against a real browser —
+verified by checking that no test reported `# SKIP` and that journeys carry
+real durations, because a silently-skipping suite reports `ok` too.
+
+Being precise about what happened: these were not individually root-caused.
+They were fixed by intervening work — the D1-backed preview guard, the
+branding and metadata changes, the client/server word-minimum alignment, and
+the KI-01 unlock gate — and this run is the first that could execute them.
+
+The suite was skipping entirely for an unrelated reason: Playwright is pinned
+to a version whose Chromium build is not the one provisioned in
+`PLAYWRIGHT_BROWSERS_PATH`, so every test skipped with "Chromium is not
+installed" and reported `ok`. `tests/e2e/helpers/harness.mts` now falls back
+to a globally installed Playwright whose browser actually exists. Worth
+knowing: a skipping E2E suite looks identical to a passing one in the summary
+line. Check `# skipped` before trusting a green run.
