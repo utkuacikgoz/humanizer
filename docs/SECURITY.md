@@ -1,6 +1,6 @@
 # Security, Privacy, and Threat Model
 
-Last updated: 2026-08-23
+Last updated: 2026-08-24
 Owner: Security Agent
 Risk principle: customer writing is sensitive even when the user does not label it sensitive
 
@@ -124,196 +124,285 @@ The Phase 0 preview currently validates idempotency keys, coalesces/replays dupl
 
 ---
 
-# Pre-launch security review — 2026-08-23
+# Pre-launch security review — 2026-08-24
 
-Reviewer: Security Agent. Scope: payment/entitlement integrity, anonymous capability model, secret handling, data minimization, web security surface, abuse/availability, supply chain.
+Reviewer: Security Agent. Scope: payment/entitlement integrity, anonymous capability model, auth boundary, secret handling, data minimization, web security surface, abuse/availability, supply chain.
 
-Method: read of the actual implementation plus empirical probing of the running development server (`http://localhost:3000`) with hostile and malformed requests. Findings marked *observed* were reproduced against that server; findings marked *code-verified* were confirmed by reading the implementation but could not be exercised live (usually because Stripe is unconfigured in this environment); findings marked *unverified* say so and explain why.
+Supersedes the 2026-08-23 review, which was cut off mid-engagement. Every claim carried forward from it was re-verified against the current tree; several were corrected (see "Corrections to the 2026-08-23 draft"). Snapshot: `6c79614`, working tree clean apart from DES's in-flight `app/page.tsx` / `app/globals.css` edits. `npm test` 126/126 passing, lint and `tsc --noEmit` clean.
 
-Snapshot: working tree at `dc34772` plus uncommitted in-flight edits by other agents. `db/stripe-client.ts`, `db/billing-repository.ts`, `app/api/result/route.ts`, and `app/api/webhooks/stripe/route.ts` changed **during** this review; line numbers below were correct at the moment each finding was taken and should be re-resolved by function name if they have drifted.
+Method:
 
-## Verdict: NO-GO for taking real customer money today
+- **observed** — reproduced against the running development server at `http://localhost:3000` with hostile/malformed requests, or read directly out of the local D1 store (`.wrangler/state/v3/d1/…`).
+- **code-verified** — confirmed by reading the implementation, but not exercisable live here (usually because Stripe is unconfigured in this environment).
+- **unverified** — stated as such, with the reason.
 
-Four launch blockers, listed in the conditions below. None of them is a disagreement about polish; each is either a control the threat model above already declares release-critical, or a defect that prevents the paid flow from functioning at all in production.
+Where an empirical result depends on the local dev runtime rather than real Cloudflare, that is called out explicitly rather than generalized.
 
-This is not a judgement that the codebase is careless — the opposite. The entitlement path, the webhook inbox, the claim transaction, the preview projection, and secret hygiene are all built to the standard this document asks for, and several of them are genuinely well done (see "What is genuinely sound"). The blockers are concentrated in the boundary between this application and the platform it will be deployed onto, and in the privacy commitments that were deliberately deferred.
+## Verdict: NO-GO for charging real customers today
+
+Five blockers, below. One of them (SEC-01) is a proven, end-to-end authentication bypass that hands one person another person's paid writing. One (SEC-04) charges a returning subscriber a second time on the *normal* journey, not an edge case. The rest are controls this document already declares release-critical.
+
+This is not a verdict about carelessness. The entitlement path, the claim transaction, the webhook inbox, the preview projection, the enumeration-oracle discipline, and secret hygiene are built to the standard this document asks for, and most of them were verified sound under adversarial probing (see "What is genuinely sound" — it is long, and it is meant to be). The blockers sit almost entirely at the seam between this application and the platform it is about to be deployed onto, plus the privacy commitments that were deliberately deferred.
 
 ### Blockers
 
-1. **SEC-01** — Platform identity headers are trusted with no verification, and the repository's own deploy path publishes a second origin that is not behind the boundary that is supposed to inject them.
-2. **SEC-02 + SEC-03** — The paywall is extractable for free at scale, and the only abuse control is keyed on a client-supplied header. `README.md` already states distributed abuse controls are mandatory before the paid model is exposed publicly; that condition is unmet.
-3. **SEC-05** — Customer writing is stored in D1 as plaintext, indefinitely, with no purge, no expiry sweeper, and no deletion path of any kind. D-P01 and D-P04 are still OPEN, which means indefinite plaintext retention would be launched as an accident rather than as a decision.
-4. **SEC-06** — The deploy workflow never applies D1 migrations and the generated `migrations_dir` points at a directory that does not exist. On a real deploy, the database has no schema, so no capability is ever issued and nobody can complete a purchase.
+1. **SEC-01 (Critical)** — Two forged request headers are a complete authentication bypass. *Proven end-to-end against the running server*: forged headers returned a victim's full unlocked rewrite with HTTP 200. The application has no defence of its own; it relies entirely on an unproven assumption about the hosting boundary, and the repo's own deploy path publishes a second origin.
+2. **SEC-02 (High)** — The paywall is extractable for free, at scale, by shaping input. For short inputs the server returns the **entire** rewrite with `hiddenWordCount: 0`.
+3. **SEC-04 (High)** — `/api/checkout` never checks whether the caller is already subscribed. The default returning-customer journey walks an existing subscriber straight into a second $9.99/mo subscription.
+4. **SEC-06 (High)** — Customer writing is stored in D1 as indefinite plaintext with no purge, no expiry sweeper, and no deletion path. D-P01 and D-P04 are still OPEN, so this would ship as an accident rather than a decision.
+5. **SEC-07 (Medium security / launch-fatal operationally)** — The deploy workflow never applies D1 migrations, and the generated `migrations_dir` points at a directory that does not exist. On a real deploy the schema is absent, no capability is ever issued, and nobody can complete a purchase — silently.
 
-### If the owner intends to launch anyway, the minimum GO-WITH-CONDITIONS set
+SEC-03 (High) is not listed separately as a blocker only because it is inseparable from SEC-02: `README.md` already states that distributed abuse controls are mandatory before the paid model is exposed publicly, and that condition is unmet.
 
-- Prove, with a request from outside the platform, that the production origin cannot be reached without the hosting boundary, **and** that the boundary strips inbound `oai-authenticated-user-*` headers. If either cannot be proven, implement the shared-secret check in SEC-01 first. This is a verification task, not necessarily a code change, but it must produce evidence.
-- Add `wrangler d1 migrations apply --remote` to the deploy job and fix `migrations_dir`; smoke-test that a preview returns a `capability` in production.
-- Move rate limiting to a durable store, or accept a documented, dated risk that the free preview is farmable and the service is DoS-able by one client.
-- Either implement the 24-hour purge for unclaimed anonymous payloads, or record an explicit dated Security/Legal acceptance of indefinite plaintext retention with the privacy notice matching it. The current privacy page is honest about deletion being unavailable, which is why this is a condition rather than a misrepresentation.
+### The minimum GO-WITH-CONDITIONS set, if the owner launches anyway
 
-Per `docs/AGENTS.md`, closing any QA gate or milestone remains a PO decision; nothing here grants one.
+Each condition must produce evidence, not an intention.
+
+1. **Prove the auth boundary, or fail closed without it.** Produce a request from outside the platform showing (a) the production origin is unreachable except through the hosting boundary, and (b) the boundary strips inbound `oai-authenticated-user-*` headers. If either cannot be shown, implement the boundary-injected shared secret in SEC-01 first. Set `workers_dev: false` and bind the `ownword.pro` route regardless — the second origin should not exist either way.
+2. **Add an existing-entitlement check to `/api/checkout`** (SEC-04) — refuse to create a second subscription for a customer who already holds an active one, and tell them so. This is a small change and it protects real money.
+3. **Apply migrations on deploy** (SEC-07): add `wrangler d1 migrations apply --remote`, fix `migrations_dir`, and smoke-test that a production preview actually returns a `capability`.
+4. **Fix the preview exposure policy** (SEC-02): a bounded fraction with a hidden-word floor that scales with input, and refuse inputs short enough to make the policy meaningless. A response with `hiddenWordCount: 0` must never be produced by the paid path.
+5. **Retention** (SEC-06): either implement the 24-hour purge for unclaimed anonymous payloads, or record a dated, explicit Security/Legal acceptance of indefinite plaintext retention with the privacy notice matching it. Decide D-P04 one way or the other in writing.
+6. **Abuse controls** (SEC-03): move rate/concurrency enforcement to a durable store and extend it to `/api/result`, `/api/checkout`, and `/api/billing/portal` — or accept a documented, dated risk that the preview is farmable and the billing routes are unthrottled.
+
+Per `docs/AGENTS.md`, closing any QA gate or milestone is a PO decision; nothing in this document grants one.
 
 ## Findings, ranked by severity
 
-### SEC-01 — Critical — Platform identity headers are accepted from any caller; the deploy path creates a boundary-free origin
+### SEC-01 — Critical — Forged platform identity headers are a full authentication bypass (proven)
 
-- `src/lib/chatgpt-identity.ts:27` (`resolveChatGPTUserFromHeaders`) — identity is `headers.get("oai-authenticated-user-id")` and `...-email`. There is no signature, no shared secret, no origin check, no allowlist, and no middleware anywhere in the app (`middleware.ts` does not exist; `/signin-with-chatgpt` returns 404 because it is entirely the platform's route).
-- `.github/workflows/deploy.yml:44` runs `npx wrangler deploy --config dist/server/wrangler.json`. The generated `dist/server/wrangler.json` sets neither `workers_dev: false` nor `routes`, so a deploy publishes the Worker on its default `*.workers.dev` hostname — an origin that by construction is **not** behind the ChatGPT hosting boundary.
+**Where.** `src/lib/chatgpt-identity.ts:27` (`resolveChatGPTUserFromHeaders`) resolves identity from exactly two request headers, `oai-authenticated-user-id` and `oai-authenticated-user-email`. There is no signature, no shared secret, no origin check, and no allowlist. There is no `middleware.ts` anywhere in the repository (verified: none at root, `app/`, or `src/`), and `/signin-with-chatgpt` returns 404 locally because it is entirely the platform's route. Every authenticated surface — `app/api/result/route.ts`, `app/api/checkout/route.ts`, `app/api/billing/portal/route.ts`, `app/chatgpt-auth.ts` — funnels through that one function.
 
-**Observed.** Against the running server:
+**Observed — end-to-end, not inferential.** A victim was seeded into the local D1 store (one `users` row with `external_subject = sec-victim-subject-9001`, one `active` `subscriptions` row, and one owned `humanization_jobs` row), reproducing exactly the state a real paying customer would be in. Then, from a plain shell with no session, no cookie, and no credential of any kind:
 
 ```
-curl -H 'oai-authenticated-user-id: attacker-sub' -H 'oai-authenticated-user-email: a@b.com' \
-     '/api/result?job=00000000-0000-4000-8000-000000000000'
-  -> 404 {"error":"Result not found.","pending":true}     # authenticated code path
-curl '/api/result?job=...'
-  -> 401 {"error":"Sign in to view this result."}          # unauthenticated code path
-curl -X POST -H 'oai-authenticated-user-id: victim-subject-123' ... '/api/billing/portal'
-  -> 404 {"error":"No billing account found."}             # authenticated code path
-curl -X POST '/api/billing/portal'
-  -> 401 {"error":"Sign in to manage billing."}
+$ curl -s "http://localhost:3000/api/result?job=<victim-job>"
+HTTP/1.1 401 Unauthorized
+{"error":"Sign in to view this result."}
+
+$ curl -s -H 'oai-authenticated-user-id: sec-victim-subject-9001' \
+         -H 'oai-authenticated-user-email: attacker@evil.test' \
+         "http://localhost:3000/api/result?job=<victim-job>"
+HTTP/1.1 200 OK
+{"original":"In today's busy world, it is important to note …",
+ "result":"In today's busy world, clear communication plays a crucial role. …"}
 ```
 
-Two forged headers move every route from the unauthenticated branch to the authenticated branch.
+The second response is the victim's complete paid rewrite. Two headers, no credential.
 
-**Exploit scenario.** An attacker who learns or guesses a victim's ChatGPT subject identifier sends requests to the `workers.dev` origin with those two headers and becomes that user. They can read the victim's unlocked rewrites (`GET /api/result`), open a Stripe Billing Portal session bound to the victim's customer (`POST /api/billing/portal` → invoices, payment-method details, cancel the subscription), and permanently claim a preview capability into an account of their choosing (`POST /api/checkout`). The subject identifier is an account identifier, not a credential — it is not designed to resist guessing, and it is the only thing standing between an attacker and full impersonation.
+The billing portal authenticates the same forgery. `POST /api/billing/portal` with the same two headers returned **503 "Billing is not available yet."** — and that status is itself the proof: `app/api/billing/portal/route.ts:24` resolves the user and their Stripe customer ID *before* the Stripe client is constructed, so reaching the 503 branch means the forged identity successfully resolved to the victim's `cus_…`. It stops only because Stripe is unconfigured in this environment. With Stripe configured, that call returns a Billing Portal URL scoped to the victim's customer: invoices, payment method, cancellation.
 
-The threat table above already rates "Auth header spoof" **Critical** and names the required control: *"Hosting boundary strips/injects trusted headers; production origin not directly reachable; deployment test."* None of the three is implemented or evidenced.
+**Also observed — the ownership check itself is sound.** Forging a *different* existing user's identity (`qa-user-A`) against the victim's job returned `404 {"error":"Result not found.","pending":true}`. There is no IDOR here. The defect is purely that identity is unauthenticated; every authorization decision downstream of it is correct.
 
-**Unverified portion.** I could not test the real production origin — there is none yet, and `.openai/hosting.json` records only a `project_id`. If the platform is the sole origin and it strips inbound `oai-*` headers, the live risk drops sharply. But the repository's own deploy workflow creates the second origin, so this is not hypothetical, and the app has zero defence in depth if the assumption ever breaks (a route change, a custom domain, a platform migration).
+**The second origin is real.** `.github/workflows/deploy.yml:44` runs `npx wrangler deploy --config dist/server/wrangler.json`. That file is generated by `vite.config.ts`, whose `localBindingConfig` sets neither `workers_dev: false` nor `routes` — verified in the generated artifact, which contains no `workers_dev` and no `routes` key. Wrangler's default with no route configured is to publish on the account's `*.workers.dev` hostname: an origin that by construction is not behind the ChatGPT hosting boundary.
+
+**Exploit scenario.** An attacker who learns or guesses a victim's ChatGPT subject identifier sends two headers to the `workers.dev` origin and *is* that user. They read every unlocked rewrite the victim owns (`GET /api/result`), open a Billing Portal session against the victim's Stripe customer (`POST /api/billing/portal`) to view invoices and payment-method details or cancel the subscription, and can permanently claim a preview capability into an account of their choosing (`POST /api/checkout`). A subject identifier is an account identifier, not a credential — it is not designed to resist guessing, is not rotatable, and is the only thing between an attacker and full impersonation.
+
+The threat table in this document already rates "Auth header spoof" **Critical** and names the required control: *"Hosting boundary strips/injects trusted headers; production origin not directly reachable; server helper only; deployment test."* None of the three is implemented or evidenced.
+
+**Unverified portion.** The real production origin could not be tested — there is none yet, and `.openai/hosting.json` records only a `project_id`. If the platform turns out to be the sole reachable origin *and* it strips inbound `oai-*` headers, live risk drops sharply. But the repository's own deploy workflow creates a second origin, so this is not hypothetical; and the application has zero defence in depth if that assumption ever breaks — a route change, a custom domain, a platform migration, or someone running the deploy workflow as written.
+
+**Plainly stated, as asked:** if this application is ever reachable other than through the trusted hosting boundary, it is **not safe**. It has no authentication at all in that configuration. Any anonymous internet user who can name a subject identifier becomes that user.
 
 **Remediation.**
-1. Set `workers_dev: false` and bind only the `ownword.pro` route in the generated Wrangler config; **and**
-2. Require a boundary-injected shared secret header, compared in constant time, rejecting any request that lacks it — so that a direct hit on any origin fails closed regardless of routing; **and**
-3. Add a deployment test that sends forged `oai-authenticated-user-*` headers at the production hostname and asserts 401.
+1. Set `workers_dev: false` and bind only the `ownword.pro` route in `vite.config.ts`'s `localBindingConfig`, so the generated Wrangler config never publishes a boundary-free origin; **and**
+2. require a boundary-injected shared-secret header, compared in constant time, rejecting any request that lacks it — so a direct hit on *any* origin fails closed regardless of routing; **and**
+3. add a deployment test that sends forged `oai-authenticated-user-*` headers at the production hostname and asserts 401.
 
-### SEC-02 — High — The paywall is extractable for free by chunking input into minimum-size previews
+Item 2 is the one that actually removes the single point of failure. Items 1 and 3 reduce the blast radius and prove it stays reduced.
 
-- `app/api/humanize/route.ts:109` — `partialPreview` exposes `Math.min(90, Math.max(8, Math.floor(words.length * 0.46)))` words.
-- `app/api/humanize/route.ts:149` — the minimum accepted input is 12 words. The endpoint requires no authentication.
+### SEC-02 — High — The paywall is extractable for free by shaping input; short inputs return the complete rewrite
 
-**Observed.** A 12-word submission returned `preview` of 8 words with `hiddenWordCount: 4` — 67% of the paid output, free, per request. The floor of 8 means the shorter the chunk, the higher the free fraction.
+**Where.** `app/api/humanize/route.ts:125-128` — `partialPreview` exposes `Math.min(90, Math.max(8, Math.floor(words.length * 0.46)))` words of the rewrite. `app/api/humanize/route.ts:165` sets the minimum accepted input at 12 words. The endpoint requires no authentication and no capability.
 
-**Exploit scenario.** Split a document into overlapping ~12-word windows and submit each anonymously, then reassemble. Every window yields at least 8 rewritten words and the windows can be shifted to cover the seams. The customer never pays and never signs in. Combined with SEC-03 there is no effective throttle on the loop. D-004's "the full product remains paid" is defeated not by leaking the hidden remainder (that boundary holds — see below) but by making the visible fraction arbitrarily large through input shaping.
+**Observed.** A 12-word submission returned the whole rewrite:
 
-**Remediation.** Make the exposure policy a fixed transparent fraction with a hidden-word floor that scales with input rather than a constant visible floor (never expose more than ~40%, never hide fewer than N words), and refuse inputs short enough to make the policy meaningless. `ARCHITECTURE.md` already assigns "Partial preview selection" to PO + DES before M1-10 — this finding is the security reason that decision cannot be deferred past launch.
+```
+$ curl -s -X POST /api/humanize -H 'x-idempotency-key: …' \
+    -d '{"text":"It is important to note that clear communication plays a crucial role.","mode":"natural"}'
+{"original":"It is important to note that clear communication plays a crucial role.",
+ "preview":"Clear communication plays a crucial role.",
+ "hiddenWordCount":0, …, "capability":"rXFvyf4g…"}
+```
 
-### SEC-03 — High — Rate limiting is keyed on a client-supplied header, is per-isolate, and defaults to a shared constant
+`hiddenWordCount: 0`. Nothing was withheld. The constant visible floor of 8 words means that whenever the rewrite is 8 words or shorter, the paid product is delivered in full, free, unauthenticated. `src/lib/preview-projection.ts:shouldOfferUnlock` correctly declines to render an unlock CTA in that state — which is honest, and is also precisely the point: there is nothing left to sell.
 
-- `src/lib/preview-request-guard.ts:57` keys the replay cache `${clientId}:${idempotencyKey}`; line 77 keys the rate-limit window on `clientId` alone.
-- `app/api/humanize/route.ts:167` and `app/api/preview/route.ts:33` both derive it as `request.headers.get("cf-connecting-ip")?.trim() || "anonymous-runtime"`.
+**Exploit scenario.** Split a document into overlapping ~12-word windows, submit each anonymously, reassemble. Each window yields at least 8 rewritten words, and shifting the window by 8 covers the seams. Cost to the attacker is one unauthenticated request per 8 words of output. The customer never pays and never signs in. D-004's "the full product remains paid" is defeated — not by leaking the hidden remainder (that boundary holds; see "What is genuinely sound") but by making the withheld fraction arbitrarily small through input shaping.
 
-**Observed.** After the default bucket returned 429 (requests 9–15 of a burst), six consecutive requests carrying rotating `cf-connecting-ip: 10.0.0.1` … `10.0.0.6` all returned 200. Rotating one header fully resets the limit.
+**Remediation.** Replace the constant visible floor with a fixed transparent fraction plus a *hidden*-word floor that scales with input: never expose more than ~40%, never hide fewer than N words, and refuse inputs short enough to make the policy meaningless. Treat any response that would carry `hiddenWordCount: 0` from the paid path as a bug, not as a preview. `ARCHITECTURE.md` already assigns "Partial preview selection" to PO + DES before M1-10; this finding is the security reason that decision cannot be deferred past launch.
 
-**Exploit scenario, two branches, and both are bad.**
-- If the Worker is reachable outside Cloudflare's edge (which SEC-01 shows it will be), `cf-connecting-ip` is attacker-controlled: unlimited previews, which is the engine for SEC-02 and, once a metered AI provider is connected, unlimited cost.
-- If the Worker sits behind the ChatGPT proxy, Cloudflare sets `cf-connecting-ip` to the *proxy's* address, so every customer in the world collapses into one bucket of 12 requests/minute. One user's normal activity denies service to everyone else.
-- Either way the `Map` is per-isolate and Workers isolates are many and ephemeral, so the real ceiling is `12 × (number of live isolates)` and the replay cache — the idempotency guarantee — evaporates on isolate recycle. `app/api/humanize/route.ts:19-39` already documents that consequence honestly.
-- `/api/checkout`, `/api/result`, `/api/billing/portal`, and `/api/events` have **no** guard at all. With SEC-01, an unauthenticated attacker can drive unbounded Stripe API calls through `/api/billing/portal` with rotating forged identities.
+### SEC-03 — High — Abuse controls are per-isolate and in-memory, and three routes have none at all
 
-**Remediation.** Move rate and concurrency enforcement to a Durable Object, KV, or Cloudflare's Rate Limiting binding. Derive client identity at the hosting boundary and treat a missing signal as fail-closed, never as the shared constant `"anonymous-runtime"`. Extend coverage to the billing and result routes.
+**Where.** `src/lib/preview-request-guard.ts:57` keys the replay cache `${clientId}:${idempotencyKey}`; line 77 keys the rate-limit window on `clientId` alone; both live in plain `Map`s inside one isolate. `app/api/humanize/route.ts:183` and `app/api/preview/route.ts:33` both derive `clientId` as `request.headers.get("cf-connecting-ip")?.trim() || "anonymous-runtime"`.
 
-### SEC-04 — High (on provider connect) / Medium (today) — The advertised 50,000 words/month is enforced nowhere
+**Observed.** Against the dev server, 20 rapid `/api/humanize` requests from one client produced `200 200 429 429 …` — the limiter works. Then eight requests carrying rotating `cf-connecting-ip: 10.9.9.1 … 10.9.9.8` all returned **200**. Separately, 30 consecutive `/api/result` requests (each returning a full paid rewrite) all returned 200, and 15 consecutive `/api/billing/portal` requests all reached the Stripe branch. Neither route is throttled at all.
 
-- `src/config/pricing.ts:11` declares `wordLimit: 50_000` and `app/page.tsx` renders "50,000 words / month" as a plan feature.
-- `db/schema.ts`'s `usageEntries` table has **no writer and no reader anywhere in the codebase**. D-013 records this as deliberate: M2-07 was not implemented because a racy reservation would be worse than none.
-- `db/billing-repository.ts`'s `getUnlockedResult` gates on entitlement + ownership only; there is no per-period accounting.
+**Honest reading of the header-rotation result.** On real Cloudflare, `CF-Connecting-IP` is set by the edge and any client-supplied value is overwritten, so the rotation bypass observed above is a **dev-server artifact and is not by itself a production finding**. The 2026-08-23 draft claimed it as a live spoofing risk; that claim is withdrawn. What survives, and is enough on its own:
 
-**Exploit scenario.** One $9.99 subscription confers unlimited generations and unlimited unlocks, indefinitely. Today the marginal cost is near zero because the provider is the local deterministic one, so the realised loss is small and the direction of the error favours the customer (no dark pattern). The moment a real AI provider is wired in, this becomes unbounded cost per subscriber with no ceiling anywhere in the system.
+- **Per-isolate state.** Workers isolates are many and ephemeral. The real ceiling is `12 × (live isolates)`, and the replay cache — the *idempotency guarantee* — evaporates whenever an isolate recycles. `app/api/humanize/route.ts:41-56` already documents that consequence honestly. An attacker distributing requests across colos or simply opening many concurrent connections gets many isolates for free.
+- **Shared-bucket collapse.** If the Worker sits behind the ChatGPT proxy and Cloudflare therefore sees the *proxy's* address, every customer in the world collapses into one bucket of 12 requests/minute and two concurrent requests, per isolate. One user's normal activity throttles everyone else. Which branch applies is **unverified** — it depends on whether the platform forwards the end-user address, which cannot be determined from this repository.
+- **A missing signal is a shared constant, not a failure.** `|| "anonymous-runtime"` puts every request with no client signal into one bucket rather than failing closed.
+- **Zero coverage where money is.** `/api/checkout`, `/api/result`, `/api/billing/portal`, and `/api/events` have no guard whatsoever. Combined with SEC-01, an unauthenticated attacker can drive unbounded Stripe API calls through `/api/billing/portal` with rotating forged identities.
 
-**Remediation.** Implement M2-07 with the atomic "committed + active reservations + request ≤ allowance" admission step D-013 describes, with the concurrency test it demands, **before** any metered provider is connected. Until then, either remove the "50,000 words / month" claim from the pricing card or record an explicit acceptance that it is an unenforced ceiling.
+`README.md` states outright that "distributed edge/store-backed abuse controls remain mandatory before the paid model is exposed publicly." That is this finding, in the project's own words.
 
-### SEC-05 — High — Customer writing is stored as indefinite plaintext with no purge and no deletion path
+**Remediation.** Move rate and concurrency enforcement to a Durable Object, KV, or Cloudflare's Rate Limiting binding. Derive client identity at the hosting boundary and treat a missing signal as fail-closed. Extend coverage to the result and billing routes.
 
-- `db/repository.ts:141` writes `sourceRef: input.original` and `resultRef: input.result` — the customer's source text and the complete rewrite — directly as SQLite `text` columns (`db/schema.ts`, `jobPayloads`). `encryptionKeyId` exists in the schema and is never populated.
-- There is **no** sweeper, no scheduled handler, and no cron trigger: `dist/server/wrangler.json` contains `"triggers":{}`. There is no deletion route. `purgedAt` is honoured on read (`getUnlockedResult`) but nothing ever sets it.
-- The 24-hour `expiresAt` on `anonymous_sessions` only stops *capability redemption*. The job row, the protected-item rows, and the plaintext payload survive forever.
-- Persistence happens for **anonymous, unauthenticated** submissions (`app/api/humanize/route.ts` `tryPersist`). The store therefore accumulates the writing of people who never created an account and have no mechanism — technical or contractual — to have it erased.
+### SEC-04 — High — `/api/checkout` never checks for an existing subscription, so a returning customer is charged twice
 
-**Impact.** Launching today means indefinite plaintext retention of restricted-class customer content, chosen by default rather than by decision, with no ability to satisfy an erasure request. This contradicts the "Retention and deletion principles" section above and D-011, and it means **D-P01 (retention duration) and D-P04 (payload encryption) are not merely open decisions — their absence is being shipped.** A future decision to retain for 24 hours cannot retroactively delete what was kept from launch day onward.
+**Where.** `app/api/checkout/route.ts` validates the plan, claims the capability (`:95`), reads the existing Stripe customer ID, and creates a Checkout Session (`:103`). At no point does it call `getActiveEntitlement`. `app/page.tsx` is a client component with no identity or entitlement awareness at all — `getChatGPTUser` is referenced nowhere outside its own definition in `app/chatgpt-auth.ts` — so the unlock card, its price, and its CTA render identically for a brand-new visitor and for a paying subscriber.
 
-The privacy page (`app/privacy/page.tsx`) is honest about this: it marks retention as unresolved and states self-service deletion is "planned but not yet available". That honesty is why this is High rather than a "misleading deletion" Critical. It does not make the underlying exposure acceptable. (Separately, that page states pasted text "is sent to a third-party AI provider"; today the pipeline is local and deterministic and no provider receives anything. The error is in the safe direction, but COPY/LEGAL should reconcile it.)
+**Why this is the default journey, not an edge case.** There is no history feature. The only way a subscriber can use what they paid for is to paste new text and run another rewrite. That returns a fresh preview with a fresh capability, which renders the unlock card again: *"Unlock full rewrite for $9.99/mo."* Clicking it, while already signed in, creates a second Checkout Session against the same Stripe customer. `{ idempotencyKey: "checkout:${jobId}:${planId}" }` (`:118`) is keyed per job, so it does not deduplicate across jobs — correctly, for its own purpose, but it means nothing here. Stripe does not refuse a second subscription to the same customer for the same price. The customer is now paying $19.98/month.
 
-**Remediation before charging.** Implement the 24-hour purge for unclaimed anonymous payloads — a scheduled Worker trigger, or purge-on-read as a stopgap. Decide D-P04 explicitly: either encrypt payloads with a key held outside D1, or record a dated Security acceptance that D1's at-rest encryption is the accepted control. State paid retention in the privacy notice with a number.
+**Code-verified**; not exercised live because Stripe is unconfigured in this environment. The reasoning depends only on the absence of a check, which is directly observable, and on Stripe's documented default behaviour for subscription-mode Checkout.
 
-### SEC-06 — Medium (security) / launch-blocking (operational) — Production D1 is never migrated
+**Downstream, the projection tolerates it silently.** `upsertSubscriptionFromStripe` keys on `stripeSubscriptionId`, so two active rows exist for one user; `getActiveEntitlement` returns the most recently updated one and everything appears normal. Nothing alerts. The customer discovers it on their card statement.
 
-- `.github/workflows/deploy.yml` runs `npm ci`, `npm run build`, then `npx wrangler deploy`. It never runs `wrangler d1 migrations apply`.
-- `dist/server/wrangler.json` sets `"migrations_dir": "../../migrations"`, which resolves to a repository-root `migrations/` directory that **does not exist**. The schema lives in `drizzle/0000_empty_eternals.sql`.
+`docs/MONETIZATION.md`'s dark-pattern rules and this document's "Quota manipulation/race … double charge" row both cover this. Of every finding here, this is the one most likely to actually cost a real person real money in the first week.
 
-**Impact.** Every D1 call in production throws. `tryPersist` swallows the error by design, so previews still render — but no `capability` is returned, so `app/page.tsx:264` renders the disabled Unlock button and nobody can buy. If it partially works, `claimJobForUser` fails and the customer gets "This preview link is no longer available" after being sent toward Stripe. The failure is silent: no log, no alert, no user-visible error.
+**Remediation.** In `/api/checkout`, load `getActiveEntitlement` for the resolved user before creating a session; if one exists, return a distinct status and have the client render "You're already subscribed" with a link to the existing result and to the billing portal, rather than a purchase CTA. Implement ACT-11's server-computed availability projection so the unlock card knows the caller's state before it renders a price. Consider it defence in depth to also reconcile duplicate active subscriptions per customer in the webhook projector and alert on them.
+
+### SEC-05 — High (on provider connect) / Medium (today) — The advertised 50,000 words/month is enforced nowhere
+
+**Where.** `src/config/pricing.ts:11` declares `wordLimit: 50_000`. `src/lib/subscription-disclosure.ts:15` now renders that allowance into the purchase disclosure next to the unlock button (ACT-10), so it is a headline commitment at the point of sale. `db/schema.ts:278` defines `usage_entries` — and a repository-wide grep finds **no writer and no reader anywhere in the application**; the only other hits are the table's own indexes and check constraints. *Observed*: the local D1 `usage_entries` table has 0 rows after 120 persisted jobs. `getUnlockedResult` gates on entitlement + ownership only; there is no per-period accounting.
+
+D-013 records this as deliberate: M2-07 was not implemented because a racy reservation would be worse than none. That reasoning is sound and this finding does not dispute it.
+
+**Exploit scenario.** One $9.99 subscription confers unlimited generations and unlimited unlocks, indefinitely. Today the marginal cost is near zero — the provider is the local deterministic pipeline — so realised loss is small and the error favours the customer. The moment a real AI provider is wired in, this is unbounded cost per subscriber with no ceiling anywhere in the system.
+
+**Remediation.** Implement M2-07 with the atomic "committed + active reservations + request ≤ allowance" admission step D-013 describes, with the concurrency test it demands, **before** any metered provider is connected. Until then, either soften the "50,000 words / month" claim wherever it appears (card, features list, purchase disclosure) or record an explicit acceptance that it is an unenforced ceiling.
+
+### SEC-06 — High — Customer writing is stored as indefinite plaintext, with no purge and no deletion path
+
+**Where and observed.** `db/repository.ts:141-142` writes `sourceRef: input.original` and `resultRef: input.result` — the customer's source text and the complete rewrite — directly into SQLite `text` columns (`db/schema.ts`, `job_payloads`). Reading the local D1 store directly:
+
+- 120 `humanization_jobs` rows and 120 `job_payloads` rows, oldest dated **2026-08-23**, all still present.
+- `encryption_key_id` is `NULL` on every row; `purged_at` is `NULL` on every row. Source and result are readable as plaintext straight out of the file.
+
+There is **no** purge implementation of any kind. A repository-wide grep for `purgedAt`, `deletionJobs`, and `scheduled(` finds exactly one hit: the *read-side* tombstone check at `db/billing-repository.ts:311`. Nothing ever sets it. The generated `dist/server/wrangler.json` contains `"triggers":{}` — no cron, no scheduled handler. There is no deletion route.
+
+The 24-hour `expiresAt` on `anonymous_sessions` stops *capability redemption* only. The job row, the protected-item rows, and the plaintext payload survive it indefinitely.
+
+Persistence happens for **anonymous, unauthenticated** submissions (`app/api/humanize/route.ts` `tryPersist`, called unconditionally on every successful rewrite). The store therefore accumulates the writing of people who never created an account and have no mechanism — technical or contractual — to have it erased.
+
+**Impact.** Launching today means indefinite plaintext retention of restricted-class customer content, chosen by default rather than by decision, with no ability to satisfy an erasure request through any tooling. This contradicts this document's own "Retention and deletion principles" and D-011, and it means **D-P01 (retention duration) and D-P04 (payload encryption) are not merely open — their absence is what ships.** A later decision to retain for 24 hours cannot retroactively delete what was kept from launch day onward.
+
+`app/privacy/page.tsx` is honest about this: it marks retention as `PENDING` and states self-service deletion is "planned but not yet available," offering a manual email path instead. That honesty is why this is High rather than a "misleading deletion" Critical. It does not make the exposure acceptable, and note that the manual path has no tooling behind it — honouring it means an operator running ad-hoc SQL against production D1.
+
+**Separately, in the safe direction:** that page states pasted text "is sent to a third-party AI provider." Today the pipeline is local and deterministic and no provider receives anything. Over-disclosure rather than under-disclosure, but COPY/LEGAL should reconcile it, and D-P05 must be resolved before that sentence becomes true.
+
+**Remediation before charging.** Implement the 24-hour purge for unclaimed anonymous payloads — a scheduled Worker trigger, or purge-on-read as a stopgap. Decide D-P04 explicitly: either encrypt payloads with a key held outside D1, or record a dated Security acceptance that D1's at-rest encryption is the accepted control. State paid retention in the privacy notice with a number. Give the manual deletion promise an actual runbook.
+
+### SEC-07 — Medium (security) / launch-fatal (operational) — Production D1 is never migrated
+
+**Where.** `.github/workflows/deploy.yml` runs `npm ci`, `npm run build`, then `npx wrangler deploy`. It never runs `wrangler d1 migrations apply`. The generated `dist/server/wrangler.json` sets `"migrations_dir": "../../migrations"`, which resolves to a repository-root `migrations/` directory that **does not exist** (verified: `ls migrations` → No such file or directory). The schema actually lives in `drizzle/0000_empty_eternals.sql`.
+
+**Impact.** Every D1 call in production throws. `tryPersist` swallows the error by design (`app/api/humanize/route.ts`), so previews still render — but no `capability` comes back, so `shouldOfferUnlock` is false and no unlock CTA is ever rendered. Nobody can buy anything. If it partially works, `claimJobForUser` fails and the customer is told "This preview link is no longer available" after clicking toward Stripe. The failure is silent by construction: no log (deliberately, to avoid leaking bound statement parameters — see SEC-14), no alert, no user-visible error.
 
 **Remediation.** Add `npx wrangler d1 migrations apply site-creator-d1 --remote` to the deploy job, point `migrations_dir` at the real directory, and add a post-deploy smoke test asserting that a preview response contains a `capability`.
 
-### SEC-07 — Medium — The Cloudflare API token is exposed to `npm ci`'s lifecycle scripts
+### SEC-08 — Medium — The Cloudflare API token is exposed to `npm ci`'s lifecycle scripts
 
-- `.github/workflows/deploy.yml:18-21` declares `CF_API_TOKEN`, `CF_ACCOUNT_ID`, and `CF_D1_ID` at **job** scope, so they are in the environment of every step — including `npm ci`, which executes third-party postinstall scripts across a 643-package tree (`esbuild`, `workerd`, and any future addition).
+**Where.** `.github/workflows/deploy.yml:18-21` declares `CF_API_TOKEN`, `CF_ACCOUNT_ID`, and `CF_D1_ID` at **job** scope, so they are present in the environment of every step — including `npm ci`, which executes third-party postinstall scripts across the dependency tree.
 
-**Exploit scenario.** A single compromised transitive dependency reads `CLOUDFLARE_API_TOKEN` from `process.env` during install and exfiltrates it. That token can deploy Workers and read D1 — i.e. it is equivalent to the whole application and every customer's stored writing.
+**Exploit scenario.** A single compromised transitive dependency reads `CF_API_TOKEN` from `process.env` during install and exfiltrates it. That token can deploy Workers and read D1 — i.e. it is equivalent to the whole application plus every customer's stored writing (which, per SEC-06, is plaintext and unexpiring).
 
-**Remediation.** Move the two Cloudflare secrets onto the `Deploy via wrangler` step only, keeping `D1_DATABASE_ID` on the build step. The existing `environment: production` gate is good and should stay.
+**Remediation.** Move the two Cloudflare secrets onto the `Deploy via wrangler` step only, keeping `D1_DATABASE_ID` on the build step where it is genuinely needed. The existing `environment: production` gate is a good control and should stay.
 
-### SEC-08 — Medium — CSP permits `'unsafe-inline'` for scripts, so it is not the XSS control the threat model claims
+### SEC-09 — Medium — CSP permits `'unsafe-inline'` for scripts, so it is not the XSS control the threat model claims
 
-- `worker/index.ts:52` — `script-src 'self' 'unsafe-inline'`.
+**Where.** `worker/index.ts:52` — `script-src 'self' 'unsafe-inline'`. *Observed* live on every response from the running server.
 
-The threat table lists CSP as a required prevention for stored/reflected XSS. With `'unsafe-inline'`, CSP would not stop an injected inline script or event handler; the actual control is React's text escaping.
+The threat table lists CSP as a required prevention for stored/reflected XSS. With `'unsafe-inline'`, CSP would not stop an injected inline script or event handler. The control that actually holds today is React's text escaping.
 
-**That escaping was verified and holds.** *Observed:* a submission containing `<script>alert(1)</script>` and `</script><img src=x onerror=alert(2)>` round-tripped through `/api/humanize` as inert JSON text (`content-type: application/json`, `x-content-type-options: nosniff`) and is rendered as a React text child in `app/page.tsx` and `app/checkout/success/page.tsx`. The only `dangerouslySetInnerHTML` in the codebase is `app/page.tsx:154`, static JSON-LD from server config with `<` escaped to `<`. There is no known injection today.
+**That escaping was re-verified and it holds.** *Observed*: a submission containing `<script>alert(1)</script>`, `"><img src=x onerror=alert(2)>` and `javascript:alert(3)` round-tripped through `/api/humanize` as inert JSON (`content-type: application/json`, `x-content-type-options: nosniff`) and is rendered as a React text child in `app/page.tsx` (`{result.original}`, `{result.preview}`) and `app/checkout/success/page.tsx` (`{result.original}`, `{result.result}`). The only `dangerouslySetInnerHTML` in the entire codebase is `app/page.tsx:170`, static JSON-LD built from server config with `<` escaped to `<`. A grep for `innerHTML` and `eval(` across `app/` and `src/` finds nothing else. There is no known injection today.
 
-**Remediation.** Move to nonce- or hash-based `script-src` and drop `'unsafe-inline'`. Not a blocker on its own — but do not carry CSP on the control list while it is permissive.
-
-### SEC-09 — Medium — RESOLVED IN THE WORKING TREE DURING THIS REVIEW
-
-Test/live Stripe identifiers had no cross-field consistency check: `SECRET_KEY_PATTERN` validated only the shape of the secret key and the `whsec_` prefix, so a live key paired with a test webhook secret would fail every real subscription webhook signature — charging customers who are then never unlocked, with only generic errors surfacing. While this review was in progress another agent added `src/lib/stripe-config.ts` (deriving `mode`/`livemode` from the secret key) and `src/lib/stripe-webhook-projection.ts:187`, which rejects any event whose own `livemode` disagrees, **before** the inbox insert; `app/api/webhooks/stripe/route.ts:96` passes `config.livemode`. Recorded here so it is not re-reported. Not independently re-verified end-to-end — the code landed mid-review.
-
-Residual: a wrong-account (not wrong-mode) webhook secret is still undetectable statically, and the first webhook signature failure produces no alert. Add a webhook-failure alert per the observability requirements above.
+**Remediation.** Move to nonce- or hash-based `script-src` and drop `'unsafe-inline'`. Not a blocker on its own — but CSP should not be carried on the required-controls list while it is permissive.
 
 ### SEC-10 — Low/Medium — Capability tokens are accepted in a URL query string on a Worker with observability enabled
 
-- `app/api/preview/route.ts:28` reads the capability from `?capability=`.
-- `dist/server/wrangler.json` sets `"observability":{"enabled":true}`, so request URLs are captured in Cloudflare Workers Logs.
+**Where.** `app/api/preview/route.ts:28` reads the capability from `?capability=`. The generated `dist/server/wrangler.json` sets `"observability":{"enabled":true}`, so request URLs are captured in Cloudflare Workers Logs.
 
-A capability is a bearer token that redeems a preview and, through `/api/checkout`, permanently claims the job. In a query string it lands in platform logs, browser history, and `Referer` headers. Latent today: `app/page.tsx` keeps the capability in React state and sends it in a POST body, so the query-string path is currently unused by the UI.
+A capability is a bearer token: it redeems a preview and, through `/api/checkout`, permanently claims the job to whoever presents it. In a query string it lands in platform logs, browser history, and `Referer` headers. Latent today — `app/page.tsx` keeps the capability in React state and sends it in a POST body, so the query form is currently unused by the UI — but the endpoint accepts it.
 
 **Remediation.** Accept the capability in a header or POST body. If the query form stays for refresh recovery, redact it at the log boundary and shorten its TTL.
 
 ### SEC-11 — Low — Checkout consumes the one-time capability before payment
 
-`app/api/checkout/route.ts:95` calls `claimJobForUser` before the Stripe Checkout Session is created at line 103. An abandoned or failed checkout leaves `consumed_at` set, so `/api/preview` will no longer redeem that capability, while the user holds no entitlement — their own preview becomes unreachable. Not exploitable across users (the token is a 256-bit secret), and same-user retry is handled correctly by the recovery branch in `claimJobForUser`. It is a self-inflicted denial of the customer's own preview and a predictable support burden.
+`app/api/checkout/route.ts:95` calls `claimJobForUser` before the Checkout Session is created at `:103`. An abandoned or failed checkout leaves `consumed_at` set, so `/api/preview` no longer redeems that capability while the user holds no entitlement — their own preview becomes unreachable, and with no history feature there is no other way back to it.
 
-**Remediation.** Either defer consumption until the Checkout Session is successfully created, or keep the preview projection readable to the owning user after consumption.
+Not exploitable across users: the token is a 256-bit secret, and same-user retry is handled correctly by the recovery branch in `claimJobForUser` (which returns the same `jobId` to the user who already owns it, and `null` to everyone else). This is a self-inflicted denial of the customer's own preview and a predictable support burden, not a security hole.
 
-### SEC-12 — Informational — `npm audit`'s 4 moderate findings are not exploitable here
+**Remediation.** Defer consumption until the Checkout Session is successfully created, or keep the preview projection readable to the owning user after consumption.
 
-All four (`esbuild`, `@esbuild-kit/core-utils`, `@esbuild-kit/esm-loader`, `drizzle-kit`) trace to a single root: `esbuild <= 0.24.2`, GHSA-67mh-4wv8-2f99 — *"esbuild enables any website to send any requests to the development server and read the response."* It reaches the tree only through `drizzle-kit`, a devDependency, via `@esbuild-kit/*`. The advisory concerns `esbuild serve`, which this project never runs; the application ships 9 production dependencies and esbuild is not among them.
+### SEC-12 — Low — Stripe return URLs are derived from the request's own Host
 
-**Assessment: genuinely not a launch risk.** Do not treat it as a blocker and do not inflate it. Track for upgrade when `drizzle-kit` drops `@esbuild-kit`.
+`app/api/checkout/route.ts:100` and `app/api/billing/portal/route.ts:39` both compute `const origin = new URL(request.url).origin` and embed it in `success_url` / `cancel_url` / `return_url`. In a Worker, `request.url` is reconstructed from the inbound Host header.
 
-Build-time exfiltration was checked separately: enumerating install lifecycle scripts across `node_modules` found only `esbuild` and `workerd` `postinstall` hooks (both platform-binary downloads, both expected). Every other hit is a `prepare` script, which npm runs only for git/source installs, not registry tarballs. The real supply-chain exposure here is SEC-07, not any specific package.
+**Code-verified; not exercised** — Stripe is unconfigured here, so no session could be created to inspect. Practically constrained: Cloudflare routes by hostname, so an arbitrary Host does not reach this Worker, and the only leak would be the attacker's *own* job ID going to their own domain. Worth fixing as hygiene once routes are bound (SEC-01 remediation item 1), by deriving the origin from server configuration (`productConfig.domain`) rather than from the request.
+
+### SEC-13 — Low — One client can exhaust the shared replay cache and 429 everyone in the isolate
+
+`src/lib/preview-request-guard.ts:68` returns 429 "Preview capacity is temporarily full" to *any* caller once `this.requests.size >= maxEntries` (256, `:32`). `cleanup()` at `:137` evicts settled entries first, so this only fires when 256 requests are simultaneously **in flight** — which the per-client `maxConcurrent: 2` limit prevents for a single client identity, but not for a client able to present many identities or open many connections.
+
+**Code-verified**, not exercised: building 256 genuinely concurrent in-flight requests against the deterministic local pipeline was not achievable here. Low, and it disappears once SEC-03's durable limiter replaces this map.
+
+### SEC-14 — Informational — `npm audit`'s 4 moderate findings are not exploitable here
+
+*Observed*: `npm audit --omit=dev` reports **0 vulnerabilities**. The full `npm audit` reports 4 moderate, all tracing to one root: `esbuild <= 0.24.2`, GHSA-67mh-4wv8-2f99 — *"esbuild enables any website to send any requests to the development server and read the response."* It reaches the tree only through `drizzle-kit`, a devDependency, via `@esbuild-kit/core-utils` → `@esbuild-kit/esm-loader`. The advisory concerns `esbuild serve`, which this project never runs, and esbuild is not among the production dependencies.
+
+**Assessment: genuinely not a launch risk.** Do not treat it as a blocker and do not inflate it. Track for upgrade when `drizzle-kit` drops `@esbuild-kit`. The real supply-chain exposure in this repository is SEC-08, not any specific package.
+
+### SEC-15 — Informational — Test/live Stripe identifier mixing: resolved, with a residual
+
+The 2026-08-23 draft raised that `SECRET_KEY_PATTERN` validated only key shape and the `whsec_` prefix, so a live key paired with a test webhook secret would fail every real subscription webhook signature — charging customers who are then never unlocked. That is now closed, and re-verified in this review: `src/lib/stripe-config.ts` derives `mode`/`livemode` from the secret key; `src/lib/stripe-webhook-projection.ts:ingestVerifiedStripeEvent` rejects any event whose own `livemode` disagrees **before** the inbox insert, returning 400 rather than 500 so a misconfiguration does not become a retry storm; `app/api/webhooks/stripe/route.ts:96` passes `config.livemode`. `tests/stripe-config.test.mts` and `tests/webhook-adversarial.test.mts` cover the branches, and the full suite passes 126/126.
+
+**Residual, unchanged:** a wrong-*account* (not wrong-mode) webhook secret is still undetectable by static inspection, and the first webhook signature failure produces no alert anywhere. Add a webhook-failure alert per this document's observability requirements — it is the only detector for that class of misconfiguration.
 
 ## What is genuinely sound
 
-Verified, and deliberately recorded so a later reviewer does not re-litigate it:
+Verified in this review and recorded deliberately, so a later reviewer does not re-litigate it. Several of these are better than the threat model requires.
 
-- **Secret handling — clean.** A pattern scan of the built client output (`dist/client/**`, all chunks and assets) for `sk_`/`rk_`/`whsec_`/`price_`/`sk-`/`AKIA`/PEM headers and for `STRIPE_*`/`CLOUDFLARE_*` identifiers returned **zero** matches. `.dev.vars` is gitignored (`.gitignore`, alongside `.env*`), is untracked, and has never appeared in git history; the only matches for secret-shaped patterns across all commits are the validation regex itself in `db/stripe-client.ts`. Every Stripe value resolves from the Workers `env` binding at runtime. Error responses are uniformly generic across checkout, portal, result, and webhook — no Stripe or D1 driver internals reach a client. The single `console.*` call in any request path (`app/api/checkout/route.ts:86`) prints a `PriceMismatchError` message containing a plan id and expected/actual amounts: no secrets, no customer text. `app/api/humanize/route.ts:71-78` deliberately swallows D1 errors rather than logging them, precisely because driver errors can carry bound statement parameters. This objective is met.
-- **Capability model — holds as specified.** 32 bytes from `crypto.getRandomValues`, base64url-encoded (*observed*: 43-character tokens), only the SHA-256 digest persisted, and a unique index on `anonymous_sessions.job_id` enforcing the 1:1 job binding (`db/repository.ts:90-109,163-169`; `db/schema.ts:93-106`).
-- **Enumeration oracle — holds on every path tested.** *Observed*: `/api/preview` returns a byte-identical 404 body for a valid-shaped unknown token, a malformed token, and a missing parameter. `/api/result` returns identical `{"error":"Result not found.","pending":true}` for an unknown job, a job owned by someone else, and an owner without entitlement. In code, `db/repository.ts:191` and `claimJobForUser` collapse unknown/expired/consumed into a single `null`, and the same-user recovery branch reveals ownership only to the caller who already owns it.
-- **No client-supplied value reaches an entitlement decision (D-003/D-006).** `planId` is validated against the server catalog (`isPurchasablePlan`); the price ID comes from env and is never accepted from the client; `client_reference_id` and Checkout metadata are opaque internal references; the success page's `session_id` is never read as authority — `src/lib/result-access.ts:39-53` makes ignoring it explicit and asserts it in tests.
-- **Webhook handling — correct by construction** (*code-verified*; not exercised live because Stripe is unconfigured here, so a bogus signature returned 500 from the unconfigured-client branch rather than the 400 the signature branch produces). Raw body read exactly once and size-capped *before* parsing; `constructEventAsync` performs HMAC and timestamp verification; `stripe_events.id` is the primary key and the replay defense, with a bounded retry budget that distinguishes a true duplicate from a transient failure; the subscription object is always re-fetched from Stripe rather than trusting the delivered payload; the plan is re-derived from the live price rather than from stale metadata, which correctly survives a Billing-Portal downgrade.
-- **Claim transaction — race-free.** The guarded `UPDATE ... WHERE consumed_at IS NULL AND expires_at > now` with winner detection by rows-changed is sound, and the doc comment records that the earlier timestamp-comparison approach was unsound and how it was caught.
-- **Entitlement drift — closed.** `isExpiredCancellation` denies access once a cancel-at-period-end subscription's period has elapsed, independent of whether the final webhook ever arrives — which matters because the retry budget deliberately gives up on permanently failing events.
-- **Price integrity.** `assertPriceMatchesCatalog` blocks amount/currency/interval/archived drift between the advertised price and the Stripe Price, and fails closed to 503 rather than charging.
-- **Analytics — content-free.** Server-side event and property allowlists (`app/api/events/route.ts`), and every client call site passes only `mode`, `wordCount`, `issuesImproved`, `planId`. No document text, no PII, and the route stores nothing.
-- **Preview boundary (D-004) — holds.** *Observed*: responses contain only the truncated `preview` plus `hiddenWordCount`. The full rewrite appears in no JSON response, no HTML, and no RSC payload; it is reachable only through `/api/result` behind ownership + entitlement. (SEC-02 defeats the paywall economically, but not by leaking the remainder.)
-- **Security headers — verified live** on the running server for both page and API responses: CSP, `x-frame-options: DENY`, `x-content-type-options: nosniff`, `referrer-policy: strict-origin-when-cross-origin`, `permissions-policy`, `cross-origin-opener-policy: same-origin`, and `cache-control: no-store` on every authenticated/API response.
+- **Auth *authorization* — correct, even though authentication is not.** *Observed*: with a forged identity belonging to a different existing user, the victim's job returned an identical `404 {"error":"Result not found.","pending":true}`. `db/billing-repository.ts:getUnlockedResult` requires entitlement **and** `job.ownerUserId === userId` **and** `state === "succeeded"` **and** a non-purged payload. There is no cross-user IDOR. SEC-01 is an identity-forgery problem, not an authorization problem — which matters, because it means fixing the boundary fixes it completely.
+- **Enumeration oracle — holds on every path, including the ones that are hard.** *Observed*: `/api/preview` returned a byte-identical `404 {"error":"This preview link is no longer available."}` for all five states — valid-shape unknown token, malformed token, missing parameter, **already-consumed** capability, and **expired** capability (the last two produced by mutating the local store directly). `/api/result` returned identical `404 … pending:true` for an unknown external subject, a known user with no entitlement, a known user querying someone else's job, and a known user querying a nonexistent job. In code, `db/repository.ts:redeemPreviewCapability` and `claimJobForUser` collapse unknown/expired/consumed into a single `null`, and the same-user recovery branch reveals ownership only to the caller who already owns it.
+- **No reproducible timing oracle.** *Observed*: 60 samples per class, repeated twice, against `/api/result` for unknown-subject / known-user-not-owner / known-user-bogus-job. p50s clustered at 25–30 ms with no stable separation and inconsistent ordering between runs. The 2026-08-23 draft left this "not excluded"; it can now be downgraded to "measured locally, no separation observed." This is not proof for production network conditions, but it is no longer an open concern.
+- **Capability model — exactly as specified.** 32 bytes from `crypto.getRandomValues`, base64url-encoded (*observed*: 43-character tokens), only the SHA-256 digest persisted (`db/repository.ts:digestCapabilityToken`), and a unique index on `anonymous_sessions.job_id` enforcing the 1:1 job binding, plus a unique index on the digest (`db/schema.ts:93-106`). *Observed* in the local store: `capability_digest` columns contain 64-hex digests, no raw tokens anywhere.
+- **No client-supplied value reaches an entitlement decision (D-003/D-006).** `planId` is validated against the server catalog via `isPurchasablePlan`; the price ID comes from env and is never accepted from a client; `client_reference_id` and Checkout metadata are opaque internal references. `src/lib/result-access.ts:buildResultResponse` reads the URL for exactly one thing — the job ID — and its doc comment makes ignoring `session_id`/`success`/`plan` explicit; `app/checkout/success/page.tsx` reads only `job` from the query and never `session_id`. Asserted in `tests/result-access.test.mts`.
+- **Webhook handling — correct by construction.** Raw body read exactly once and size-capped (1 MB) *before* parsing; `constructEventAsync` performs HMAC and timestamp verification; `livemode` checked before the inbox; `stripe_events.id` is the primary key and the replay defense, with a bounded retry budget that distinguishes a true duplicate from a transient failure from an exhausted one; the subscription object is always **re-fetched** from Stripe rather than trusting the delivered payload, so out-of-order delivery cannot resurrect a canceled entitlement; the plan is re-derived from the live price rather than from stale metadata, which correctly survives a Billing-Portal downgrade. Signature acceptance/tampering is now covered by a passing test (`tests/webhook.test.mts`, suite entry 126) — an item the previous draft could not verify.
+- **Claim transaction — race-free.** The guarded `UPDATE … WHERE consumed_at IS NULL AND expires_at > now` with winner detection by rows-changed is sound, and the doc comment records that the earlier timestamp-comparison approach was unsound and how it was caught. Covered by a concurrent test.
+- **Entitlement drift — closed.** `isExpiredCancellation` denies access once a cancel-at-period-end subscription's period has elapsed, independently of whether the final webhook ever arrives — which matters precisely because the retry budget deliberately gives up on permanently failing events. Correctly scoped to `cancelAtPeriodEnd` only, so a slow renewal webhook cannot lock out a paying customer.
+- **Price integrity.** `assertPriceMatchesCatalog` blocks amount/currency/interval/archived drift between the advertised price and the Stripe Price, rounds cents correctly (`Math.round(9.99 * 100)`), and fails closed to 503 rather than charging. Cached per price ID, so rotating `STRIPE_PRICE_STARTER` re-verifies.
+- **Secret handling — clean.** *Observed*: a pattern scan of the entire built client output (`dist/client/**`) for `sk_test`/`sk_live`/`rk_`/`whsec_`/`price_…`/`AKIA…`/PEM headers returned **zero** matches, as did a scan for `STRIPE_*` / `CLOUDFLARE_*` / `D1_DATABASE_ID` identifiers. `.dev.vars` is gitignored (alongside `.env*`), is untracked, and appears nowhere in git history (`git log --all --diff-filter=A` finds only `.dev.vars.example`). Every Stripe value resolves from the Workers `env` binding at runtime via `db/stripe-client.ts`, the single module that imports `cloudflare:workers` for secrets.
+- **Error responses — uniformly generic.** Checkout, portal, result, and webhook all return fixed strings; no Stripe or D1 driver internals reach a client. The **only** `console.*` in any request path across `app/`, `src/`, `db/` and `worker/` is `app/api/checkout/route.ts:86`, which prints a `PriceMismatchError` message containing a plan ID and expected/actual minor units — no secrets, no customer text. `app/api/humanize/route.ts`'s `tryPersist` deliberately swallows D1 errors without logging them, with a comment explaining that driver errors can carry bound statement parameters (i.e. the customer's text).
+- **Analytics — content-free.** Server-side allowlists for both event names and property names (`app/api/events/route.ts`), string values capped at 64 characters, non-conforming payloads rejected with 400, and the route stores and forwards nothing (204). Client call sites pass only `mode`, `wordCount`, `issuesImproved`, `planId`.
+- **Preview boundary (D-004) — holds.** *Observed*: preview responses contain `preview` plus `hiddenWordCount` and never the remainder. The lock in `app/page.tsx` is a row of empty placeholder `<span>`s sized from `hiddenWordCount` — not blurred real text — so there is nothing to recover from the DOM, the RSC payload, or CSS. The full rewrite is reachable only through `/api/result` behind ownership + entitlement. (SEC-02 defeats the paywall economically, but not by leaking the remainder.)
+- **Security headers — verified live** on the running server for both HTML and API responses: CSP, `x-frame-options: DENY`, `x-content-type-options: nosniff`, `referrer-policy: strict-origin-when-cross-origin`, `permissions-policy: camera=(), microphone=(), geolocation=(), payment=(self)`, `cross-origin-opener-policy: same-origin`, and `cache-control: no-store` on every API and authenticated response (`no-store, must-revalidate` on pages).
+- **Input bounds.** `/api/humanize` enforces content-type, a declared-length check, a streaming 10 KB body cap with cancel-on-exceed, strict UTF-8 decoding, 12–300 words, 2,400 characters, an allowlisted mode, a validated idempotency-key format, and a 5-second abort-signalled deadline. `/api/webhooks/stripe` and `/api/events` use the same streaming-cap pattern at their own sizes.
+- **Schema invariants.** Unique indexes on `users.external_subject`, `anonymous_sessions.job_id`, `anonymous_sessions.capability_digest`, `job_payloads.job_id`, `(client_fingerprint, idempotency_key)`, and `(operation_key, entry_type)`; CHECK constraints on mode, job state, protected-item kind, and verification status; full result text confined to `job_payloads` and never inlined onto a queryable row. Drizzle parameterizes every query; no dynamic SQL is built from content.
+- **Cancellation path is real** (ACT-09). `src/components/manage-billing.tsx` calls the portal route from both the landing page and the post-purchase page, and `src/lib/billing-portal.ts` maps every failure status (401/404/503/other) to an honest, actionable message rather than a silent no-op. The redirect target comes from our own server's response, never from user input.
+
+## Corrections to the 2026-08-23 draft
+
+Recorded so the two documents are not read as disagreeing by accident.
+
+- **Withdrawn:** the claim that `cf-connecting-ip` rotation is a production rate-limit bypass. Cloudflare sets that header at its edge and overwrites inbound copies; the rotation observed against the dev server is a dev-runtime artifact. SEC-03 stands on per-isolate state, shared-bucket collapse, and the entirely unguarded billing/result routes.
+- **Strengthened:** SEC-01 moved from "two forged headers move every route to the authenticated branch" to a proven end-to-end retrieval of another user's paid rewrite, plus confirmation that the billing-portal path resolves the victim's Stripe customer before failing on unconfigured Stripe.
+- **Strengthened:** SEC-02 — the previous draft reported 67% of the paid output exposed. The observed worst case is 100%, with `hiddenWordCount: 0`.
+- **New:** SEC-04 (double-charge), which the previous review did not identify.
+- **Downgraded:** timing-based enumeration moved from "not excluded" to "measured, no separation observed."
+- **Closed:** webhook signature verification is now covered by a passing test; the previous draft could not verify it.
+- **Renumbered:** identifiers shifted because of the new finding. Old SEC-04 (quota) is now SEC-05, old SEC-05 (retention) is now SEC-06, old SEC-06 (migrations) is now SEC-07, old SEC-07 (CI token) is now SEC-08, old SEC-08 (CSP) is now SEC-09, old SEC-10/11 are now SEC-10/11, old SEC-09 (Stripe mode) is now SEC-15, and old SEC-12 (npm audit) is now SEC-14.
 
 ## Could not verify, and why
 
-- **Whether the production hosting boundary strips inbound `oai-authenticated-user-*` headers.** No production deployment exists and `.openai/hosting.json` documents only a `project_id`. This is the single most important open question in this review — it decides whether SEC-01 is a live Critical or a latent one. It must be answered with an actual request from outside the platform before launch.
-- **HSTS on production responses.** `worker/index.ts:54` sets it only when `url.protocol === "https:"`; the dev server is HTTP, so it was never emitted. Confirm on the real origin, and confirm the boundary does not proxy over plain HTTP internally, which would suppress it.
-- **Webhook signature rejection end-to-end.** Stripe is unconfigured in this environment, so signature-failure responses could not be distinguished from configuration-failure responses. `tests/webhook.test.mts` and the new `tests/webhook-adversarial.test.mts` exist; per instruction the suite was not run, and other agents were mid-edit.
-- **Timing-based enumeration.** Response *content* is uniform, but the code paths behind unknown / expired / unowned differ in database work performed. Timing was not measured. Not excluded.
-- **D1 behaviour under real concurrency.** The claim transaction was reasoned about and is covered by a concurrent test, but the ledger concurrency spike `ARCHITECTURE.md` requires before M2-07 has not happened, and the local SQLite harness is not D1.
-- **Live Stripe behaviour** — idempotency-key collisions, double-charge under retry, and real webhook ordering — all require configured Stripe credentials and test clocks.
+- **Whether the production hosting boundary strips inbound `oai-authenticated-user-*` headers, and whether the production origin is reachable without it.** No production deployment exists; `.openai/hosting.json` records only a `project_id`. This is the single most important open question in this review — it decides whether SEC-01 is live or latent. It must be answered with an actual request from outside the platform before launch, and the answer must be written down.
+- **Whether the platform forwards the end-user address as `cf-connecting-ip`.** This decides which branch of SEC-03 applies: a per-user bucket that is merely weak, or a single global bucket of 12 requests/minute for the entire customer base.
+- **HSTS on production responses.** `worker/index.ts:55` emits it only when `url.protocol === "https:"`; the dev server is HTTP, so it was never seen. Confirm on the real origin, and confirm the boundary does not proxy over plain HTTP internally, which would suppress it.
+- **Live Stripe behaviour.** Signature rejection could not be distinguished end-to-end from configuration failure (an unconfigured client returns 500 before the signature branch is reached); idempotency-key collisions, double-charge under Stripe's own retries, and real webhook ordering all need configured credentials and test clocks. The logic is covered by `tests/webhook-adversarial.test.mts` against real SQLite, which is the right substitute but is not the same thing.
+- **SEC-04 against real Stripe.** The absence of an entitlement check is directly observable in code; that Stripe will actually create the second subscription is inferred from its documented default behaviour, not demonstrated here.
+- **D1 behaviour under real concurrency.** The claim transaction is covered by a concurrent test, but the ledger concurrency spike `ARCHITECTURE.md` requires before M2-07 has not happened, and the local SQLite harness is not D1.
+- **SEC-13's saturation threshold.** 256 simultaneously in-flight requests could not be generated against the deterministic local pipeline.
+
+### Reproducing SEC-01
+
+The victim fixture used above was removed from the local store after testing, so the dev database is back to its prior state. To reproduce, seed one `users` row with a known `external_subject`, one `subscriptions` row for that user with `status = 'active'` and a future `current_period_end`, and set `humanization_jobs.owner_user_id` on any succeeded job to that user's ID; then issue the two `curl` commands in SEC-01.

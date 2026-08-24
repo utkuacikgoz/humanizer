@@ -91,6 +91,23 @@ export async function POST(request: Request) {
     }
 
     const { userId } = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: user.userId, email: user.email });
+
+    // SEC-04: never sell a second subscription to someone who already has
+    // one. The idempotency key below is per job+plan, so a returning
+    // subscriber starting a new job would sail past it and be charged twice.
+    // There is no history surface yet, so the unlock card is exactly what a
+    // returning customer sees — this is the normal path, not an edge case.
+    const existingEntitlement = await billing.getActiveEntitlement(db, userId);
+    if (existingEntitlement) {
+      return Response.json(
+        {
+          error: "You already have an active subscription.",
+          alreadySubscribed: true,
+          manageBillingPath: "/#manage-billing",
+        },
+        { status: 409, headers: { "cache-control": "no-store" } },
+      );
+    }
     const capabilityDigest = await sha256Hex(capability);
     const claimed = await billing.claimJobForUser(db, { capabilityDigest, userId });
     if (!claimed) {

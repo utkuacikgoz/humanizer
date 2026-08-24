@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { POST } from "../app/api/humanize/route";
+import { MIN_PAYWALLABLE_INPUT_WORDS } from "../src/lib/preview-projection";
 
 function request(body: unknown, contentType = "application/json", idempotencyKey = crypto.randomUUID()) {
   return new Request("http://localhost/api/humanize", {
@@ -10,7 +11,7 @@ function request(body: unknown, contentType = "application/json", idempotencyKey
   });
 }
 
-const validText = "In today's fast-paced world, it is important to note that clear communication helps teams. Furthermore, people should utilize simple language whenever possible.";
+const validText = "In today's fast-paced world, it is important to note that clear communication helps teams. Furthermore, people should utilize simple language whenever possible to avoid confusion and to facilitate optimal outcomes across the wider organization.";
 
 test("returns only a partial preview with qualitative trust signals", async () => {
   const response = await POST(request({ text: validText, mode: "natural" }));
@@ -112,12 +113,14 @@ function words(count: number) {
 // pipeline's repetition/naturalness heuristics for no real benefit.
 // "Not rejected by the word-count gate" is the actual claim under test;
 // a 422 from the quality gate is not a boundary-validation failure.
-test("word-count boundaries: exactly 11 words rejected by validation, 12 passes validation", async () => {
-  const justUnder = await POST(request({ text: "The team reviewed the report before the important weekly meeting.", mode: "natural" }));
+test("word-count boundaries: one word under the minimum is rejected, exactly the minimum passes validation", async () => {
+  // The minimum is SEC-02's paywall-integrity control, not a style hint:
+  // shorter submissions cannot withhold a meaningful remainder.
+  const justUnder = await POST(request({ text: words(MIN_PAYWALLABLE_INPUT_WORDS - 1), mode: "natural" }));
   assert.equal(justUnder.status, 400);
-  assert.match((await justUnder.json() as { error: string }).error, /at least 12 words/i);
+  assert.match((await justUnder.json() as { error: string }).error, new RegExp(`at least ${MIN_PAYWALLABLE_INPUT_WORDS} words`, "i"));
 
-  const exactlyAtMin = await POST(request({ text: "The team carefully reviewed the report before the important client meeting today.", mode: "natural" }));
+  const exactlyAtMin = await POST(request({ text: words(MIN_PAYWALLABLE_INPUT_WORDS), mode: "natural" }));
   assert.notEqual(exactlyAtMin.status, 400);
 });
 
@@ -132,10 +135,10 @@ test("word-count boundaries: exactly 300 words passes validation, 301 is rejecte
 
 test("idempotency key length boundaries: 7 chars rejected, 8 accepted, 128 accepted, 129 rejected", async () => {
   // Word-count validation runs before the idempotency-key check, so the
-  // 400/rejected cases below never reach the pipeline — words(12)'s
+  // 400/rejected cases below never reach the pipeline — the minimum-length fixture's
   // content doesn't matter there. The 200/accepted cases do reach the
   // pipeline, so they use validText, already known to pass it cleanly.
-  const sevenChars = await POST(request({ text: words(12), mode: "natural" }, "application/json", "a".repeat(7)));
+  const sevenChars = await POST(request({ text: words(MIN_PAYWALLABLE_INPUT_WORDS), mode: "natural" }, "application/json", "a".repeat(7)));
   assert.equal(sevenChars.status, 400);
 
   const eightChars = await POST(request({ text: validText, mode: "natural" }, "application/json", "a".repeat(8)));
@@ -144,7 +147,7 @@ test("idempotency key length boundaries: 7 chars rejected, 8 accepted, 128 accep
   const oneTwentyEight = await POST(request({ text: validText, mode: "natural" }, "application/json", "a".repeat(128)));
   assert.equal(oneTwentyEight.status, 200);
 
-  const oneTwentyNine = await POST(request({ text: words(12), mode: "natural" }, "application/json", "a".repeat(129)));
+  const oneTwentyNine = await POST(request({ text: words(MIN_PAYWALLABLE_INPUT_WORDS), mode: "natural" }, "application/json", "a".repeat(129)));
   assert.equal(oneTwentyNine.status, 400);
 });
 
