@@ -1,6 +1,6 @@
 # Quality Assurance and Release Gates
 
-Last updated: 2026-08-23
+Last updated: 2026-08-25
 Owners: Automated QA and Manual QA
 
 ## Quality strategy
@@ -83,6 +83,20 @@ Critical journeys:
 5. Mobile and keyboard-only flow with accessible announcements/focus.
 
 Network assertions confirm that hidden output is not present before unlock and writing is absent from analytics requests/URLs.
+
+Implemented in `tests/e2e/` (browser, requires `npm run dev` and Chromium):
+
+| Journey | Coverage |
+|---|---|
+| 1 Anonymous paste → modes → preview → paywall disclosure | `anonymous-journey.e2e.test.mts`. Live Stripe checkout, sign-in, unlock, and a paid second generation are not automated (need test-mode secrets). A second *preview* in the same visit is covered. |
+| 2 Refresh/back/forward without loss | Not covered. Preview lives in React state only; D-004 forbids storing writing in `sessionStorage`. Server capability redemption exists (`GET /api/preview`) but the landing page does not restore from it yet. |
+| 3 Payment canceled / failed / recovered, cancel-at-period-end, quota exhausted | Cancel return: `recovery.e2e.test.mts` (`/?checkout=canceled`). Failed/recovered payment, subscription end, and quota exhaustion are not browser-covered. |
+| 4 History, sentence restore, protected phrases, account deletion | Not covered; those product surfaces are still open (see `AGENTS.md` M3). |
+| 5 Mobile and keyboard | `responsive.e2e.test.mts`, `accessibility.e2e.test.mts`. |
+
+Also covered: locked-remainder leak checks, hostile input, unchanged/cosmetic un-sellable guards, activation landing, paid-result copy (API mocked), error/rate-limit UX.
+
+KI-01 and KI-02 are resolved (2026-08-24). Do not treat a green summary line as proof the suite ran in a browser — check that tests are not skipped (`environmentBlocker`).
 
 ### Security and abuse automation
 

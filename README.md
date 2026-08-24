@@ -46,7 +46,7 @@ npm run lint
 npm run benchmark
 ```
 
-The current test suite covers protected-content extraction, targeted rewriting, verification failure, deadline cancellation, retry accounting, idempotent preview replay, preview response shaping, hostile input, privacy-safe analytics, benchmark shape, protected benchmark facts, the product example, server rendering, centralized copy, and starter-template removal regressions. The broader suites and release gates in [Quality assurance](docs/QA.md) are planned and are not yet implemented.
+The current test suite covers protected-content extraction, targeted rewriting, verification failure, deadline cancellation, retry accounting, idempotent preview replay, preview response shaping, hostile input, privacy-safe analytics, benchmark shape, protected benchmark facts, the product example, server rendering, centralized copy, starter-template removal regressions, and a Playwright browser suite under `tests/e2e/` (anonymous preview, paywall honesty, accessibility, hostile input, error states, checkout-cancel return). Release gates and the remaining QA.md journeys (live Stripe, history, quota exhaustion) are still open.
 
 ## Configuration
 
