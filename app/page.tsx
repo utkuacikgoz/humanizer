@@ -172,6 +172,12 @@ export default function Home() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("checkout") !== "canceled") return;
+    // The query string only exists in the browser, so a lazy useState
+    // initializer would read `window` during render and break SSR plus
+    // hydration. This runs once on mount, beside the replaceState that clears
+    // the parameter, and cannot cascade, because the guard above returns first on
+    // every subsequent render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNotice("Checkout was canceled. Nothing was charged. Paste your draft again if this page no longer shows the preview.");
     window.history.replaceState(null, "", "/");
   }, []);
