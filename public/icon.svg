@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Ownword">
+  <!-- Favicon and app mark. Reads at 16px: one solid tile, one counter-form,
+       no hairlines. The open ring is a proof mark rather than a plain O — the
+       gap is where a cut was made, and the short rule sitting in it is the
+       replacement, which is the whole product in one glyph. -->
+  <rect width="64" height="64" rx="14" fill="#1f5a3d"/>
+  <path d="M32 13.5a18.5 18.5 0 1 1 0 37 18.5 18.5 0 0 1 0-37Z"
+        fill="none" stroke="#f4f1e8" stroke-width="7.5" stroke-linecap="round"
+        stroke-dasharray="86 30" transform="rotate(-32 32 32)"/>
+  <rect x="38.5" y="28.6" width="14.5" height="6.8" rx="3.4" fill="#9fdcb8"/>
+</svg>

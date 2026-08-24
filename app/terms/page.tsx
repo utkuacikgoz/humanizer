@@ -3,6 +3,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { productConfig } from "@/src/config/product";
 import { pricingConfig } from "@/src/config/pricing";
+import { ManageBilling } from "@/src/components/manage-billing";
 
 // Mirrors app/robots.txt/route.ts and app/sitemap.xml/route.ts: canonical/OG/
 // index output is gated on the request Host matching productConfig.domain
@@ -166,6 +167,16 @@ export default function TermsOfServicePage() {
           <a href={`mailto:${productConfig.supportEmail}`}>{productConfig.supportEmail}</a> and give us 30 days
           to try to resolve the matter with you directly. Most issues are settled this way.
         </p>
+      </section>
+
+      <section id="manage-billing">
+        <h2>Managing or cancelling your subscription</h2>
+        <p>
+          Change your plan, update your card, or cancel from the billing portal. It shows the
+          exact date any change takes effect before you confirm anything, and cancelling costs
+          nothing.
+        </p>
+        <ManageBilling returnTo="/terms#manage-billing" />
       </section>
 
       <section>

@@ -193,22 +193,31 @@ test("ACT-09: every portal failure is an honest, actionable state rather than a 
   assert.ok(offline.message.trim().length > 0, "a network failure must still say something");
 });
 
-test("ACT-09: the portal entry point exists on both the main page and the post-purchase page", async () => {
-  const [home, success, component] = await Promise.all([
+test("ACT-09: the cancellation claim leads to a real portal", async () => {
+  const [home, success, terms, component] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/checkout/success/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/terms/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/manage-billing.tsx", import.meta.url), "utf8"),
   ]);
-  assert.match(home, /<ManageBilling/, "the main page must expose the billing portal (ACT-09)");
-  assert.match(success, /<ManageBilling/, "the post-purchase page must expose the billing portal (ACT-09)");
   assert.match(component, /fetch\("\/api\/billing\/portal"/);
-  // The hero claim and the path must ship together, or neither
-  // (docs/ACTIVATION.md ACT-09: "Keeping the claim without the path is
-  // not an acceptable outcome"), and the claim itself points at it.
+  assert.match(success, /<ManageBilling/, "the post-purchase page must expose the billing portal (ACT-09)");
+
+  // The control moved off the landing page: advertising cancellation to
+  // people who have not bought anything is not what ACT-09 asked for. It now
+  // sits on /terms beside the cancellation clause. What ACT-09 actually
+  // requires is unchanged and still asserted here — the claim and a reachable
+  // path ship together, or neither ("Keeping the claim without the path is
+  // not an acceptable outcome").
+  assert.match(terms, /<ManageBilling/, "the billing portal must be reachable from /terms (ACT-09)");
+  assert.match(terms, /id="manage-billing"/, "the claim's anchor must exist on the page it points at");
+
   if (/Cancel anytime/.test(home)) {
-    assert.match(home, /<ManageBilling/);
-    assert.match(home, /<a href="#manage-billing">Cancel anytime<\/a>/);
-    assert.match(home, /id="manage-billing"/);
+    assert.match(
+      home,
+      /<Link href="\/terms#manage-billing">Cancel anytime<\/Link>/,
+      "the hero claim must link to the portal, wherever it lives",
+    );
   }
 });
 

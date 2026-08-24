@@ -50,6 +50,9 @@ export async function generateMetadata(): Promise<Metadata> {
       images: socialImage ? [socialImage] : undefined,
     },
     twitter: { card: "summary_large_image", title, description, images: socialImage ? [socialImage.url] : undefined },
+    // One SVG serves the tab, the bookmark, and the home-screen tile. It is
+    // built to survive 16px: a solid tile, one counter-form, no hairlines.
+    icons: { icon: "/icon.svg", shortcut: "/icon.svg", apple: "/icon.svg" },
   };
 }
 
