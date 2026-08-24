@@ -191,7 +191,6 @@
    min-content widths. */
 main { display: flex; flex-direction: column; min-height: 100dvh; }
 main > * { width: 100%; min-width: 0; }
-main > .billing-strip { margin-top: auto; }
 html { scroll-behavior: smooth; }
 html, body { min-height: 100%; }
 body {
@@ -990,18 +989,6 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
    The reachable path behind "Cancel anytime".
    ============================================================ */
 
-.billing-strip {
-  max-width: var(--container); margin: 0 auto;
-  padding: var(--s7) var(--gutter);
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-  gap: var(--s4) var(--s6);
-  border-top: 1px solid var(--line-soft);
-}
-.billing-strip h2 { font-size: var(--t-lg); letter-spacing: -.025em; }
-.billing-strip p {
-  margin: var(--s2) 0 0; max-width: 58ch;
-  color: var(--ink-2); font-size: var(--t-sm); line-height: 1.55;
-}
 .manage-billing-button {
   padding: 12px 20px; white-space: nowrap;
   border: 1px solid var(--line-strong); border-radius: 999px;
@@ -1161,8 +1148,6 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   .paid-result-actions { grid-template-columns: 1fr; padding: var(--s4); }
   .paid-result-actions .copy-result { width: 100%; }
   .no-change-note { padding: var(--s5) var(--s4) var(--s6); }
-  .billing-strip { padding: var(--s6) var(--gutter); }
-  .billing-strip .manage-billing { width: 100%; }
   .manage-billing-button { width: 100%; }
   .how { padding: var(--s8) var(--gutter); }
   .how-grid article { padding: var(--s5) 0; gap: var(--s2) var(--s4); }
@@ -1177,4 +1162,80 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
 
 @media (max-width: 380px) {
   .sample-button { padding: 7px 10px; }
+}
+
+/* Brand mark. Sized in ch so it tracks the wordmark beside it rather than
+   drifting when the type scale changes. */
+.brand-icon {
+  width: 1.55em;
+  height: 1.55em;
+  flex: 0 0 auto;
+  border-radius: 22%;
+  display: block;
+}
+
+/* Why this works. Two columns of prose at desktop, one on narrow screens.
+   Deliberately no numbering: these are four independent reasons, not a
+   sequence, and numbering them would claim an order that is not real. */
+.why {
+  max-width: var(--container); margin: 0 auto;
+  padding: var(--s8) var(--gutter);
+  display: grid;
+  gap: clamp(2rem, 4vw, 3.25rem);
+}
+
+.why-lede {
+  margin: 1rem 0 0;
+  max-width: 58ch;
+  color: var(--ink-2);
+  font-size: 1.02rem;
+  line-height: 1.6;
+}
+
+/* Two columns, not auto-fit: four items in a three-column track leaves a
+   single orphan on the second row, which reads as a layout fault. */
+.why-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(1.5rem, 3vw, 2.75rem) clamp(2rem, 5vw, 4rem);
+}
+
+@media (max-width: 720px) {
+  .why-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.why-grid article {
+  display: grid;
+  gap: .5rem;
+  align-content: start;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--line);
+}
+
+.why-grid h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+.why-grid p {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.62;
+  max-width: 46ch;
+}
+
+/* Account management belongs in the footer, not mid-funnel. ACT-09 requires
+   the "Cancel anytime" claim to have a reachable path; it does not require
+   advertising cancellation to people who have not bought anything. */
+.legal-doc .manage-billing button {
+  font: inherit;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
