@@ -8,6 +8,8 @@
 // code needing the ambient-request-context variant should use
 // app/chatgpt-auth.ts's getChatGPTUser()/requireChatGPTUser() instead,
 // which wrap these.
+import { productConfig } from "@/src/config/product";
+
 export type ChatGPTUser = {
   userId: string;
   displayName: string;
@@ -24,7 +26,54 @@ const SIGN_IN_PATH = "/signin-with-chatgpt";
 const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
 
-export function resolveChatGPTUserFromHeaders(requestHeaders: Headers): ChatGPTUser | null {
+const HOST_HEADER = "host";
+// Hosts served directly by the runtime, outside the trusted boundary.
+const DEV_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * SEC-01. The identity headers below are only meaningful because the hosting
+ * boundary injects them and strips any client-supplied copy. Any origin that
+ * reaches the Worker without passing through it — a *.workers.dev URL, a
+ * preview alias, a direct route — can set them freely, and trusting them
+ * there is a full authentication bypass: a forged user id returns another
+ * customer's paid rewrite and opens their billing portal.
+ *
+ * So identity is honored only on the configured production domain, or on a
+ * local dev host. Everywhere else the caller is anonymous, which fails closed:
+ * no entitlement, no unlock, no portal. `workers_dev: false` in vite.config.ts
+ * removes the known bad origin; this makes an unknown one harmless too.
+ *
+ * This is a containment control, not provenance verification. It assumes the
+ * boundary is the only thing serving the production Host. Replacing it with a
+ * signed/verifiable assertion from the boundary is the real fix.
+ */
+export function isTrustedIdentityHost(source: Request | Headers): boolean {
+  const hostname = hostnameOf(source);
+  if (!hostname) return false;
+  if (DEV_HOSTS.has(hostname)) return true;
+  const configured = productConfig.domain.trim().toLowerCase();
+  if (!configured) return false;
+  return hostname === configured || hostname === `www.${configured}`;
+}
+
+/**
+ * The Host header is authoritative when present (Workers always populate it).
+ * A bare `Headers` with no host falls back to nothing, so callers holding a
+ * Request should pass the Request and let its URL answer.
+ */
+function hostnameOf(source: Request | Headers): string {
+  const headers = source instanceof Headers ? source : source.headers;
+  const fromHeader = (headers.get(HOST_HEADER) ?? "").trim();
+  if (fromHeader) return fromHeader.toLowerCase().split(":")[0];
+  if (!(source instanceof Headers)) {
+    try { return new URL(source.url).hostname.toLowerCase(); } catch { return ""; }
+  }
+  return "";
+}
+
+export function resolveChatGPTUserFromHeaders(source: Request | Headers): ChatGPTUser | null {
+  if (!isTrustedIdentityHost(source)) return null;
+  const requestHeaders = source instanceof Headers ? source : source.headers;
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);
   if (!userId || !email) return null;
