@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Send a JSON body." }, { status: 415 });
   }
 
-  const user = resolveChatGPTUserFromHeaders(request.headers);
+  const user = resolveChatGPTUserFromHeaders(request);
   if (!user) {
     return Response.json({ error: "Sign in to continue.", signInPath: chatGPTSignInPath("/") }, { status: 401, headers: { "cache-control": "no-store" } });
   }

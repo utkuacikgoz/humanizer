@@ -93,8 +93,12 @@ test("ACT-01: shouldOfferUnlock refuses every shape that withholds nothing", () 
   assert.equal(shouldOfferUnlock(undefined), false);
   assert.equal(shouldOfferUnlock({ unchanged: true }), false);
   assert.equal(shouldOfferUnlock({ preview: "", hiddenWordCount: 9 }), false);
-  assert.equal(shouldOfferUnlock({ preview: "a rewrite", hiddenWordCount: 0 }), false);
-  assert.equal(shouldOfferUnlock({ preview: "a rewrite", hiddenWordCount: 4 }), true);
+  assert.equal(shouldOfferUnlock({ preview: "a rewrite", hiddenWordCount: 0, issuesImproved: 2 }), false);
+  // KI-01: withholding text is necessary but not sufficient — the engine must
+  // also have measured a real improvement.
+  assert.equal(shouldOfferUnlock({ preview: "a rewrite", hiddenWordCount: 4, issuesImproved: 0 }), false);
+  assert.equal(shouldOfferUnlock({ preview: "a rewrite", hiddenWordCount: 4 }), false);
+  assert.equal(shouldOfferUnlock({ preview: "a rewrite", hiddenWordCount: 4, issuesImproved: 2 }), true);
 });
 
 // ---------------------------------------------------------------------

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { eq } from "drizzle-orm";
-import { anonymousSessions, humanizationJobs, jobPayloads, protectedItems } from "../db/schema";
-import { persistHumanizationJob, redeemPreviewCapability } from "../db/repository";
+import { anonymousSessions, humanizationJobs, jobPayloads, protectedItems, users } from "../db/schema";
+import { ANONYMOUS_RETENTION_MS, persistHumanizationJob, purgeExpiredAnonymousPayloads, redeemPreviewCapability } from "../db/repository";
 import { createTestDatabase } from "./helpers/sqlite-db.mjs";
 
 const baseProjection = {
@@ -134,4 +134,56 @@ test("job_payloads never leaks into the redeemed projection shape", async () => 
   const [payload] = await db.select().from(jobPayloads).where(eq(jobPayloads.jobId, persisted.jobId));
   assert.equal(payload.sourceRef, baseInput.original);
   assert.equal(payload.resultRef, baseInput.result);
+});
+
+// SEC-06 — /privacy promises anonymous drafts are deleted after 30 days.
+// Nothing enforced it: every job_payloads row sat with purged_at NULL and
+// the source text still in place.
+
+test("purges anonymous draft text once the retention window has passed", async () => {
+  const db = await createTestDatabase();
+  const persisted = await persistHumanizationJob(db, { ...baseInput, idempotencyKey: crypto.randomUUID() });
+
+  const stale = new Date(Date.now() - ANONYMOUS_RETENTION_MS - 60_000);
+  await db.update(jobPayloads).set({ createdAt: stale }).where(eq(jobPayloads.jobId, persisted.jobId));
+
+  assert.equal(await purgeExpiredAnonymousPayloads(db), 1);
+
+  const [payload] = await db.select().from(jobPayloads).where(eq(jobPayloads.jobId, persisted.jobId)).limit(1);
+  assert.equal(payload.sourceRef, "", "the draft text must be gone");
+  assert.equal(payload.resultRef, null, "the rewrite must be gone");
+  assert.ok(payload.purgedAt, "a tombstone must record that this was purged, not never stored");
+
+  const items = await db.select().from(protectedItems).where(eq(protectedItems.jobId, persisted.jobId));
+  assert.ok(items.length > 0);
+  for (const item of items) {
+    assert.equal(item.valueRef, null, "protected values must be purged alongside the payload");
+    assert.ok(item.purgedAt);
+  }
+});
+
+test("leaves anonymous drafts inside the retention window untouched", async () => {
+  const db = await createTestDatabase();
+  const persisted = await persistHumanizationJob(db, { ...baseInput, idempotencyKey: crypto.randomUUID() });
+
+  assert.equal(await purgeExpiredAnonymousPayloads(db), 0);
+  const [payload] = await db.select().from(jobPayloads).where(eq(jobPayloads.jobId, persisted.jobId)).limit(1);
+  assert.equal(payload.purgedAt, null);
+  assert.notEqual(payload.sourceRef, "");
+});
+
+test("never purges a job someone has paid for", async () => {
+  const db = await createTestDatabase();
+  const persisted = await persistHumanizationJob(db, { ...baseInput, idempotencyKey: crypto.randomUUID() });
+
+  const stale = new Date(Date.now() - ANONYMOUS_RETENTION_MS - 60_000);
+  await db.update(jobPayloads).set({ createdAt: stale }).where(eq(jobPayloads.jobId, persisted.jobId));
+  const ownerId = crypto.randomUUID();
+  await db.insert(users).values({ id: ownerId, externalSubject: "paying-customer", contactEmail: "payer@example.com" });
+  await db.update(humanizationJobs).set({ ownerUserId: ownerId }).where(eq(humanizationJobs.id, persisted.jobId));
+
+  assert.equal(await purgeExpiredAnonymousPayloads(db), 0, "an owned job is out of scope for anonymous retention");
+  const [payload] = await db.select().from(jobPayloads).where(eq(jobPayloads.jobId, persisted.jobId)).limit(1);
+  assert.equal(payload.purgedAt, null);
+  assert.notEqual(payload.sourceRef, "");
 });
