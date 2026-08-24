@@ -42,9 +42,12 @@ closed. Current workspace evidence establishes:
 - The M2 usage ledger is concurrency-safe and is now enforced for entitled `/api/humanize` requests. Successful
   paid requests return the full result plus allowance/consumption state; failures and no-op attempts release their
   reservations. Billing readiness, Checkout, webhook projection, private checkout return, and unlock paths exist.
-- M3 is partial: full paid-result display and accessible copy exist. Authorized history/edit revisions, sentence
-  restore/regeneration, protected-phrase controls, and self-service history/account deletion remain open. Funnel
-  analytics exist for the current journey, but the full M3 event and deletion acceptance criteria are not closed.
+- M3 is partial: full paid-result display and accessible copy exist, and authorized history list/detail/delete
+  (M3-01) is implemented with owner-filtered queries, a soft-delete that voids the stored text, and a queued purge
+  job. Only checkout-claimed jobs currently have an owner, so history holds unlocked rewrites and not a
+  subscriber's day-to-day ones. Edit revisions, sentence restore/regeneration, protected-phrase controls, the purge
+  worker, and account deletion remain open. Funnel analytics exist for the current journey, but the full M3 event
+  and deletion acceptance criteria are not closed.
 - M4 remains open. Hosting/ENG owns attaching `ownword.pro` (currently a Hostinger parked page) and production
   bindings; MON owns live Stripe/catalog verification and reconciliation evidence; HE owns the frozen production-
   provider benchmark; LEGAL owns counsel approval; AQA/MQA/SEC own production-like release, smoke, rollback, and
@@ -128,8 +131,31 @@ review/gate tasks and require production-like evidence; implementation must not 
 
 Implementation note (2026-08-25): M3-02 is partial because paid full-result display and accessible copy are
 implemented while persisted edit/revision behavior is open. M3-06 is partial for the current activation journey;
-history, deletion, and cancellation-related event acceptance remains open. M3-01, M3-03, M3-04, and the self-service
+history, deletion, and cancellation-related event acceptance remains open. M3-03, M3-04, and the self-service
 parts of M3-05 are open.
+
+Implementation note (2026-08-25, M3-01, ENG): authorized history list/detail/delete is implemented and covered by
+`tests/history-access.test.mts`. `src/lib/history-access.ts` holds the decisions, `db/history-repository.ts` the
+queries, `app/api/history/route.ts` and `app/api/history/[id]/route.ts` the thin handlers, and `/history` the
+signed-in surface. Every query is filtered by the user id resolved server-side from the boundary identity headers;
+the only client-supplied value accepted anywhere is one job id, re-checked against `owner_user_id` in the same
+query. No history path reads a preview capability, so an anonymous capability answers 401 and enumerates nothing.
+Delete voids `job_payloads.sourceRef`/`resultRef`/`previewProjection`, nulls `protected_items.valueRef`, stamps
+`purged_at` on both, and enqueues one `deletion_jobs` row (`subject_type: job`, `scope: history_item`,
+`status: pending`); it is idempotent on D1's `meta.changes` and is not gated on entitlement, so a lapsed customer
+can still erase their own writing.
+
+This does not close M3-01's gate, and three things remain open behind it:
+
+1. **Only checkout-claimed jobs ever have an owner.** `owner_user_id` is set exclusively by `claimJobForUser` during
+   the checkout linkage, and the entitled `/api/humanize` path returns the full rewrite without persisting a job at
+   all. A subscriber's day-to-day rewrites therefore never enter history. Persisting them needs an owned-job write
+   path and, before that, a retention rule for owned payloads — `purgeExpiredAnonymousPayloads` deliberately
+   excludes owned jobs, so nothing currently ages them out. That is a PO/LEGAL decision, not an ENG one, and it was
+   left open rather than decided here.
+2. **Nothing drains `deletion_jobs`.** The row is the enqueue half of the purge workflow; the worker that
+   propagates it to other stores/processors and completes within the published window is M3-05.
+3. **No history or deletion analytics.** M3-06's history/deletion event acceptance is untouched.
 
 ### M4 — Commercial release
 

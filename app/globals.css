@@ -1239,3 +1239,88 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   text-underline-offset: 2px;
   cursor: pointer;
 }
+
+/* ------------------------------------------------------------
+   HISTORY (M3-01)
+   No new visual vocabulary: this reuses the workspace surface,
+   the panel rules, and the existing control shapes. The list is
+   a stack of bordered rows in the same rhythm as .how-grid, so
+   an opened rewrite drops its .checks/.comparison straight in
+   and looks native.
+   ------------------------------------------------------------ */
+.history-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.history-item {
+  display: grid;
+  gap: var(--s3);
+  padding: var(--s5) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s2) var(--s4);
+}
+
+.history-meta strong { font-size: var(--t-md); font-weight: 650; letter-spacing: -.02em; }
+.history-meta small { color: var(--ink-3); font-size: var(--t-xs); }
+
+/* The approved preview projection only — the withheld remainder of an
+   unopened rewrite is never sent to this page in the first place. */
+.history-preview {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--ink-2);
+  font-family: var(--font-read);
+  font-size: var(--t-base);
+  line-height: 1.6;
+}
+
+.history-actions { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); align-items: center; }
+
+.history-delete, .history-cancel {
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  padding: var(--s2) var(--s4);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+/* Destructive, so it is named plainly and coloured with the accent ink
+   rather than dressed as the primary action. */
+.history-delete {
+  border: 1px solid var(--clay);
+  background: var(--clay-soft);
+  color: var(--clay);
+}
+
+.history-delete:hover { background: var(--clay); color: var(--paper); }
+
+.history-cancel {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.history-cancel:hover { border-color: var(--line-strong); color: var(--ink); }
+
+.history-warning {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+}
+
+.history-detail { display: grid; gap: var(--s4); }
+.history-detail .comparison { border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; }

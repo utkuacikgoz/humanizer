@@ -16,6 +16,11 @@ import type { UnlockedResult } from "../../db/billing-repository";
 // hygiene, never the access control.
 const JOB_ID = /^[0-9a-f-]{8,64}$/i;
 
+/** Shared with src/lib/history-access.ts so both paths refuse the same shapes. */
+export function isJobIdShape(value: string): boolean {
+  return JOB_ID.test(value);
+}
+
 const NO_STORE = { "cache-control": "no-store" } as const;
 
 /** The subset of db/billing-repository.ts this route depends on. */

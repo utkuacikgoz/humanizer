@@ -50,7 +50,7 @@ V1 contains one journey:
 - Mass-generated SEO pages.
 - Team workspaces, collaboration, public sharing, mobile apps, browser extensions, and a public API.
 
-Paid history, edit/revision storage, sentence restore/regeneration, protected-phrase controls, and self-service deletion are required paid-workflow work but remain open; they must not be advertised as available until implemented.
+Paid history list/detail/delete is implemented (M3-01): a signed-in owner can see their unlocked rewrites at `/history`, open one under the same entitlement check that governs `/api/result`, and delete one. Edit/revision storage, sentence restore/regeneration, protected-phrase controls, the purge worker that drains queued deletions, and account deletion remain open and must not be advertised as available until implemented.
 
 ## Current product behavior
 
@@ -85,7 +85,19 @@ The append-only ledger from D-015 is now wired into entitled `/api/humanize` req
 
 An entitled successful request returns the **complete result** directly, not an anonymous preview, together with the qualitative checks, measured improvement count, protected items, and a usage summary (`consumed`, `allowance`, `remaining`, `periodEnd`, and `paidUseCount`). The landing workspace renders this full paid result and supports copy.
 
-This closes the previous gap where the ledger existed but no request path used it. It does not implement paid history, editing, sentence controls, protected phrases, or deletion.
+This closes the previous gap where the ledger existed but no request path used it. It does not implement editing, sentence controls, protected phrases, or account deletion. It also does not persist the rewrite: an entitled request returns the complete result and writes no job row, so a subscriber's direct rewrites do not enter history. Persisting owned jobs needs a retention rule for owned payloads first, which is a PO/LEGAL decision and is still open.
+
+### Paid history
+
+`/history` is a private, `noindex` surface listing the rewrites the signed-in account owns.
+
+- Every list, detail, and delete query is filtered by the user id resolved server-side from the hosting boundary's identity headers. The only client-supplied value any of these paths accepts is a single job id, re-checked against `owner_user_id` in the same query.
+- The list returns metadata only: mode, date, word counts, state, and the same preview-projection fields an anonymous visitor already sees before paying. The full rewrite is never in a list response.
+- Opening one returns the complete rewrite through the existing ownership plus active-entitlement decision, not a second copy of it. A job owned by nobody, owned by someone else, or already deleted returns the same not-found shape as one that never existed.
+- No history path reads an anonymous preview capability, so a capability grants its one job through `/api/preview` as before and enumerates nothing.
+- Deleting an item voids the stored source, result, and projection, nulls any protected-item reference, stamps the purge tombstone, and queues a `history_item` deletion job. It is idempotent, and it is not gated on an active entitlement, so a lapsed customer can still erase their own writing.
+
+Two limits are worth stating plainly. History currently holds only rewrites claimed through checkout, because that is the only path that assigns an owner. And the queued deletion job is the enqueue half of the purge workflow; the worker that propagates it to every store and processor within the published window is still open.
 
 ## Experience requirements
 
@@ -154,7 +166,7 @@ Status: code-complete or substantially complete through M2-10, including D-015 l
 
 ### M3 â€” Paid result workflow
 
-Status: partial. Copy, direct paid result rendering, post-checkout result evidence, bottom-funnel analytics, and second-paid-use semantics are implemented. Paid history, edit/revision workflow, sentence restore/regeneration, protected phrases, self-service history/account deletion, purge completion evidence, and full responsive/manual QA remain open.
+Status: partial. Copy, direct paid result rendering, post-checkout result evidence, bottom-funnel analytics, second-paid-use semantics, and M3-01's authorized history list/detail/delete are implemented. Still open: persisting an entitled request's rewrite so it reaches history at all, the edit/revision workflow, sentence restore/regeneration, protected phrases, account deletion, the purge worker that drains queued deletion jobs and the completion evidence it produces, history/deletion analytics events, and full responsive/manual QA.
 
 ### M4 â€” Commercial release
 
