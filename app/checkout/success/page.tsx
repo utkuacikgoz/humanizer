@@ -39,6 +39,11 @@ export default function CheckoutSuccessPage() {
   const attempts = useRef(0);
   const marks = useMemo(() => (result ? diffRewrite(result.original, result.result) : null), [result]);
 
+  // Hydration marker, matching the landing page. The post-purchase surface
+  // fires no analytics beacon, so this client-only effect is the single
+  // signal that it has become interactive.
+  useEffect(() => { document.documentElement.classList.add("motion-ready"); }, []);
+
   useEffect(() => {
     if (!jobId) return;
     let cancelled = false;

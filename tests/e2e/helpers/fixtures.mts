@@ -41,33 +41,45 @@ export const ALREADY_NATURAL_DRAFT =
  * post-processing rule that deletes whitespace before punctuation.
  */
 export const COSMETIC_ONLY_DRAFT =
-  "The quarterly report was very long , and the team read it twice before the meeting on Tuesday morning in the small room.";
+  "The quarterly report was very long , and the team read it twice before the meeting on Tuesday " +
+  "morning in the small room near the stairs, and nobody raised a single question about it afterwards.";
 
+// Fixtures below MIN_PAYWALLABLE_INPUT_WORDS (25) are deliberately short —
+// they exercise input validation. Every other draft here must clear that
+// minimum, or it is refused client-side and never reaches the engine path it
+// was written to stress.
 export const HOSTILE_DRAFTS = {
   empty: "",
   oneWord: "hello",
   elevenWords: "one two three four five six seven eight nine ten eleven",
-  twelveWords: "It is important to note that the team should leverage new tools daily",
+  // Under MIN_PAYWALLABLE_INPUT_WORDS (25). Named for its role, not its
+  // length, so a future change to the minimum cannot leave the name lying.
+  belowMinimum: "It is important to note that the team should leverage new tools daily",
   threeHundredWords: Array.from({ length: 300 }, (_, i) => (i % 12 === 11 ? "clear." : "clear")).join(" "),
   threeHundredOneWords: Array.from({ length: 301 }, (_, i) => (i % 12 === 11 ? "clear." : "clear")).join(" "),
   giantSingleWord: "a".repeat(5_000),
   emoji:
     "Furthermore 🎉🎉 the team 🚀 must leverage 💡 every channel 🔥 in today's fast-paced world 😀 because " +
-    "it is important to note that 🧠 results matter a great deal here.",
+    "it is important to note that 🧠 results matter a great deal here. " +
+    "Moreover, stakeholders should utilize robust frameworks in order to facilitate optimal outcomes across the wider organization moving forward together this quarter.",
   rightToLeft:
     "Furthermore, it is important to note that مرحبا بالعالم هذا اختبار للغة العربية والنص ثنائي الاتجاه " +
-    "and the team must leverage every available channel today.",
+    "and the team must leverage every available channel today. " +
+    "Moreover, stakeholders should utilize robust frameworks in order to facilitate optimal outcomes across the wider organization moving forward together this quarter.",
   markup:
     "Furthermore, it is important to note that <script>window.__xssScript = 1</script> " +
     "<img src=x onerror=\"window.__xssHandler = 1\"> <svg onload=\"window.__xssSvg = 1\"></svg> " +
-    "the team must leverage <b>bold</b> channels every single day.",
+    "the team must leverage <b>bold</b> channels every single day. " +
+    "Moreover, stakeholders should utilize robust frameworks in order to facilitate optimal outcomes across the wider organization moving forward together this quarter.",
   markdown:
     "# Heading\n\nFurthermore, it is important to note that **bold** and _italic_ text with `code` and a " +
-    "[link](https://example.org/x?y=1&z=2) must leverage lists:\n\n- one\n- two\n\n> a quoted line here.",
+    "[link](https://example.org/x?y=1&z=2) must leverage lists:\n\n- one\n- two\n\n> a quoted line here.\n\n" +
+    "Moreover, stakeholders should utilize robust frameworks in order to facilitate optimal outcomes across the wider organization moving forward together this quarter.",
   citationHeavy:
     "Furthermore, it is important to note that Dr. O'Neill said “the 87% figure isn’t final” " +
     "(Chen et al., 2024, pp. 12–15); revenue was $2.3 million on March 14, 2024, per " +
-    "https://example.org/data?q=1&r=2 and the team must leverage that finding.",
+    "https://example.org/data?q=1&r=2 and the team must leverage that finding. " +
+    "Moreover, stakeholders should utilize robust frameworks in order to facilitate optimal outcomes across the wider organization moving forward together this quarter.",
 } as const;
 
 /**

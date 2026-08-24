@@ -155,6 +155,13 @@ export default function Home() {
     } : {}),
   };
 
+  // Hydration marker. `motion-ready` no longer gates any animation — the
+  // scroll-reveal it was built for is gone — but it remains the documented
+  // "this page is interactive" signal every automated check waits on
+  // (tests/e2e/helpers/harness.mts), and it is the cheapest honest one:
+  // it can only appear once a client effect has actually run.
+  useEffect(() => { document.documentElement.classList.add("motion-ready"); }, []);
+
   useEffect(() => { track("landing_view"); }, []);
 
   async function humanize() {
