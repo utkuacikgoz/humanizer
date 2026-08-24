@@ -1,16 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { productConfig } from "@/src/config/product";
 import { pricingConfig } from "@/src/config/pricing";
 import { subscriptionDisclosure } from "@/src/lib/subscription-disclosure";
 import { ManageBilling } from "@/src/components/manage-billing";
+import { MarkedText, describeMarks, diffRewrite } from "@/src/components/rewrite-marks";
 
 type UnlockedResult = {
   original: string;
   result: string;
 };
+
+function countWords(value: string) {
+  return value.trim() ? value.trim().split(/\s+/).length : 0;
+}
 
 const POLL_INTERVAL_MS = 1_500;
 const MAX_POLLS = 10; // ~15s bound (M2-09: "polls with bounds")
@@ -32,6 +37,7 @@ export default function CheckoutSuccessPage() {
   const [status, setStatus] = useState<"confirming" | "unlocked" | "delayed" | "signed-out">("confirming");
   const [result, setResult] = useState<UnlockedResult | null>(null);
   const attempts = useRef(0);
+  const marks = useMemo(() => (result ? diffRewrite(result.original, result.result) : null), [result]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -75,7 +81,8 @@ export default function CheckoutSuccessPage() {
         </Link>
       </header>
 
-      <section className="workspace" aria-labelledby="checkout-status-title" style={{ marginTop: 48 }}>
+      <div className="stage stage-single">
+        <section className="workspace" aria-labelledby="checkout-status-title">
         <div className="workspace-topline">
           <div>
             <span className="step-number">03</span>
@@ -104,19 +111,34 @@ export default function CheckoutSuccessPage() {
           </p>
         ) : null}
 
-        {status === "unlocked" && result ? (
-          <div className="comparison">
-            <article>
-              <div className="panel-label"><span>Original</span></div>
-              <p>{result.original}</p>
-            </article>
-            <article className="humanized-panel">
-              <div className="panel-label"><span>Humanized</span></div>
-              <p>{result.result}</p>
-            </article>
-          </div>
-        ) : null}
-      </section>
+        {status === "unlocked" && result && marks ? (
+          <>
+            <div className="comparison">
+              <article>
+                <div className="panel-label"><span>Original</span><small>{countWords(result.original)} words</small></div>
+                <p><MarkedText segments={marks.source} /></p>
+              </article>
+              <article className="humanized-panel">
+                <div className="panel-label"><span>Humanized</span><small>complete</small></div>
+                <p className="sr-only">{describeMarks(marks.result)}</p>
+                <p><MarkedText segments={marks.result} /></p>
+              </article>
+            </div>
+            {/* ACT-15: the paid screen carries the same evidence as the
+                free preview did, over the complete text — and a way back
+                into the workspace, because nothing else invites a second
+                draft. */}
+            <div className="evidence">
+              <p className="diff-legend" aria-hidden="true">
+                <span><i className="k-cut" /> Cut</span>
+                <span><i className="k-add" /> Rewritten</span>
+              </p>
+              <p className="protected-note"><Link className="next-action" href="/">Rewrite another draft</Link></p>
+            </div>
+          </>
+          ) : null}
+        </section>
+      </div>
 
       {/* ACT-09: the same one-click cancellation path as the main page,
           present on the post-purchase surface where a customer who has
