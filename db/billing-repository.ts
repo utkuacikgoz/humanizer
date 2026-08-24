@@ -223,6 +223,7 @@ export interface Entitlement {
   subscriptionId: string;
   planId: string;
   status: SubscriptionStatus;
+  /** Period boundaries scope the usage ledger's allowance (M2-07). */
   currentPeriodStart: Date;
   currentPeriodEnd: Date;
   stripeCustomerId: string;
