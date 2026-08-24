@@ -31,6 +31,10 @@ type PaidResult = {
   original: string;
   result: string;
   paid: true;
+  // Present so `unchanged` is a valid discriminant across the whole union.
+  // Without it, `result.unchanged` is a type error on Result rather than a
+  // narrowing check, which is what broke the build on main.
+  unchanged?: false;
   issuesImproved: number;
   naturalness: "Strong" | "Good";
   meaningPreservation: "High" | "Review needed";
