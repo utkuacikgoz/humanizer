@@ -212,3 +212,36 @@ test("every declared benchmark fact is extracted from its source at the expected
     }
   }
 });
+
+// The replacement literals are written sentence-initially ("To", "From
+// here, "), and casing used to only ever be added, never restored. A
+// mid-sentence match kept the literal's capital and shipped
+// "...robust frameworks To facilitate..." to a paying customer.
+
+test("a mid-sentence substitution does not keep the replacement's capital", async () => {
+  const pipeline = createHumanizationPipeline({ config: { maxInputCharacters: 2_400 } });
+  const result = await pipeline.humanize({
+    text:
+      "It is important to note that leveraging synergies is a key component of driving impactful outcomes. " +
+      "Furthermore, it should be emphasized that stakeholders must utilize robust frameworks in order to " +
+      "facilitate optimal results across the organization moving forward together in the coming quarter.",
+    mode: "natural",
+  });
+
+  assert.doesNotMatch(result.text, /\S\s+To\s/, "\"in order to\" became a capitalized \"To\" mid-sentence");
+  assert.doesNotMatch(result.text, /\S\s+From here/, "\"moving forward\" became a capitalized \"From here\" mid-sentence");
+  assert.match(result.text, /to facilitate/);
+});
+
+test("a substitution at a sentence start is still capitalized", async () => {
+  const pipeline = createHumanizationPipeline({ config: { maxInputCharacters: 2_400 } });
+  const result = await pipeline.humanize({
+    text:
+      "Moving forward, we will utilize better tools. Furthermore, the team must leverage every channel " +
+      "in order to succeed across the whole organization this quarter.",
+    mode: "natural",
+  });
+
+  assert.match(result.text, /^From here,/, "a sentence-initial replacement must keep its capital");
+  assert.doesNotMatch(result.text, /\.\s+[a-z]/, "every sentence must start with a capital");
+});
