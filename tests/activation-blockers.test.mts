@@ -72,7 +72,7 @@ test("ACT-01: no unlock CTA can be produced for an unchanged rewrite", async () 
 
 test("ACT-01: a genuine rewrite still produces a preview and an offer", async () => {
   const body = await humanize(
-    "In today's fast-paced world, it is important to note that clear communication helps teams. Furthermore, people should utilize simple language whenever possible to avoid confusion.",
+    "In today's fast-paced world, it is important to note that clear communication helps teams. Furthermore, people should utilize simple language whenever possible to avoid confusion. It should be emphasized that stakeholders must leverage robust frameworks in order to facilitate optimal outcomes across the organization moving forward together.",
   );
   assert.notEqual(body.unchanged, true);
   assert.ok(body.preview && body.preview.length > 0);
@@ -103,7 +103,7 @@ test("ACT-01: shouldOfferUnlock refuses every shape that withholds nothing", () 
 
 test("ACT-02: the projected count is exactly the engine's measured count, with no floor", async () => {
   const text =
-    "In today's fast-paced world, it is important to note that clear communication helps teams. Furthermore, people should utilize simple language whenever possible to avoid confusion.";
+    "In today's fast-paced world, it is important to note that clear communication helps teams. Furthermore, people should utilize simple language whenever possible to avoid confusion. It should be emphasized that stakeholders must leverage robust frameworks in order to facilitate optimal outcomes across the organization moving forward together.";
   // Same pipeline configuration the route constructs, so `improvements`
   // here is the number the route projected.
   const pipeline = createHumanizationPipeline({ config: { maxInputCharacters: 2_400 } });
