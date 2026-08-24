@@ -15,6 +15,12 @@ import { isPurchasablePlan } from "@/src/config/stripe";
 
 const CAPABILITY_TOKEN = /^[A-Za-z0-9_-]{16,128}$/;
 
+// One verification per price ID per isolate, not per checkout: the first
+// request pays a single Stripe read, the rest reuse it. Keyed by price ID
+// so rotating STRIPE_PRICE_STARTER re-verifies instead of trusting a
+// cached pass for a different price.
+const verifiedPriceIds = new Set<string>();
+
 async function sha256Hex(value: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -65,6 +71,25 @@ export async function POST(request: Request) {
       throw error;
     }
 
+    // Never send a customer to Checkout for a Price that charges something
+    // other than what the page advertised (MON: bait-and-switch guard).
+    const priceId = config.priceIds[planId];
+    if (!verifiedPriceIds.has(priceId)) {
+      const { assertPriceMatchesCatalog, PriceMismatchError } = await import("@/src/lib/price-integrity");
+      try {
+        assertPriceMatchesCatalog(planId, await stripe.prices.retrieve(priceId));
+        verifiedPriceIds.add(priceId);
+      } catch (error) {
+        if (error instanceof PriceMismatchError) {
+          // Fail closed and loudly: this is a misconfiguration, not a
+          // user error. Charging here would be the actual harm.
+          console.error("[checkout] price integrity check failed:", error.message);
+          return Response.json({ error: "Checkout is not available yet." }, { status: 503, headers: { "cache-control": "no-store" } });
+        }
+        throw error;
+      }
+    }
+
     const { userId } = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: user.userId, email: user.email });
     const capabilityDigest = await sha256Hex(capability);
     const claimed = await billing.claimJobForUser(db, { capabilityDigest, userId });
@@ -78,7 +103,7 @@ export async function POST(request: Request) {
     const session = await stripe.checkout.sessions.create(
       {
         mode: "subscription",
-        line_items: [{ price: config.priceIds[planId], quantity: 1 }],
+        line_items: [{ price: priceId, quantity: 1 }],
         client_reference_id: userId,
         // Opaque internal references only — never writing, capability
         // tokens, or sensitive attributes (D-005).

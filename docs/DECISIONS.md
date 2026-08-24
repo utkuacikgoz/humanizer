@@ -78,6 +78,12 @@ Decision: Every material engine change runs the frozen 100+ passage suite and re
 Reason: Anecdotal prompt tuning hides regressions.
 Consequence: A gain in one metric cannot waive a blocking regression in another.
 
+### D-014 — Token/context discipline is mandatory, not optional
+
+Decision: TOK owns session token/context spend. Defaults: terse chat replies (bullets over prose, no restating the request); no comment bloat in code (one line max, only for non-obvious WHY); route mechanical/lookup work to cheaper models via subagents instead of doing it inline; avoid re-reading files/re-deriving facts already in context.
+Reason: User flagged token spend as a real cost, not a style nit.
+Consequence: Applies to every agent's output from this point forward, not just chat replies.
+
 ## Proposed; must resolve before named milestone
 
 ### D-P01 — Anonymous/result retention duration (before M1)

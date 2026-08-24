@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { productConfig } from "@/src/config/product";
+import { pricingConfig } from "@/src/config/pricing";
+import { subscriptionDisclosure } from "@/src/lib/subscription-disclosure";
+import { ManageBilling } from "@/src/components/manage-billing";
 
 type UnlockedResult = {
   original: string;
@@ -113,6 +116,20 @@ export default function CheckoutSuccessPage() {
             </article>
           </div>
         ) : null}
+      </section>
+
+      {/* ACT-09: the same one-click cancellation path as the main page,
+          present on the post-purchase surface where a customer who has
+          just been charged is most likely to look for it. */}
+      <section className="billing-strip" id="manage-billing" aria-labelledby="manage-billing-title">
+        <div>
+          <h2 id="manage-billing-title">Your subscription</h2>
+          <p>
+            {subscriptionDisclosure(pricingConfig.plans.starter)} Cancel or change it at any time — the
+            billing portal shows the exact effective date before you confirm.
+          </p>
+        </div>
+        <ManageBilling returnTo="/checkout/success" />
       </section>
     </main>
   );

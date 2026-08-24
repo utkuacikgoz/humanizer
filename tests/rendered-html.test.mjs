@@ -63,7 +63,15 @@ test("keeps brand and pricing copy centralized", async () => {
   ]);
   assert.match(page, /productConfig\.productName/);
   assert.match(page, /pricingConfig\.plans\.starter/);
-  assert.doesNotMatch(page, /\$9\/month/);
-  assert.match(productConfig, /productName:\s*"Humanizer"/);
-  assert.match(pricingConfig, /monthlyPrice:\s*9/);
+  assert.doesNotMatch(page, /\$9(\.99)?\/month/);
+  assert.match(productConfig, /productName:\s*"Ownword"/);
+  // Anchored: a bare /monthlyPrice:\s*9/ also matches 9.99, so it would
+  // silently keep passing across a price change (MON finding).
+  assert.match(pricingConfig, /monthlyPrice:\s*9\.99,/);
+});
+
+test("renders the configured price, not a stale hardcoded one", async () => {
+  const html = await (await render()).text();
+  assert.match(html, /9\.99/);
+  assert.doesNotMatch(html, /\$9\b(?!\.)/);
 });

@@ -227,6 +227,37 @@ export interface Entitlement {
 }
 
 /**
+ * A subscription the customer has already scheduled to end, whose final
+ * period has now elapsed, confers nothing — even if the local projection
+ * still says `active`.
+ *
+ * This closes a real entitlement-drift hole rather than a hypothetical
+ * one. Access ends at `current_period_end` for a cancel-at-period-end
+ * subscription (docs/MONETIZATION.md: "keep access through
+ * `current_period_end` only when Stripe indicates cancellation at period
+ * end; then block new paid work"), but the local projection only learns
+ * that the period actually elapsed when Stripe's final
+ * `customer.subscription.deleted` webhook arrives and is processed
+ * successfully. That delivery can fail: db/billing-repository.ts's own
+ * MAX_STRIPE_EVENT_ATTEMPTS deliberately stops retrying a permanently
+ * failing event, at which point the row would sit at `active` forever and
+ * keep unlocking paid content indefinitely, for free. Deriving the expiry
+ * from data the webhook already delivered makes the check independent of
+ * any *later* webhook arriving at all.
+ *
+ * Deliberately narrow: it fires only when `cancelAtPeriodEnd` is set, so a
+ * normally-renewing subscription is never locked out by a slow renewal
+ * webhook (its `cancel_at_period_end` is false, and Stripe advances the
+ * period on renewal). A broader "any elapsed period is stale" rule would
+ * trade this leak for a false lockout of paying customers, which is why
+ * general projection staleness belongs to the periodic Stripe
+ * reconciliation job (docs/MONETIZATION.md), not to this read path.
+ */
+function isExpiredCancellation(row: { cancelAtPeriodEnd: boolean; currentPeriodEnd: Date }, now: number): boolean {
+  return row.cancelAtPeriodEnd && row.currentPeriodEnd.getTime() <= now;
+}
+
+/**
  * Server-authoritative entitlement lookup (M2-08). Only ever driven by
  * the local subscription projection updated from verified webhooks —
  * never by a client-supplied plan/status, a Checkout redirect, or a
@@ -234,7 +265,8 @@ export interface Entitlement {
  */
 export async function getActiveEntitlement(db: AppDatabase, userId: string): Promise<Entitlement | null> {
   const rows = await db.select().from(subscriptions).where(eq(subscriptions.userId, userId)).orderBy(desc(subscriptions.updatedAt));
-  const active = rows.find((row) => ACTIVE_ENTITLEMENT_STATUSES.has(row.status));
+  const now = Date.now();
+  const active = rows.find((row) => ACTIVE_ENTITLEMENT_STATUSES.has(row.status) && !isExpiredCancellation(row, now));
   if (!active) return null;
   return { planId: active.planId, status: active.status, currentPeriodEnd: active.currentPeriodEnd, stripeCustomerId: active.stripeCustomerId };
 }
@@ -259,6 +291,14 @@ export interface UnlockedResult {
  * is still a proposed, unresolved decision (docs/DECISIONS.md) — this
  * implements the strict interpretation (active/trialing only) as the
  * safe default until that's ratified, not the lenient one.
+ *
+ * A purged payload is treated as gone, not as content to serve: once a
+ * deletion job tombstones a row (`job_payloads.purged_at`), telling the
+ * user it is deleted while this path still returns the text would be the
+ * "Deletion failure — UI says deleted while payload remains" threat in
+ * docs/SECURITY.md. The purge worker itself is M3-05; this read path is
+ * made purge-aware now so that landing it cannot leave a window where
+ * tombstoned content is still readable.
  */
 export async function getUnlockedResult(db: AppDatabase, input: { userId: string; jobId: string }): Promise<UnlockedResult | null> {
   const entitlement = await getActiveEntitlement(db, input.userId);
@@ -268,7 +308,7 @@ export async function getUnlockedResult(db: AppDatabase, input: { userId: string
   if (!job || job.ownerUserId !== input.userId || job.state !== "succeeded") return null;
 
   const [payload] = await db.select().from(schema.jobPayloads).where(eq(schema.jobPayloads.jobId, job.id)).limit(1);
-  if (!payload?.resultRef) return null;
+  if (!payload?.resultRef || payload.purgedAt) return null;
 
   return { original: payload.sourceRef, result: payload.resultRef };
 }

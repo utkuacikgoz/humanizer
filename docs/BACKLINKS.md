@@ -1,4 +1,4 @@
-# Humanizer Backlink Acquisition System (V1)
+# Ownword Backlink Acquisition System (V1)
 
 **Owner:** Backlink Agent
 **Status:** V1 operating playbook

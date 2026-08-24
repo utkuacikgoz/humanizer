@@ -11,7 +11,7 @@ Canonical launch offers:
 
 | Plan | Price | Billing | Included words | Available V1 features |
 |---|---:|---|---:|---|
-| Starter | $9 | Monthly | 50,000 | Four modes, semantic protection, comparison, history, sentence regeneration, protected terminology |
+| Starter | $9.99 | Monthly | 50,000 | Four modes, semantic protection, comparison, history, sentence regeneration, protected terminology |
 | Pro | $19 | Monthly | 200,000 | Starter features; larger limits/value positioning only where actually implemented |
 
 Voice DNA, multiple voice profiles, larger documents, batch processing, and advanced controls are future Pro capabilities, not V1 deliverables. Unavailable capabilities must be omitted from purchase claims or explicitly labeled `Coming later`; never imply they are usable at checkout.
