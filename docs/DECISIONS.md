@@ -114,6 +114,18 @@ Consequence: The following remain genuinely open and are NOT satisfied by placeh
 
 M2-01 through M2-06, M2-08, M2-09, and M2-10 are implemented (identity/claim, catalog, Checkout Session creation, verified webhook ingress and inbox, subscription projection, server-authoritative unlock, the checkout-return polling page, and the Billing Portal). **M2-07 (append-only usage ledger) is deliberately NOT implemented this session**, not an oversight: a correct implementation needs atomic, concurrency-safe admission control ("committed + active reservations + request <= allowance" checked and reserved as one atomic step), and this session's own claim-transaction work twice found real races in exactly this class of problem (an unsound timestamp-comparison check, then a capability-lockout gap — see db/billing-repository.ts's git history) before landing a correct fix each time. Shipping a superficially-plausible `reserveUsage()` that races under concurrent requests would be worse than not shipping it: it looks like the security-critical control D-006 requires while not actually providing it. There is also no consumer yet — nothing in M1-M2's scope calls it; the first real caller is M3-03 (sentence regeneration). ARCHITECTURE.md already flags this exact concern as an open risk ("D1 usage ledger concurrency... ENG + MON load/concurrency spike before M2-07") — implement M2-07 as part of that spike, with a real concurrency test (mirroring tests/billing-repository.test.mts's concurrent-claim test) proving no over-reservation before trusting it.
 
+### D-015 — M2-07 usage ledger is implemented and the D-013 deferral is lifted
+
+Decision: the append-only usage ledger and its admission control now exist (`db/usage-ledger.ts`). D-013 deferred this because a `reserveUsage()` that races looks like the control D-006 requires without being one — that objection is answered, not waived.
+
+Admission is a single guarded `INSERT ... SELECT ... WHERE` whose balance check is evaluated inside the same write that records the reservation, decided by rows-affected. There is no read-then-write window, and no re-read-and-compare (which cannot distinguish "I won" from "someone wrote an identical value" — the exact mistake found twice in this repository's claim transaction).
+
+Evidence, not assertion: `tests/usage-ledger.test.mts` runs 20 concurrent 100-word reservations against a 1,000-word allowance and asserts exactly 10 admissions. A deliberately naive read-then-write implementation was run against that same test and admitted 20, consuming 2,000 of a 1,000 allowance — so the test detects the race it claims to.
+
+The README guardrail "never charge quota for failed attempts or internal retries" is enforced by construction: a reservation is held during the attempt, a commit records only the words that actually succeeded, and the difference is released. A failed attempt costs the customer nothing. Replays are idempotent through the `(operation_key, entry_type)` unique index.
+
+Consequence: the ledger is correct and tested, but **nothing calls it yet** — the 50,000-word allowance is still not enforced on any request path. Wiring it into the humanize route is the next step and is a separate change; this entry exists so a reader does not mistake a working ledger for an enforced quota.
+
 ## Rejected
 
 - Unlocking on a `success=true` query parameter or Checkout redirect.
