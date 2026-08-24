@@ -55,7 +55,7 @@ async function applyMigrations(databasePath: string) {
         applied += 1;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (/already exists/i.test(message)) {
+        if (/already exists|duplicate column name/i.test(message)) {
           skipped += 1;
           continue;
         }

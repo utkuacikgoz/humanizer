@@ -148,6 +148,13 @@ what a confident guess would produce.
   distinguish "I won" from "someone wrote an identical value". That exact
   mistake was made twice here, once with a timestamp comparison in the claim
   transaction.
+- **Do not put multi-statement SQLite trigger bodies in Wrangler D1
+  migrations.** Remote migration application split the trigger body and failed
+  with `incomplete input` even though local SQLite accepted it. The preview
+  guard instead uses a transactional D1 batch: a counter row receives a random
+  admission token, and the guarded lease write requires that exact token.
+  This preserves shared rate/concurrency authority without parser-sensitive
+  triggers.
 - **TypeScript wants `.mjs` in the specifier when importing a `.mts` file**
   under `moduleResolution: "bundler"`.
 - **Internal links need `Link` from `next/link`.** A bare `<a href="/...">`
