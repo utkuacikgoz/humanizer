@@ -45,8 +45,8 @@ No browser request directly calls an AI provider, D1, R2, or Stripe privileged A
 
 Maintain two typed projections from one source:
 
-- Public brand: product name, tagline, domain, support email, public social handles.
-- Server brand/legal: legal company name and any operational metadata not needed by clients.
+- Public brand: confirmed product name, tagline, and domain, plus only verified support and social details.
+- Server brand/legal: a nullable legal company name and operational metadata not needed by clients. Null means unconfirmed and must never render as placeholder copy.
 
 Pricing follows the same pattern: one server-owned catalog and a deliberately safe public view. Do not mix brand or price definitions into components.
 
@@ -155,7 +155,7 @@ Thresholds are versioned. Each job records the effective pipeline, prompt, provi
 - Emit structured state transitions, duration, token counts, cost estimates, failure class, and redacted provider status.
 - Use timeouts and bounded retries with jitter for transient external failures; never retry deterministic invalid input.
 - Make checkout creation, humanization submission, webhook effects, and usage operations idempotent.
-- Phase 0 implements a bounded per-runtime preview guard (60-second replay, 12 requests/minute per observed client, two concurrent requests per observed client, and a five-second request-path deadline). The deadline rejects orchestration and propagates an abort signal; provider adapters must honor that signal to stop upstream work. Treat the guard as prototype defense-in-depth and replace it with distributed enforcement before enabling a paid provider.
+- Anonymous preview admission is shared through D1: fixed 60-second windows allow 12 executions per HMAC-pseudonymized Cloudflare client and expiring leases allow two active executions. Idempotent responses are AES-GCM encrypted for ten-minute replay; a lease fencing token prevents stale completion after another Worker reclaims expired work. The five-second pipeline deadline propagates an abort signal; provider adapters must also honor that signal to stop upstream work. Isolate memory is an explicit local/test fallback only.
 - Define a stuck-job sweeper and Stripe reconciliation job before launch.
 - Alert on semantic/protected-content failure spikes, terminal pipeline failures, webhook lag/failure, entitlement drift, quota invariant violations, provider latency/cost, and checkout-to-unlock failures.
 - Keep support tooling least-privileged; viewing customer text requires explicit policy and audit, not ordinary logs.

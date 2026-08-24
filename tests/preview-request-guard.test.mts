@@ -36,3 +36,20 @@ test("preview guard limits concurrent work without caching failures", async () =
   const retry = await guard.run({ clientId: "other", idempotencyKey: failedKey, fingerprint: "same", execute: async () => "recovered" });
   assert.equal(retry.ok, true);
 });
+
+test("preview guard releases concurrency when execute throws synchronously", async () => {
+  const guard = new PreviewRequestGuard<string>({ maxConcurrent: 1 });
+  await assert.rejects(guard.run({
+    clientId: "client",
+    idempotencyKey: "request-sync-failure",
+    fingerprint: "same",
+    execute: (() => { throw new Error("sync failure"); }) as () => Promise<string>,
+  }));
+  const retry = await guard.run({
+    clientId: "client",
+    idempotencyKey: "request-after-failure",
+    fingerprint: "next",
+    execute: async () => "recovered",
+  });
+  assert.equal(retry.ok, true);
+});

@@ -14,7 +14,14 @@ type ClientWindow = {
 
 export type GuardResult<T> =
   | { ok: true; value: T; replayed: boolean }
-  | { ok: false; status: 409 | 429; error: string; retryAfterSeconds?: number };
+  | { ok: false; status: 409 | 429 | 503; error: string; retryAfterSeconds?: number };
+
+export type GuardInput<T> = {
+  clientId: string;
+  idempotencyKey: string;
+  fingerprint: string;
+  execute: () => Promise<T>;
+};
 
 type GuardOptions = {
   maxRequests: number;
@@ -24,18 +31,33 @@ type GuardOptions = {
   maxEntries: number;
 };
 
-const DEFAULT_OPTIONS: GuardOptions = {
+export const PREVIEW_GUARD_LIMITS = {
   maxRequests: 12,
   windowMs: 60_000,
   maxConcurrent: 2,
+  leaseMs: 15_000,
+  replayTtlMs: 10 * 60_000,
+  failedTtlMs: 30_000,
+} as const;
+
+const DEFAULT_OPTIONS: GuardOptions = {
+  maxRequests: PREVIEW_GUARD_LIMITS.maxRequests,
+  windowMs: PREVIEW_GUARD_LIMITS.windowMs,
+  maxConcurrent: PREVIEW_GUARD_LIMITS.maxConcurrent,
   replayTtlMs: 60_000,
   maxEntries: 256,
 };
 
+const STORAGE_ERROR = "Preview protection is temporarily unavailable. Please try again shortly.";
+
+class GuardExecutionError {
+  constructor(readonly cause: unknown) {}
+}
+
 /**
- * A bounded, per-runtime safety net. This intentionally does not claim to be a
- * distributed rate limiter; a durable edge/store-backed limiter is still a
- * launch requirement before this endpoint calls a paid model.
+ * Fast isolate-local fallback. Production callers must use
+ * DistributedPreviewRequestGuard; this class exists for plain-Node tests and
+ * explicitly non-production development only.
  */
 export class PreviewRequestGuard<T> {
   private readonly options: GuardOptions;
@@ -46,12 +68,7 @@ export class PreviewRequestGuard<T> {
     this.options = { ...DEFAULT_OPTIONS, ...options };
   }
 
-  async run(input: {
-    clientId: string;
-    idempotencyKey: string;
-    fingerprint: string;
-    execute: () => Promise<T>;
-  }): Promise<GuardResult<T>> {
+  async run(input: GuardInput<T>): Promise<GuardResult<T>> {
     const now = Date.now();
     this.cleanup(now);
     const requestKey = `${input.clientId}:${input.idempotencyKey}`;
@@ -66,12 +83,7 @@ export class PreviewRequestGuard<T> {
     }
 
     if (this.requests.size >= this.options.maxEntries) {
-      return {
-        ok: false,
-        status: 429,
-        error: "Preview capacity is temporarily full. Please try again shortly.",
-        retryAfterSeconds: 1,
-      };
+      return { ok: false, status: 429, error: "Preview capacity is temporarily full. Please try again shortly.", retryAfterSeconds: 1 };
     }
 
     const client = this.clientWindow(input.clientId, now);
@@ -84,31 +96,20 @@ export class PreviewRequestGuard<T> {
       };
     }
     if (client.inFlight >= this.options.maxConcurrent) {
-      return {
-        ok: false,
-        status: 429,
-        error: "Two previews are already being processed. Please wait for one to finish.",
-        retryAfterSeconds: 1,
-      };
+      return { ok: false, status: 429, error: "Two previews are already being processed. Please wait for one to finish.", retryAfterSeconds: 1 };
     }
 
     client.requests += 1;
     client.inFlight += 1;
     client.lastSeenAt = now;
-    const promise = input.execute();
-    this.requests.set(requestKey, {
-      fingerprint: input.fingerprint,
-      expiresAt: now + this.options.replayTtlMs,
-      promise,
-    });
+    // Normalizing through a microtask also makes a synchronous throw from a
+    // nominally async provider follow the cleanup path below.
+    const promise = Promise.resolve().then(input.execute);
+    this.requests.set(requestKey, { fingerprint: input.fingerprint, expiresAt: now + this.options.replayTtlMs, promise });
 
     try {
       const value = await promise;
-      this.requests.set(requestKey, {
-        fingerprint: input.fingerprint,
-        expiresAt: Date.now() + this.options.replayTtlMs,
-        value,
-      });
+      this.requests.set(requestKey, { fingerprint: input.fingerprint, expiresAt: Date.now() + this.options.replayTtlMs, value });
       return { ok: true, value, replayed: false };
     } catch (error) {
       this.requests.delete(requestKey);
@@ -128,9 +129,7 @@ export class PreviewRequestGuard<T> {
   }
 
   private cleanup(now: number) {
-    for (const [key, request] of this.requests) {
-      if (!request.promise && request.expiresAt <= now) this.requests.delete(key);
-    }
+    for (const [key, request] of this.requests) if (!request.promise && request.expiresAt <= now) this.requests.delete(key);
     for (const [key, client] of this.clients) {
       if (client.inFlight === 0 && now - client.lastSeenAt > this.options.windowMs * 2) this.clients.delete(key);
     }
@@ -140,4 +139,231 @@ export class PreviewRequestGuard<T> {
       this.requests.delete(settled[0]);
     }
   }
+}
+
+type DistributedOptions = {
+  leaseMs: number;
+  replayTtlMs: number;
+  failedTtlMs: number;
+  windowMs: number;
+  now: () => number;
+};
+
+type RequestRow = {
+  fingerprint: string;
+  status: "active" | "succeeded" | "failed";
+  lease_expires_at: number;
+  response_ciphertext: string | null;
+  response_iv: string | null;
+  expires_at: number;
+};
+
+export class DistributedPreviewRequestGuard<T> {
+  private readonly options: DistributedOptions;
+
+  constructor(
+    private readonly db: D1Database,
+    private readonly secret: string,
+    options: Partial<DistributedOptions> = {},
+  ) {
+    if (new TextEncoder().encode(secret).byteLength < 32) throw new Error("PREVIEW_GUARD_SECRET must contain at least 32 bytes.");
+    this.options = {
+      leaseMs: PREVIEW_GUARD_LIMITS.leaseMs,
+      replayTtlMs: PREVIEW_GUARD_LIMITS.replayTtlMs,
+      failedTtlMs: PREVIEW_GUARD_LIMITS.failedTtlMs,
+      windowMs: PREVIEW_GUARD_LIMITS.windowMs,
+      now: Date.now,
+      ...options,
+    };
+  }
+
+  async run(input: GuardInput<T>): Promise<GuardResult<T>> {
+    try {
+      const [clientKey, requestKey, contentKey] = await Promise.all([
+        previewGuardHmac(this.secret, `client\0${input.clientId}`),
+        previewGuardHmac(this.secret, `request\0${input.clientId}\0${input.idempotencyKey}`),
+        previewGuardHmac(this.secret, `content\0${input.fingerprint}`),
+      ]);
+      const now = this.options.now();
+      const existing = await this.read(requestKey);
+      const prior = existing ? await this.handleExisting(existing, contentKey, requestKey) : null;
+      if (prior) return prior;
+
+      const windowStart = Math.floor(now / this.options.windowMs) * this.options.windowMs;
+      const leaseExpiresAt = now + this.options.leaseMs;
+      const expiresAt = now + this.options.replayTtlMs;
+      const leaseToken = crypto.randomUUID();
+      let admitted = false;
+
+      try {
+        if (existing) {
+          const result = await this.db.prepare(
+            `UPDATE preview_guard_requests
+             SET client_key = ?, fingerprint = ?, window_start = ?, status = 'active', lease_token = ?, lease_expires_at = ?,
+                 response_ciphertext = NULL, response_iv = NULL, expires_at = ?, updated_at = ?
+             WHERE request_key = ? AND (status = 'failed' OR lease_expires_at <= ? OR expires_at <= ?)`,
+          ).bind(clientKey, contentKey, windowStart, leaseToken, leaseExpiresAt, expiresAt, now, requestKey, now, now).run();
+          admitted = Number(result.meta.changes ?? 0) === 1;
+        } else {
+          await this.db.prepare(
+            `INSERT INTO preview_guard_requests
+              (request_key, client_key, fingerprint, window_start, status, lease_token, lease_expires_at, expires_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+          ).bind(requestKey, clientKey, contentKey, windowStart, leaseToken, leaseExpiresAt, expiresAt, now, now).run();
+          admitted = true;
+        }
+      } catch (error) {
+        const limited = this.classifyAdmissionError(error, now, windowStart);
+        if (limited) return limited;
+        const raced = await this.read(requestKey);
+        if (raced) {
+          const racedResult = await this.handleExisting(raced, contentKey, requestKey);
+          if (racedResult) return racedResult;
+        }
+        throw error;
+      }
+
+      if (!admitted) {
+        const raced = await this.read(requestKey);
+        if (raced) {
+          const racedResult = await this.handleExisting(raced, contentKey, requestKey);
+          if (racedResult) return racedResult;
+        }
+        throw new Error("Preview admission changed without a readable request row.");
+      }
+
+      // Cloudflare may terminate un-awaited work once the response completes;
+      // wait for the bounded cleanup rather than relying on isolate lifetime.
+      await this.cleanup(now).catch(() => undefined);
+      let value: T;
+      try {
+        value = await Promise.resolve().then(input.execute);
+      } catch (error) {
+        await this.db.prepare(
+          `UPDATE preview_guard_requests SET status = 'failed', lease_expires_at = 0, expires_at = ?, updated_at = ?
+           WHERE request_key = ? AND status = 'active' AND lease_token = ?`,
+        ).bind(this.options.now() + this.options.failedTtlMs, this.options.now(), requestKey, leaseToken).run().catch(() => undefined);
+        throw new GuardExecutionError(error);
+      }
+      try {
+        const encrypted = await this.encrypt(JSON.stringify(value), requestKey);
+        const completion = await this.db.prepare(
+          `UPDATE preview_guard_requests
+           SET status = 'succeeded', lease_expires_at = 0, response_ciphertext = ?, response_iv = ?, expires_at = ?, updated_at = ?
+           WHERE request_key = ? AND status = 'active' AND lease_token = ?`,
+        ).bind(encrypted.ciphertext, encrypted.iv, this.options.now() + this.options.replayTtlMs, this.options.now(), requestKey, leaseToken).run();
+        if (Number(completion.meta.changes ?? 0) !== 1) {
+          return { ok: false, status: 409, error: "That preview request is already being processed.", retryAfterSeconds: 1 };
+        }
+        return { ok: true, value, replayed: false };
+      } catch {
+        return { ok: false, status: 503, error: STORAGE_ERROR, retryAfterSeconds: 2 };
+      }
+    } catch (error) {
+      if (error instanceof GuardExecutionError) throw error.cause;
+      return { ok: false, status: 503, error: STORAGE_ERROR, retryAfterSeconds: 2 };
+    }
+  }
+
+  private async handleExisting(row: RequestRow, contentKey: string, requestKey: string): Promise<GuardResult<T> | null> {
+    const now = this.options.now();
+    if (row.fingerprint !== contentKey) {
+      return { ok: false, status: 409, error: "That idempotency key was already used for different text." };
+    }
+    if (row.status === "succeeded" && row.expires_at > now && row.response_ciphertext && row.response_iv) {
+      try {
+        return {
+          ok: true,
+          value: JSON.parse(await this.decrypt(row.response_ciphertext, row.response_iv, requestKey)) as T,
+          replayed: true,
+        };
+      } catch {
+        return { ok: false, status: 503, error: STORAGE_ERROR, retryAfterSeconds: 2 };
+      }
+    }
+    if (row.status === "active" && row.lease_expires_at > now) {
+      return { ok: false, status: 409, error: "That preview request is already being processed.", retryAfterSeconds: 1 };
+    }
+    return null;
+  }
+
+  private read(requestKey: string) {
+    return this.db.prepare(
+      `SELECT fingerprint, status, lease_expires_at, response_ciphertext, response_iv, expires_at
+       FROM preview_guard_requests WHERE request_key = ?`,
+    ).bind(requestKey).first<RequestRow>();
+  }
+
+  private classifyAdmissionError(error: unknown, now: number, windowStart: number): GuardResult<T> | null {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("preview_rate_limit")) {
+      return {
+        ok: false,
+        status: 429,
+        error: "Too many previews were requested. Please wait a moment and try again.",
+        retryAfterSeconds: Math.max(1, Math.ceil((windowStart + this.options.windowMs - now) / 1_000)),
+      };
+    }
+    if (message.includes("preview_concurrency_limit")) {
+      return { ok: false, status: 429, error: "Two previews are already being processed. Please wait for one to finish.", retryAfterSeconds: 1 };
+    }
+    return null;
+  }
+
+  private async cleanup(now: number) {
+    const oldWindow = Math.floor(now / this.options.windowMs) * this.options.windowMs - this.options.windowMs * 2;
+    await this.db.batch([
+      this.db.prepare(
+        "DELETE FROM preview_guard_requests WHERE request_key IN (SELECT request_key FROM preview_guard_requests WHERE expires_at <= ? LIMIT 100)",
+      ).bind(now),
+      this.db.prepare(
+        "DELETE FROM preview_guard_windows WHERE (client_key, window_start) IN (SELECT client_key, window_start FROM preview_guard_windows WHERE window_start < ? LIMIT 100)",
+      ).bind(oldWindow),
+    ]);
+  }
+
+  private async encryptionKey() {
+    const material = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`preview-response\0${this.secret}`));
+    return crypto.subtle.importKey("raw", material, "AES-GCM", false, ["encrypt", "decrypt"]);
+  }
+
+  private async encrypt(value: string, requestKey: string) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(requestKey) },
+      await this.encryptionKey(),
+      new TextEncoder().encode(value),
+    );
+    return { ciphertext: toBase64Url(new Uint8Array(ciphertext)), iv: toBase64Url(iv) };
+  }
+
+  private async decrypt(ciphertext: string, encodedIv: string, requestKey: string) {
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: fromBase64Url(encodedIv), additionalData: new TextEncoder().encode(requestKey) },
+      await this.encryptionKey(),
+      fromBase64Url(ciphertext),
+    );
+    return new TextDecoder("utf-8", { fatal: true }).decode(plaintext);
+  }
+}
+
+export function previewGuardClientKey(secret: string, clientId: string) {
+  return previewGuardHmac(secret, `client\0${clientId}`);
+}
+
+async function previewGuardHmac(secret: string, value: string) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return toBase64Url(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value))));
+}
+
+function toBase64Url(bytes: Uint8Array) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function fromBase64Url(value: string) {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(base64);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }

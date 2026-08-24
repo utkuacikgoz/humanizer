@@ -39,7 +39,7 @@ Each item should fit one reviewable change. `Depends` references backlog IDs; `â
 | ID | Owner | Task | Depends | Acceptance criteria |
 |---|---|---|---|---|
 | M0-01 | PO | Ratify V1 scope and exclusions | â€” | `PRODUCT.md` names the only V1 journey, included capabilities, exclusions, and measurable MVP definition. |
-| M0-02 | ENG | Define centralized brand config contract | M0-01 | One typed server-safe/public-safe source contains `productName`, `productTagline`, `domain`, `supportEmail`, `legalCompanyName`, and `socialHandles`; customer-facing code imports it; secrets are excluded. |
+| M0-02 | ENG | Define centralized brand config contract | M0-01 | One typed server-safe/public-safe source contains confirmed Ownword identity plus nullable, explicitly unverified `supportEmail` and `legalCompanyName`; customer-facing code imports it; secrets are excluded. |
 | M0-03 | MON | Define centralized catalog and entitlement contract | M0-01 | Starter/Pro price, interval, word allowance, feature flags, Stripe price env-key, and version are defined in one server-owned catalog; clients receive a safe projection only. |
 | M0-04 | ENG | Draft D1 schema and state transitions | M0-01, M0-03 | Schema covers users, jobs, protected content, results, subscriptions, Stripe events, usage ledger, and audit metadata; transitions and uniqueness constraints are documented. |
 | M0-05 | HE | Define model-independent provider interfaces | M0-01 | Extraction, humanization, verification, and evaluation contracts have versioned inputs/outputs, typed failure classes, timeouts, and usage/cost metadata. |

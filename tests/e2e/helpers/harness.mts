@@ -2,11 +2,10 @@
 //
 // Design constraints that shape everything in this file:
 //
-// 1. Playwright is installed system-wide, NOT as a project dependency, and
-//    must stay that way (CI has no browser and `npm test` must not need one).
-//    It is therefore resolved by absolute path at runtime, and every E2E file
-//    skips itself with a clear message when the browser is unavailable rather
-//    than failing a run that was never meant to include it.
+// 1. Playwright is an explicit development dependency. Its browser binary is
+//    installed separately, so every E2E file still skips itself with a clear
+//    message when Chromium is unavailable rather than producing a misleading
+//    module-resolution failure.
 // 2. The suite drives a dev server that is already running. It never starts
 //    one, and it never mutates application state that another run could see.
 // 3. `POST /api/humanize` is guarded per client IP (12 requests / 60s,
@@ -17,17 +16,14 @@ import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import type { Browser, BrowserContext, Page, Response as PWResponse } from "playwright";
 
-const PLAYWRIGHT_MODULE = "/opt/node22/lib/node_modules/playwright";
-const CHROMIUM_EXECUTABLE = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
-
 export const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 
 let cachedBrowser: Browser | null = null;
 let unavailableReason: string | null = null;
 
 function loadPlaywright() {
-  const require = createRequire(`${PLAYWRIGHT_MODULE}/`);
-  return require(PLAYWRIGHT_MODULE) as typeof import("playwright");
+  const require = createRequire(import.meta.url);
+  return require("playwright") as typeof import("playwright");
 }
 
 /** Why the suite cannot run here, or `null` when it can. Never throws. */
@@ -36,12 +32,13 @@ export async function environmentBlocker(): Promise<string | null> {
   try {
     loadPlaywright();
   } catch {
-    unavailableReason = `Playwright is not installed at ${PLAYWRIGHT_MODULE}`;
+    unavailableReason = "Playwright is not installed in this project";
     return unavailableReason;
   }
   const { existsSync } = await import("node:fs");
-  if (!existsSync(CHROMIUM_EXECUTABLE)) {
-    unavailableReason = `Chromium is not installed at ${CHROMIUM_EXECUTABLE}`;
+  const executablePath = loadPlaywright().chromium.executablePath();
+  if (!existsSync(executablePath)) {
+    unavailableReason = "Chromium is not installed; run `npx playwright install chromium`";
     return unavailableReason;
   }
   try {
@@ -62,7 +59,7 @@ export async function environmentBlocker(): Promise<string | null> {
 export async function getBrowser(): Promise<Browser> {
   if (cachedBrowser) return cachedBrowser;
   const { chromium } = loadPlaywright();
-  cachedBrowser = await chromium.launch({ executablePath: CHROMIUM_EXECUTABLE });
+  cachedBrowser = await chromium.launch();
   return cachedBrowser;
 }
 
