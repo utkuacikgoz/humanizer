@@ -517,7 +517,6 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => void unlock(starterPlan.id)}
-                  disabled={!billingReadiness?.available || unlockStatus === "working"}
                   aria-disabled={!billingReadiness?.available || unlockStatus === "working"}
                 >
                   {unlockStatus === "working"

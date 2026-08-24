@@ -19,6 +19,10 @@ jobs:
       CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CF_D1_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      STRIPE_PRICE_STARTER: ${{ secrets.STRIPE_PRICE_STARTER }}
+      PREVIEW_GUARD_SECRET: ${{ secrets.PREVIEW_GUARD_SECRET }}
     steps:
       - uses: actions/checkout@v5
 
@@ -35,10 +39,7 @@ jobs:
         env:
           D1_DATABASE_ID: ${{ env.CF_D1_ID }}
 
-      # Manual-trigger only (no push/merge auto-deploy): this repo's deploy
-      # target is a project_id-tied hosting platform (.openai/hosting.json)
-      # whose own deploy mechanism is unconfirmed. Auto-deploying here could
-      # double-fire against it.
+      # Manual-trigger only: production remains an explicit release action.
       # SEC-07: `wrangler deploy` does NOT apply D1 migrations. Without this
       # step a fresh production database has no tables, every persistence
       # call fails, and no customer can complete a purchase. Runs before the
@@ -51,14 +52,23 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ env.CF_ACCOUNT_ID }}
 
       - name: Deploy via wrangler
-        if: ${{ env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != '' && env.CF_D1_ID != '' }}
-        run: npx wrangler deploy --config dist/server/wrangler.json
+        if: ${{ env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != '' && env.CF_D1_ID != '' && env.STRIPE_SECRET_KEY != '' && env.STRIPE_WEBHOOK_SECRET != '' && env.STRIPE_PRICE_STARTER != '' && env.PREVIEW_GUARD_SECRET != '' }}
+        run: |
+          umask 077
+          secrets_file="$RUNNER_TEMP/ownword.secrets"
+          trap 'rm -f "$secrets_file"' EXIT
+          printf '%s\n' \
+            "STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY" \
+            "STRIPE_WEBHOOK_SECRET=$STRIPE_WEBHOOK_SECRET" \
+            "STRIPE_PRICE_STARTER=$STRIPE_PRICE_STARTER" \
+            "PREVIEW_GUARD_SECRET=$PREVIEW_GUARD_SECRET" > "$secrets_file"
+          npx wrangler deploy --config dist/server/wrangler.json --secrets-file "$secrets_file"
         env:
           CLOUDFLARE_API_TOKEN: ${{ env.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ env.CF_ACCOUNT_ID }}
 
       - name: Not configured
-        if: ${{ env.CF_API_TOKEN == '' || env.CF_ACCOUNT_ID == '' || env.CF_D1_ID == '' }}
+        if: ${{ env.CF_API_TOKEN == '' || env.CF_ACCOUNT_ID == '' || env.CF_D1_ID == '' || env.STRIPE_SECRET_KEY == '' || env.STRIPE_WEBHOOK_SECRET == '' || env.STRIPE_PRICE_STARTER == '' || env.PREVIEW_GUARD_SECRET == '' }}
         run: |
-          echo "::error::Set CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_D1_DATABASE_ID repo secrets before running this workflow."
+          echo "::error::Set the Cloudflare, Stripe, and PREVIEW_GUARD_SECRET repository secrets before running this workflow."
           exit 1
