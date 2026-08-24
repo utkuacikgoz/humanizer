@@ -222,6 +222,8 @@ const ACTIVE_ENTITLEMENT_STATUSES: ReadonlySet<SubscriptionStatus> = new Set(["a
 export interface Entitlement {
   planId: string;
   status: SubscriptionStatus;
+  /** Period boundaries scope the usage ledger's allowance (M2-07). */
+  currentPeriodStart: Date;
   currentPeriodEnd: Date;
   stripeCustomerId: string;
 }
@@ -268,7 +270,7 @@ export async function getActiveEntitlement(db: AppDatabase, userId: string): Pro
   const now = Date.now();
   const active = rows.find((row) => ACTIVE_ENTITLEMENT_STATUSES.has(row.status) && !isExpiredCancellation(row, now));
   if (!active) return null;
-  return { planId: active.planId, status: active.status, currentPeriodEnd: active.currentPeriodEnd, stripeCustomerId: active.stripeCustomerId };
+  return { planId: active.planId, status: active.status, currentPeriodStart: active.currentPeriodStart, currentPeriodEnd: active.currentPeriodEnd, stripeCustomerId: active.stripeCustomerId };
 }
 
 /** Returns the authenticated user's Stripe customer ID, if any subscription row exists for them. */
