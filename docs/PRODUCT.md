@@ -29,7 +29,7 @@ V1 contains one journey:
 
 ### Included
 
-- Anonymous first analysis with a 25–300-word input limit.
+- Anonymous first analysis with a 25-300-word input limit.
 - Natural (default), Professional, Academic, and Casual modes.
 - Complete rewrite generated and verified server-side.
 - Pre-purchase partial output ending on a sentence boundary, meaningful comparison marks, qualitative naturalness and meaning preservation, measured improvements, and protected-fact evidence.
@@ -140,23 +140,23 @@ Guardrails:
 
 An implementation status is not a gate closure. Named owners in `AGENTS.md` must still record gate evidence and sign-off.
 
-### M0 — Foundations and contracts
+### M0 â€” Foundations and contracts
 
 Status: substantially implemented. Ownword identity, catalog, schema, provider contracts, threat model, benchmark format, QA plan, retention behavior, and decision log exist. Production provider retention, final storage/encryption approval, and counsel sign-off remain open.
 
-### M1 — Verified anonymous preview
+### M1 â€” Verified anonymous preview
 
 Status: implementation-complete for the current deterministic provider. The comparison, sentence-boundary preview, protected evidence, persistence/capability flow, distributed production guard, non-exposure boundary, retries, and regression suites exist. Gate remains open because the deterministic provider and fixture suite are not production quality evidence; M1/M4 review evidence and a production provider benchmark are still required.
 
-### M2 — Paid unlock and identity
+### M2 â€” Paid unlock and identity
 
 Status: code-complete or substantially complete through M2-10, including D-015 ledger enforcement on entitled humanizations, Billing Portal UX, readiness gating, checkout, webhook projection, unlock, and return continuity. M2-11/M2-12 production-like adversarial evidence and security sign-off, live credential verification, reconciliation, and M2-13 gate closure remain open.
 
-### M3 — Paid result workflow
+### M3 â€” Paid result workflow
 
 Status: partial. Copy, direct paid result rendering, post-checkout result evidence, bottom-funnel analytics, and second-paid-use semantics are implemented. Paid history, edit/revision workflow, sentence restore/regeneration, protected phrases, self-service history/account deletion, purge completion evidence, and full responsive/manual QA remain open.
 
-### M4 — Commercial release
+### M4 â€” Commercial release
 
 Status: open. Release blockers include:
 

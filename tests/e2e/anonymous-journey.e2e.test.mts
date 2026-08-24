@@ -111,6 +111,25 @@ test("every writing mode returns a preview for the same draft", { skip: blocker 
   assert.deepEqual(session.pageErrors, []);
 });
 
+test("a second generation in the same visit still returns a preview", { skip: blocker ?? false }, async (t) => {
+  t.after(closeBrowser);
+  const session = await openSession();
+  t.after(() => session.close());
+  const { page } = session;
+  await gotoHydrated(page, "/");
+
+  const first = await submitDraft(page, REWRITABLE_DRAFT);
+  assert.equal(first.status, 200, `first preview failed: ${JSON.stringify(first.body)}`);
+  await resultHeading(page).waitFor({ timeout: 15_000 });
+
+  const second = await submitDraft(page, `${REWRITABLE_DRAFT} A second pass for the same visitor.`);
+  assert.equal(second.status, 200, `second preview failed: ${JSON.stringify(second.body)}`);
+  await resultHeading(page).waitFor({ timeout: 15_000 });
+  assert.ok(await unlockButton(page).count() >= 1 || (second.body.hiddenWordCount as number) === 0);
+  assert.deepEqual(session.pageErrors, []);
+});
+
+
 test("the billing/cancel entry point is reachable from the post-purchase page too", { skip: blocker ?? false }, async (t) => {
   // ACT-09 requires the path on the product surface *and* on the page a
   // customer lands on immediately after being charged.

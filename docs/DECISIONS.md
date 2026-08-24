@@ -14,7 +14,7 @@ Consequence: New dashboard, collaboration, API, and personalization work is reje
 
 ### D-002 — Brand is one configuration source
 
-Decision: The canonical customer-facing identity is Ownword at `ownword.pro`, operated by Bosphorus Elevate LLC with `support@ownword.pro` as its support address. It comes from a typed configuration object containing `productName`, `productTagline`, `domain`, `supportEmail`, `legalCompanyName`, and `socialHandles`. Use `humanizer` only as the internal codename or a generic search-category term.
+Decision: The canonical customer-facing identity is Ownword at `ownword.pro`, operated by Bosphorus Elevate LLC with `support@ownword.pro` as its support address. It comes from the typed object in `src/config/product.ts` (`productName`, `productTagline`, `domain`, `supportEmail`, `legalCompanyName`, `socialHandles`). Use `humanizer` only as the internal codename or a generic search-category term.
 
 Reason: The founder confirmed the brand and domain on 2026-08-24. The concurrent commercial-terms work on `main` confirms the operator and support address. Social profiles and official logo artwork are not confirmed.
 
