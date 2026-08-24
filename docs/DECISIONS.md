@@ -124,7 +124,7 @@ Evidence, not assertion: `tests/usage-ledger.test.mts` runs 20 concurrent 100-wo
 
 The README guardrail "never charge quota for failed attempts or internal retries" is enforced by construction: a reservation is held during the attempt, a commit records only the words that actually succeeded, and the difference is released. A failed attempt costs the customer nothing. Replays are idempotent through the `(operation_key, entry_type)` unique index.
 
-Consequence: the ledger is correct and tested, but **nothing calls it yet** — the 50,000-word allowance is still not enforced on any request path. Wiring it into the humanize route is the next step and is a separate change; this entry exists so a reader does not mistake a working ledger for an enforced quota.
+Consequence: the ledger is wired into the generation path via `src/lib/quota-gate.ts`, so the advertised allowance is now actually enforced. A subscriber over their limit gets a 429 naming the limit and the reset date; only successful words are charged, and every failure path releases the reservation. Anonymous previews stay unmetered — they are the funnel, governed by the per-client request guard rather than a subscription nobody bought. The gate fails OPEN on a metering outage: quota is a billing control, not a security boundary, and a paying customer should not lose a rewrite because a read failed. The ledger's own admission check remains the part that cannot be raced.
 
 ## Rejected
 
