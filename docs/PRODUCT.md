@@ -135,11 +135,13 @@ Status: the contracts and operating documents exist. `DECISIONS.md` still carrie
 
 Deliver the core writing surface and the full server-side pipeline: analysis, protected-content extraction, targeted rewrite, semantic verification, evaluation, bounded retry, and safe partial preview. Exit when the benchmark gate passes, invalid candidates cannot be exposed, and anonymous jobs survive refresh within the documented retention window.
 
-Status: the surface and the full pipeline are implemented, and the preview boundary holds — the browser receives only the preview and a hidden-word count. Gate not closed, and three things stand in the way of closing it:
+Status: the surface and the full pipeline are implemented, and the preview boundary holds — the browser receives only the preview and a hidden-word count. Gate not closed, and one thing stands in the way of closing it:
 
 1. The deployed rewrite provider is `DeterministicHumanizationProvider`, a fixed phrase-substitution table. It is a contract-testing and demo baseline, not production quality evidence, and the benchmark fixtures are deterministic against it. M4-01's frozen production benchmark is the real gate.
-2. That provider returns the input unchanged for prose containing none of its marker phrases. The preview projection currently presents such a result as a rewrite, truncates it, and offers checkout — the customer is asked to pay to unlock their own words. ACT-01 in `ACTIVATION.md`.
-3. M1-10's "meaningful diffs are visible" acceptance criterion is not met; see the Experience requirements section above.
+Resolved since this status was written:
+
+- The provider returning the input unchanged is no longer sold. ACT-01 catches a materially identical rewrite and KI-01 catches a cosmetic-only one, so a rewrite the engine measured at zero improvements cannot reach a purchase CTA. `tests/activation-blockers.test.mts` and `tests/security-blockers.test.mts` cover both.
+- M1-10's "meaningful diffs are visible" criterion is met. The comparison renders word-level cut and rewritten marks with a protected-fact rail (`src/components/rewrite-marks.tsx`), and the withheld remainder is a proportional skeleton rather than text. Verified in a real browser at 360/390/768/1440 in both themes.
 
 ### M2 — Paid unlock and identity
 
@@ -149,11 +151,17 @@ Status: largely implemented. Per D-013, M2-01 through M2-06, M2-08, M2-09 and M2
 
 Not done, and blocking closure:
 
-- **M2-07, the append-only usage ledger, is deliberately unimplemented** pending the D1 concurrency spike named in `ARCHITECTURE.md`. Reasoning is recorded in D-013. Until it exists there is no quota enforcement, so the 50,000-word Starter allowance advertised in `pricing.ts` is not actually metered.
-- **The Billing Portal has no caller.** The endpoint is correct but no page links to it, while the landing page promises `Cancel anytime`. That is an obstructed-cancellation dark pattern under `MONETIZATION.md`. ACT-09.
-- **The purchase CTA can dead-end.** Anonymous callers are sent to sign-in only after clicking buy, and an unconfigured Stripe environment then returns a 503. ACT-11.
-- **The paywall does not disclose recurrence or the word allowance** at the point of decision. ACT-10.
-- M2-11 adversarial billing tests and M2-12's security review are outstanding.
+Resolved since this status was written:
+
+- **M2-07 is implemented and enforced** (D-015 supersedes the D-013 deferral). Admission is a single guarded `INSERT ... SELECT ... WHERE` decided by rows-affected, so there is no read-then-write window. Proven rather than asserted: 20 concurrent 100-word reservations against a 1,000-word allowance admit exactly 10, and a deliberately naive read-then-write implementation run against the same test admitted all 20. `src/lib/quota-gate.ts` wires it into the generation path, so the advertised allowance is now metered.
+- **The Billing Portal has a caller.** A `#manage-billing` entry point exists on both the landing and post-purchase pages, and the hero's `Cancel anytime` links to it. ACT-09.
+- **The paywall discloses recurrence and the allowance** at the unlock button, built from `pricingConfig`. ACT-10.
+- **M2-11 adversarial billing tests exist** — replay, ordering, environment mismatch, and unlock-without-entitlement, in `tests/webhook-adversarial.test.mts` and `tests/result-access.test.mts`.
+
+Not done, and blocking closure:
+
+- **The purchase CTA can still dead-end.** Anonymous callers are sent to sign-in only after clicking buy, and an unconfigured Stripe environment then returns a 503. ACT-11.
+- **M2-12's security review is outstanding as a sign-off.** The 2026-08-24 review in `SECURITY.md` returned NO-GO; SEC-02, SEC-04, SEC-06 and SEC-07 are closed and SEC-01 is contained rather than fixed — identity is host-gated, but the boundary's assertion is still unsigned.
 
 M2-13 is not self-granted by any of the above.
 
