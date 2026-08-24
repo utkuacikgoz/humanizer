@@ -3,6 +3,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { productConfig } from "@/src/config/product";
 import { pricingConfig } from "@/src/config/pricing";
+import { MIN_PAYWALLABLE_INPUT_WORDS } from "@/src/lib/preview-projection";
 
 // Mirrors app/robots.txt/route.ts and app/sitemap.xml/route.ts: canonical/OG/
 // index output is gated on the request Host matching productConfig.domain
@@ -46,23 +47,6 @@ const LAST_UPDATED = "2026-08-23";
 export default function PrivacyPolicyPage() {
   return (
     <main className="legal-doc">
-      <style>{`
-        .legal-doc { max-width: 760px; margin: 0 auto; padding: 64px 24px 96px; color: var(--ink); font-family: var(--font-geist-sans), Arial, sans-serif; }
-        .legal-doc a { color: var(--green); text-decoration: underline; text-underline-offset: 2px; }
-        .legal-doc a:hover { color: var(--green-dark); }
-        .legal-doc .back-link { display: inline-block; margin-bottom: 28px; font-size: 13px; color: var(--muted); text-decoration: none; }
-        .legal-doc .back-link:hover { color: var(--ink); }
-        .legal-doc h1 { font-family: Georgia, "Times New Roman", serif; font-size: clamp(32px, 4.5vw, 44px); font-weight: 400; margin: 0 0 6px; }
-        .legal-doc .updated { color: var(--muted); font-size: 13px; margin: 0 0 32px; }
-        .legal-doc .notice { background: var(--mint); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 16px 20px; font-size: 14px; line-height: 1.6; margin-bottom: 40px; }
-        .legal-doc section { margin-bottom: 32px; }
-        .legal-doc h2 { font-size: 18px; font-weight: 700; margin: 0 0 10px; }
-        .legal-doc p, .legal-doc li { font-size: 15px; line-height: 1.7; color: var(--ink); }
-        .legal-doc ul { margin: 0 0 12px; padding-left: 20px; }
-        .legal-doc .pending { background: #fdf1e8; border: 1px dashed var(--orange); border-radius: var(--radius-sm); padding: 12px 16px; margin-top: 10px; font-size: 14px; }
-        .legal-doc .pending strong { color: var(--orange); }
-        .legal-doc footer { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
-      `}</style>
 
       <Link className="back-link" href="/">&larr; Back to {productConfig.productName}</Link>
       <h1>Privacy Policy</h1>
@@ -88,7 +72,7 @@ export default function PrivacyPolicyPage() {
       <section>
         <h2>What we process</h2>
         <ul>
-          <li>The text you paste (an anonymous first pass is limited to roughly 12–300 words) and the mode you select.</li>
+          <li>The text you paste (an anonymous first pass is limited to roughly {MIN_PAYWALLABLE_INPUT_WORDS}–300 words) and the mode you select.</li>
           <li>
             The complete rewrite is generated and checked on our servers before you see anything. Your browser
             only ever receives the portion we intentionally show you as a preview — the locked remainder is
