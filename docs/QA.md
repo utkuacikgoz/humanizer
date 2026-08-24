@@ -180,3 +180,37 @@ All of the following must be true:
 ## Post-release smoke and monitoring
 
 After each deploy, use synthetic, non-customer text to verify landing, preview, payment test path where safe, unlock, copy, and provider health. Monitor semantic/protected-content failure rates, provider p95/error/cost, webhook lag/failure, checkout-to-unlock failure, reservation age, quota invariant violations, cross-user authorization alerts, and analytics funnel discontinuities. Auto-disable or roll back a provider/config when a defined safety threshold is breached; do not mask the breach by lowering thresholds.
+
+## Known issues (open, 2026-08-24)
+
+### KI-01 — a cosmetic-only rewrite is still sold
+
+`tests/e2e/unchanged-guard.e2e.test.mts` ("a rewrite whose only edit is
+cosmetic is not sold as a rewrite") fails against the running app:
+
+```
+hiddenWordCount=19, issuesImproved=0 — purchase control still rendered
+```
+
+ACT-01's `isMateriallyUnchanged` compares normalized full text, so it catches
+a byte-identical rewrite. It does not catch a rewrite whose only change is
+cosmetic — here the post-processing rule that deletes whitespace before
+punctuation. The text differs, so the guard passes it, and the paywall is
+offered over a rewrite the engine itself measured as zero improvements.
+
+That is the same honesty problem ACT-01 exists to prevent: charging for a
+rewrite that did not improve anything. `docs/MONETIZATION.md`'s dark-pattern
+rules apply.
+
+Likely fix: gate the unlock on measured `improvements > 0` as well as on
+material change, so the two signals must agree before anything is sold.
+Needs PO sign-off, since it changes what is sellable.
+
+### KI-02 — six E2E tests unverified
+
+Tests 4, 5, 13, 14, 16 and 19 (accessibility roles/landmarks, live-region
+announcement, non-JSON error handling, dropped connection, post-purchase
+status resolution, paste truncation) fail. MQA was cut off by a session limit
+mid-run, so these were never triaged — each is either a real defect or an
+incomplete test, and which is unknown. They must be resolved before the M1
+accessibility and error-handling gates can be considered.

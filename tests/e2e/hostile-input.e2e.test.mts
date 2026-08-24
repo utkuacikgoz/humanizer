@@ -144,7 +144,11 @@ test("byte-heavy, bidirectional and fact-dense drafts either succeed or fail com
   t.after(closeBrowser);
   const outcomes: Array<[string, string]> = [];
 
-  for (const name of ["emoji", "rightToLeft", "markdown", "citationHeavy", "twelveWords"] as const) {
+  // belowMinimum is deliberately absent: it is under the 25-word server
+  // minimum, so the client refuses it without a network call and there is
+  // no response for this test to assert on. That path is covered by
+  // "drafts below the minimum are refused by the client without a network call".
+  for (const name of ["emoji", "rightToLeft", "markdown", "citationHeavy"] as const) {
     const session = await openSession();
     t.after(() => session.close());
     const { page } = session;
