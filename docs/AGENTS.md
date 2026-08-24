@@ -28,6 +28,8 @@ Owners:
 
 Token/context discipline (D-014, TOK-owned): terse replies, minimal comments, cheap-model delegation for mechanical work, no redundant re-reads. Applies to all agents.
 
+Before starting work, read `MEMORY.md` (MEM-owned). It carries the token rules in practice, the file-ownership protocol for running agents concurrently, the repository gotchas that reliably cost an hour, and the honesty rules that override convenience. Every entry there is a mistake this project already made.
+
 Agents update relevant memory documents when a decision or verified implementation changes. SEO and backlink work remains parallel and must not block core-product milestones. BL owns the operating system and acquisition backlog in `BACKLINKS.md`; SEO retains authority over indexable-page strategy and technical search requirements.
 
 ## Current execution record
