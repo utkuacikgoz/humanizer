@@ -29,6 +29,7 @@ type PreviewResult = {
 };
 type PaidResult = {
   original: string;
+  unchanged?: false;
   result: string;
   paid: true;
   issuesImproved: number;
