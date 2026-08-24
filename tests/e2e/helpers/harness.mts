@@ -13,6 +13,7 @@
 //    2 concurrent — src/lib/preview-request-guard.ts). Every context gets a
 //    unique synthetic `cf-connecting-ip`, so tests are independent of each
 //    other and of anything else hitting the same server.
+import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import type { Browser, BrowserContext, Page, Response as PWResponse } from "playwright";
 
@@ -70,15 +71,31 @@ export async function closeBrowser(): Promise<void> {
   cachedBrowser = null;
 }
 
-let clientCounter = 0;
+const issuedClientIps = new Set<string>();
 /**
- * A synthetic client IP unique to one context, so the shared per-client
- * preview guard can never make one test's rate-limit budget another test's
- * flake. Deliberately in TEST-NET-3 (203.0.113.0/24, RFC 5737).
+ * A synthetic client IP unique to one browser context.
+ *
+ * `POST /api/humanize` is rate limited per client identity (12 requests / 60s,
+ * 2 concurrent). Sharing one identity across tests makes one test's budget
+ * another test's failure — and because `node --test` runs each file in its own
+ * process, a simple in-process counter is not enough: separate files restart
+ * it and collide with each other while running concurrently. That produced
+ * exactly this failure during development, so the address is drawn at random
+ * from a 65,536-address space and checked for reuse within the process.
+ *
+ * 198.18.0.0/15 is the RFC 2544 benchmarking range: reserved, never routed,
+ * and not a real customer's address in any log this might reach.
  */
 function nextClientIp(): string {
-  clientCounter += 1;
-  return `203.0.113.${clientCounter % 250}`;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const bytes = randomBytes(2);
+    const candidate = `198.18.${bytes[0]}.${bytes[1]}`;
+    if (!issuedClientIps.has(candidate)) {
+      issuedClientIps.add(candidate);
+      return candidate;
+    }
+  }
+  throw new Error("could not allocate a unique synthetic client IP");
 }
 
 export type Session = {

@@ -126,6 +126,38 @@ export function diffRewrite(original: string, rewrite: string): { source: Segmen
   return { source, result };
 }
 
+/**
+ * ACT-07, applied at the display layer.
+ *
+ * The extractor deliberately keeps overlapping and nested spans, because
+ * masking depends on the full set and narrowing it would weaken
+ * protection. That set is wrong to *show*: rendered raw it reads
+ * "Dr. Sarah Chen · March 14, 2024 · 14 · 2024 · 12%", which makes the
+ * evidence for a precision claim look imprecise. This keeps the longest
+ * span of each overlapping family, drops duplicates, and orders what is
+ * left by where it appears in the text the visitor wrote.
+ */
+export function selectDisplayFacts(items: readonly string[], source: string): string[] {
+  const core = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  const trimmed = items.map((item) => item.trim()).filter(Boolean);
+  const byLength = [...trimmed].sort((left, right) => right.length - left.length);
+
+  const kept: string[] = [];
+  for (const item of byLength) {
+    const key = core(item);
+    if (!key) continue;
+    if (kept.some((existing) => core(existing).includes(key))) continue;
+    kept.push(item);
+  }
+
+  const haystack = source.toLowerCase();
+  return kept.sort((left, right) => {
+    const at = haystack.indexOf(left.toLowerCase());
+    const bt = haystack.indexOf(right.toLowerCase());
+    return (at === -1 ? Number.MAX_SAFE_INTEGER : at) - (bt === -1 ? Number.MAX_SAFE_INTEGER : bt);
+  });
+}
+
 /** Case-insensitive, longest-first, non-overlapping literal matches. */
 function factRanges(text: string, facts: readonly string[]): Array<{ start: number; end: number }> {
   const haystack = text.toLowerCase();
@@ -200,8 +232,19 @@ export function MarkedText({
   return (
     <>
       {segments.map((segment, index) => {
-        const marked = withFactMarks(segment.text, facts, `s${index}`);
-        if (segment.kind === "cut") return <del key={index}>{marked}</del>;
+        // Marks hug their words: the trailing space a token carries stays
+        // outside the highlight, so a mark never runs on past the comma
+        // it ends at.
+        const body = segment.text.trimEnd();
+        const trail = segment.text.slice(body.length);
+        const marked = withFactMarks(segment.kind === "same" ? segment.text : body, facts, `s${index}`);
+        if (segment.kind === "cut")
+          return (
+            <span key={index}>
+              <del>{marked}</del>
+              {trail}
+            </span>
+          );
         if (segment.kind === "pending")
           return (
             <span className="pending-text" key={index}>
@@ -210,9 +253,10 @@ export function MarkedText({
           );
         if (segment.kind === "add")
           return (
-            <ins key={index} style={{ "--mark-index": addOrdinal[index] } as React.CSSProperties}>
-              {marked}
-            </ins>
+            <span key={index}>
+              <ins style={{ "--mark-index": addOrdinal[index] } as React.CSSProperties}>{marked}</ins>
+              {trail}
+            </span>
           );
         return <span key={index}>{marked}</span>;
       })}

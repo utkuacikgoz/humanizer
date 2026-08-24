@@ -8,7 +8,7 @@ import { track } from "@/src/lib/analytics";
 import { improvementLabel, shouldOfferUnlock } from "@/src/lib/preview-projection";
 import { subscriptionDisclosure } from "@/src/lib/subscription-disclosure";
 import { ManageBilling } from "@/src/components/manage-billing";
-import { MarkedText, describeMarks, diffRewrite } from "@/src/components/rewrite-marks";
+import { MarkedText, describeMarks, diffRewrite, selectDisplayFacts } from "@/src/components/rewrite-marks";
 
 type Mode = (typeof MODES)[number]["id"];
 type PreviewResult = {
@@ -34,8 +34,17 @@ type Result = PreviewResult | UnchangedResult;
 
 const starterPlan = pricingConfig.plans.starter;
 
+// ACT-06. The fastest path into the product has to demonstrate the one
+// thing competitors do not do. The previous sample returned an empty
+// `protectedItems`, so the highest-traffic demo proved the differentiator
+// zero times and the evidence band rendered its empty state. This one
+// carries a person, a date, a count, a percentage, a citation and a URL,
+// and trips five of the marker phrases in
+// src/lib/humanization/analysis.ts, so both the change marks and the
+// protection marks land inside the exposed preview. Verified against the
+// running endpoint: protectedItems non-empty, issuesImproved 5.
 const SAMPLE_TEXT =
-  "In today’s busy world, it is important to note that clear communication plays a crucial role. Furthermore, teams should leverage simple strategies to collaborate well. These strategies enhance productivity. They also help teams reach lasting goals. In conclusion, thoughtful communication helps people solve problems and do their best work.";
+  "It is important to note that our pilot with Dr. Sarah Chen began on March 14, 2024, and the early results are encouraging. Furthermore, retention among the 240 participants rose 12% over the first quarter, which the team attributes to the new onboarding flow. The methodology follows the framework described in Chen et al. (2024), and the full dataset is published at https://example.org/pilot-data. We plan to leverage the same approach for the second cohort due to the fact that the instrumentation is already in place. In conclusion, the pilot supports a wider rollout in the second half of the year.";
 
 const MAX_FACT_CHIPS = 6;
 
@@ -113,7 +122,10 @@ export default function Home() {
   // preview only, so no segment can carry text the server withheld.
   const marks = useMemo(() => {
     if (!result || result.unchanged) return null;
-    return diffRewrite(result.original, result.preview);
+    return {
+      ...diffRewrite(result.original, result.preview),
+      facts: selectDisplayFacts(result.protectedItems, result.original),
+    };
   }, [result]);
 
   // Focus the result heading once a rewrite lands, instead of only
@@ -267,7 +279,10 @@ export default function Home() {
               <span className="step-number">01</span>
               <h2 id="workspace-title">Paste your text</h2>
             </div>
-            <button className="sample-button" type="button" onClick={() => { setText(SAMPLE_TEXT); setResult(null); }}>Try an example</button>
+            <div className="topline-meta">
+              <p className="word-meter"><span className={wordCount > 300 ? "over" : ""}>{wordCount}</span> / 300 words</p>
+              <button className="sample-button" type="button" onClick={() => { setText(SAMPLE_TEXT); setResult(null); }}>Try an example</button>
+            </div>
           </div>
 
           <label className="sr-only" htmlFor="source-text">Text to humanize</label>
@@ -289,7 +304,6 @@ export default function Home() {
           />
 
           <div className="editor-footer">
-            <div className="word-meter"><span className={wordCount > 300 ? "over" : ""}>{wordCount}</span> / 300 words</div>
             <div className="mode-group" aria-label="Writing mode">
               {MODES.map((item) => (
                 <button
@@ -354,12 +368,15 @@ export default function Home() {
             <div className="comparison">
               <article>
                 <div className="panel-label"><span>Original</span><small>{countWords(result.original)} words</small></div>
-                <p><MarkedText segments={marks.source} facts={result.protectedItems} /></p>
+                <p><MarkedText segments={marks.source} facts={marks.facts} /></p>
+                {marks.source.some((segment) => segment.kind === "pending") ? (
+                  <p className="panel-note">The dimmed text is where the visible rewrite stops. Nothing there was removed.</p>
+                ) : null}
               </article>
               <article className="humanized-panel">
                 <div className="panel-label"><span>Humanized</span><small>{modeLabel}</small></div>
                 <p className="sr-only">{describeMarks(marks.result)}</p>
-                <p><MarkedText segments={marks.result} facts={result.protectedItems} /></p>
+                <p><MarkedText segments={marks.result} facts={marks.facts} /></p>
                 {shouldOfferUnlock(result) ? (
                   <>
                     <div className="locked-copy" aria-hidden="true">
@@ -401,16 +418,16 @@ export default function Home() {
                 <span><i className="k-add" /> Rewritten</span>
                 <span><i className="k-fact" /> Held exactly</span>
               </p>
-              {result.protectedItems.length ? (
+              {marks.facts.length ? (
                 <div className="protected-note">
                   <b><IconShield /> Held exactly as you wrote them</b>
                   <ul>
-                    {result.protectedItems.slice(0, MAX_FACT_CHIPS).map((item) => (
+                    {marks.facts.slice(0, MAX_FACT_CHIPS).map((item) => (
                       <li key={item}>{item}</li>
                     ))}
                   </ul>
-                  {result.protectedItems.length > MAX_FACT_CHIPS ? (
-                    <em>and {result.protectedItems.length - MAX_FACT_CHIPS} more</em>
+                  {marks.facts.length > MAX_FACT_CHIPS ? (
+                    <em>and {marks.facts.length - MAX_FACT_CHIPS} more</em>
                   ) : null}
                 </div>
               ) : (

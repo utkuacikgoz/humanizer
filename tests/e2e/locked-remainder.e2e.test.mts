@@ -33,6 +33,15 @@ test("the withheld remainder of the rewrite never reaches the browser", { skip: 
   t.after(() => session.close());
 
   await gotoHydrated(session.page, "/");
+
+  // Everything the browser already held before this visitor submitted
+  // anything: page chrome, marketing copy, framework bundles, the RSC payload
+  // of the empty workspace. A word present here cannot be evidence that the
+  // withheld rewrite leaked, so it is subtracted from the probe set below.
+  // This keeps the search over every received byte while making a hit mean
+  // exactly one thing.
+  const baseline = await clientVisibleSurface(session);
+
   const { status, body } = await submitDraft(session.page, REWRITABLE_DRAFT);
   assert.equal(status, 200, `preview request failed: ${JSON.stringify(body)}`);
 
@@ -53,7 +62,9 @@ test("the withheld remainder of the rewrite never reaches the browser", { skip: 
 
   // Words the rewriter introduced past the preview boundary. Words the
   // visitor typed are legitimately on screen, so only these are evidence.
-  const probes = withheldOnlyTokens(REWRITABLE_DRAFT, preview, fullRewrite);
+  const probes = withheldOnlyTokens(REWRITABLE_DRAFT, preview, fullRewrite).filter(
+    (token) => !baseline.combined.includes(token),
+  );
   assert.ok(
     probes.length >= 2,
     `the fixture must introduce new vocabulary in the withheld region for this test to mean anything; got ${JSON.stringify(probes)}`,
@@ -61,6 +72,19 @@ test("the withheld remainder of the rewrite never reaches the browser", { skip: 
 
   await session.page.waitForTimeout(500);
   const surface = await clientVisibleSurface(session);
+
+  // Negative control. A passing leak test is only meaningful if the search it
+  // performs can find anything at all, so prove the machinery works on text
+  // that is *supposed* to be visible before trusting it about text that is
+  // not. Without this, a broken locator or an empty surface would read as a
+  // clean bill of health.
+  const controlPhrase = wordNgrams(preview, 3).find((gram) => !REWRITABLE_DRAFT.includes(gram));
+  assert.ok(controlPhrase, "the exposed preview must contain rewritten wording for the control to work");
+  assert.ok(
+    surface.innerText.replace(/\s+/g, " ").includes(controlPhrase),
+    `control failed: exposed preview phrase ${JSON.stringify(controlPhrase)} was not found in the rendered page, ` +
+      "so this test cannot detect a leak either. Fix the harness before reading the result below.",
+  );
 
   assert.ok(
     !surface.combined.includes(hiddenTail),
@@ -71,8 +95,18 @@ test("the withheld remainder of the rewrite never reaches the browser", { skip: 
   // three-word sequence from the withheld region. Broad surface, phrase-level
   // probe: a three-word run of a specific rewrite does not occur by accident
   // inside a framework bundle, so this stays strict without false alarms.
-  const grams = wordNgrams(hiddenTail, 3);
-  assert.ok(grams.length > 0, "the withheld tail is too short to n-gram; widen the fixture");
+  //
+  // N-grams that the rewriter left byte-identical to the visitor's own draft
+  // are excluded: that text is the visitor's, it is legitimately on screen in
+  // the Original panel, and finding it there proves nothing. What is withheld
+  // — and what is being sold — is the rewritten wording, which is precisely
+  // what remains after this filter.
+  const normalizedOriginal = REWRITABLE_DRAFT.replace(/\s+/g, " ");
+  const grams = wordNgrams(hiddenTail, 3).filter((gram) => !normalizedOriginal.includes(gram));
+  assert.ok(
+    grams.length >= 3,
+    `the fixture must withhold rewritten wording, not just a verbatim tail; got ${grams.length} distinct phrases`,
+  );
   for (const gram of grams) {
     assert.ok(
       !surface.combined.includes(gram),
@@ -87,7 +121,7 @@ test("the withheld remainder of the rewrite never reaches the browser", { skip: 
     const where = [
       surface.innerText.includes(probe) && "rendered text",
       surface.html.includes(probe) && "serialized DOM / RSC payload",
-      surface.contentResponses.includes(probe) && "a document or API response body",
+      surface.responseBodies.includes(probe) && "an HTTP response body",
       surface.storage.includes(probe) && "local/session storage",
       surface.cookies.includes(probe) && "cookies",
     ].filter(Boolean);
