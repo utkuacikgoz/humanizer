@@ -116,6 +116,7 @@ export default function Home() {
   const [unlockError, setUnlockError] = useState("");
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [billingReadiness, setBillingReadiness] = useState<BillingReadiness | null>(null);
+  const [notice, setNotice] = useState("");
   const hasTrackedText = useRef(false);
   const completedCount = useRef(0);
   const submissionInFlight = useRef(false);
@@ -167,6 +168,13 @@ export default function Home() {
   // (tests/e2e/helpers/harness.mts), and it is the cheapest honest one:
   // it can only appear once a client effect has actually run.
   useEffect(() => { document.documentElement.classList.add("motion-ready"); }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("checkout") !== "canceled") return;
+    setNotice("Checkout was canceled. Nothing was charged. Paste your draft again if this page no longer shows the preview.");
+    window.history.replaceState(null, "", "/");
+  }, []);
 
   useEffect(() => { track("landing_view"); }, []);
 
@@ -401,6 +409,7 @@ export default function Home() {
               <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span> Verifying meaning and protecting your facts…
             </p>
           ) : null}
+          {notice ? <p className="status-line" role="status">{notice}</p> : null}
           {error ? <p className="error" role="alert">{error}</p> : null}
         </section>
 

@@ -182,12 +182,8 @@ test("the real preview rate limiter refuses the burst and says how long to wait"
 });
 
 test("the post-purchase page never parks the customer on a status that cannot resolve", { skip: blocker ?? false }, async (t) => {
-  // KNOWN FAILURE, reported by MQA. /checkout/success reads the job id from
-  // the query string and returns early when it is absent, so the polling
-  // effect never starts. A customer who lands there without the parameter —
-  // a link copied without its query string, a referrer-stripping redirect, a
-  // bookmark — sits on "Confirming your payment" with a spinner, forever,
-  // with zero network activity and no way forward. Verified holding for 30s.
+  // Missing `job` must be a terminal, actionable state (`missing`), not an
+  // infinite "Confirming your payment" spinner.
   t.after(closeBrowser);
   const session = await openSession();
   t.after(() => session.close());

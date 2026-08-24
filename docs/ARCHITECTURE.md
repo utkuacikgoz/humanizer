@@ -1,11 +1,11 @@
 # Architecture
 
-Last updated: 2026-08-23
-Status: Phase 0 target architecture; implementation must confirm platform assumptions
+Last updated: 2026-08-25
+Status: Implemented modular monolith on Cloudflare; M3 history/deletion and M4 commercial release remain open
 
 ## Context
 
-The repository is a vinext/React application targeting a Cloudflare Worker. The starter includes optional D1/Drizzle support, optional R2, and Dispatch-provided Sign in with ChatGPT helpers. At Phase 0, the D1 and R2 bindings are not configured and the database schema is empty.
+The repository is a vinext/React application deployed as a Cloudflare Worker. D1/Drizzle is in use for jobs, preview capabilities, the usage ledger, Stripe event projection, and the anonymous preview admission guard. R2 is still unused. Sign in with ChatGPT is the identity path for checkout. Treat this document as the target shape; `AGENTS.md` is the implementation-status record.
 
 The architecture favors a modular monolith deployed at the edge. Separate services are not justified for V1, but domain boundaries must be explicit enough to move model work or webhook processing later.
 

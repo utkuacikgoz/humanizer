@@ -1,6 +1,6 @@
 # Monetization and Billing
 
-Last updated: 2026-08-23
+Last updated: 2026-08-25
 Owner: Monetization Agent
 
 ## Commercial rules
@@ -11,8 +11,8 @@ Canonical launch offers:
 
 | Plan | Price | Billing | Included words | Available V1 features |
 |---|---:|---|---:|---|
-| Starter | $9.99 | Monthly | 50,000 | Four modes, semantic protection, comparison, history, sentence regeneration, protected terminology |
-| Pro | $19 | Monthly | 200,000 | Starter features; larger limits/value positioning only where actually implemented |
+| Starter | $9.99 | Monthly | 50,000 | Four modes, semantic protection, comparison. History, sentence regeneration, and protected-term controls are catalogued as planned, not V1 checkout claims. |
+| Pro | $19 | Monthly | 200,000 | Announced, not checkout-active. Larger limits plus later Voice DNA / batch — label `Coming later`, never as usable V1 features. |
 
 Voice DNA, multiple voice profiles, larger documents, batch processing, and advanced controls are future Pro capabilities, not V1 deliverables. Unavailable capabilities must be omitted from purchase claims or explicitly labeled `Coming later`; never imply they are usable at checkout.
 
