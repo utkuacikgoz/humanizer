@@ -58,9 +58,20 @@ const MODE_REWRITES: Record<WritingMode, Array<[RegExp, string]>> = {
   ],
 };
 
+/**
+ * Match the replacement's case to the text it replaces, in both directions.
+ *
+ * The replacement literals above are written sentence-initially ("To",
+ * "From here, "), and this used to only ever ADD capitals. A mid-sentence
+ * match therefore kept the literal's capital and shipped
+ * "...robust frameworks To facilitate..." to a paying customer.
+ */
 function preserveCapitalization(before: string, after: string): string {
-  if (!after || !before || before[0] !== before[0].toUpperCase()) return after;
-  return `${after[0].toUpperCase()}${after.slice(1)}`;
+  if (!after || !before) return after;
+  const startsUpper = before[0] === before[0].toUpperCase() && before[0] !== before[0].toLowerCase();
+  return startsUpper
+    ? `${after[0].toUpperCase()}${after.slice(1)}`
+    : `${after[0].toLowerCase()}${after.slice(1)}`;
 }
 
 function applyRewrites(text: string, mode: WritingMode): string {
@@ -71,7 +82,10 @@ function applyRewrites(text: string, mode: WritingMode): string {
   return candidate
     .replace(/\s+([,.;!?])/g, "$1")
     .replace(/([.!?]) {2,}/g, "$1 ")
-    .replace(/(^|[.!?]\n]\s+)([a-z])/g, (_match, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`);
+    // Re-capitalize sentence starts. The previous pattern was malformed —
+    // `[.!?]\n]` reads as the class [.!?] followed by a literal `\n]`, so it
+    // never fired after a real sentence break and only ever matched `^`.
+    .replace(/(^|[.!?]\s+|\n+)([a-z])/g, (_match, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`);
 }
 
 export class DeterministicHumanizationProvider implements HumanizationProvider {
