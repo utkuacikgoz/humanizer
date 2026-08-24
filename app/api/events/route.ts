@@ -5,10 +5,13 @@ const allowedEvents = new Set([
   "humanization_completed",
   "preview_viewed",
   "checkout_started",
+  "checkout_completed",
+  "full_result_unlocked",
   "result_copied",
+  "repeat_preview",
   "second_humanization",
 ]);
-const allowedPropertyNames = new Set(["mode", "wordCount", "issuesImproved", "planId", "source"]);
+const allowedPropertyNames = new Set(["mode", "wordCount", "issuesImproved", "planId", "source", "jobId", "customerState"]);
 const MAX_EVENT_BYTES = 2_048;
 
 async function readLimitedBody(request: Request) {

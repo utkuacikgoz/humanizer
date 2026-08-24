@@ -26,7 +26,7 @@
 // customer is only ever charged for words that actually came back — the
 // "never charge quota for failed attempts or internal retries" guardrail in
 // README.md is enforced by construction rather than by remembering to.
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import type { AppDatabase } from "./repository";
 import * as schema from "./schema";
 
@@ -183,4 +183,17 @@ export async function getConsumedWords(db: AppDatabase, userId: string, periodSt
     .from(usageEntries)
     .where(and(eq(usageEntries.userId, userId), eq(usageEntries.periodStart, periodStart)));
   return Number(row?.consumed ?? 0);
+}
+
+/** Durable paid-use ordinal across billing periods and browser sessions. */
+export async function getSuccessfulPaidUseCount(db: AppDatabase, userId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(usageEntries)
+    .where(and(
+      eq(usageEntries.userId, userId),
+      eq(usageEntries.entryType, "commit"),
+      gt(usageEntries.successfulWords, 0),
+    ));
+  return Number(row?.count ?? 0);
 }

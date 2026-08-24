@@ -1,6 +1,6 @@
 # Agent Operating Model and Atomic Backlog
 
-Last updated: 2026-08-23
+Last updated: 2026-08-25
 Authority: `PRODUCT.md` for scope; `DECISIONS.md` for accepted cross-cutting decisions
 
 ## Working agreement
@@ -30,6 +30,24 @@ Token/context discipline (D-014, TOK-owned): terse replies, minimal comments, ch
 
 Agents update relevant memory documents when a decision or verified implementation changes. SEO and backlink work remains parallel and must not block core-product milestones. BL owns the operating system and acquisition backlog in `BACKLINKS.md`; SEO retains authority over indexable-page strategy and technical search requirements.
 
+## Current execution record
+
+The backlog below remains the durable ownership and acceptance contract; it is not a claim that every milestone is
+closed. Current workspace evidence establishes:
+
+- Activation work ACT-01 through ACT-16 is implemented and covered by targeted tests. This completes the current
+  preview-to-paid-result activation surface, not the commercial release gate.
+- The M2 usage ledger is concurrency-safe and is now enforced for entitled `/api/humanize` requests. Successful
+  paid requests return the full result plus allowance/consumption state; failures and no-op attempts release their
+  reservations. Billing readiness, Checkout, webhook projection, private checkout return, and unlock paths exist.
+- M3 is partial: full paid-result display and accessible copy exist. Authorized history/edit revisions, sentence
+  restore/regeneration, protected-phrase controls, and self-service history/account deletion remain open. Funnel
+  analytics exist for the current journey, but the full M3 event and deletion acceptance criteria are not closed.
+- M4 remains open. Hosting/ENG owns attaching `ownword.pro` (currently a Hostinger parked page) and production
+  bindings; MON owns live Stripe/catalog verification and reconciliation evidence; HE owns the frozen production-
+  provider benchmark; LEGAL owns counsel approval; AQA/MQA/SEC own production-like release, smoke, rollback, and
+  security gates. SEO verifies canonical redirects, robots, sitemap, schema, and search consoles after deployment.
+
 ## Atomic backlog
 
 Each item should fit one reviewable change. `Depends` references backlog IDs; `â€”` means no task dependency beyond this brief.
@@ -39,7 +57,7 @@ Each item should fit one reviewable change. `Depends` references backlog IDs; `â
 | ID | Owner | Task | Depends | Acceptance criteria |
 |---|---|---|---|---|
 | M0-01 | PO | Ratify V1 scope and exclusions | â€” | `PRODUCT.md` names the only V1 journey, included capabilities, exclusions, and measurable MVP definition. |
-| M0-02 | ENG | Define centralized brand config contract | M0-01 | One typed server-safe/public-safe source contains confirmed Ownword identity plus nullable, explicitly unverified `supportEmail` and `legalCompanyName`; customer-facing code imports it; secrets are excluded. |
+| M0-02 | ENG | Define centralized brand config contract | M0-01 | One typed server-safe/public-safe source contains confirmed Ownword identity, `ownword.pro`, `support@ownword.pro`, and Bosphorus Elevate LLC; customer-facing code imports it; secrets are excluded. Social profiles and official logo artwork remain nullable/unconfirmed. |
 | M0-03 | MON | Define centralized catalog and entitlement contract | M0-01 | Starter/Pro price, interval, word allowance, feature flags, Stripe price env-key, and version are defined in one server-owned catalog; clients receive a safe projection only. |
 | M0-04 | ENG | Draft D1 schema and state transitions | M0-01, M0-03 | Schema covers users, jobs, protected content, results, subscriptions, Stripe events, usage ledger, and audit metadata; transitions and uniqueness constraints are documented. |
 | M0-05 | HE | Define model-independent provider interfaces | M0-01 | Extraction, humanization, verification, and evaluation contracts have versioned inputs/outputs, typed failure classes, timeouts, and usage/cost metadata. |
@@ -87,6 +105,10 @@ Each item should fit one reviewable change. `Depends` references backlog IDs; `â
 | M2-12 | SEC | Perform billing/auth authorization review | M2-11 | No critical/high finding remains; medium findings have explicit owner/date; production secret handling and webhook replay evidence are approved. |
 | M2-13 | PO | Close M2 payment gate | M2-01..M2-12 | Test-mode stranger journey succeeds end to end; state reconciliation and recovery runbooks are exercised. |
 
+Implementation note (2026-08-25): M2-01 through M2-10 have repository implementations, including D-015/D-016
+ledger admission and route enforcement. M2-11 has substantial automated coverage. M2-12 and M2-13 are still formal
+review/gate tasks and require production-like evidence; implementation must not be mistaken for milestone closure.
+
 ### M3 â€” Paid result workflow
 
 | ID | Owner | Task | Depends | Acceptance criteria |
@@ -101,6 +123,11 @@ Each item should fit one reviewable change. `Depends` references backlog IDs; `â
 | M3-08 | MQA | Execute destructive manual suite | M3-01..M3-07 | Results include environment, exact steps, expected/actual, severity, and evidence; all blocker/critical/high defects close and are retested. |
 | M3-09 | OPT | Audit Landing-to-Wow-to-Payment | M3-08 | Recommendations cite funnel evidence and do not weaken trust/security/quality; scope changes require PO approval. |
 | M3-10 | PO | Close M3 product gate | M3-01..M3-09 | The full MVP definition is demonstrated on desktop and mobile; deletion, history, and second-use flows pass. |
+
+Implementation note (2026-08-25): M3-02 is partial because paid full-result display and accessible copy are
+implemented while persisted edit/revision behavior is open. M3-06 is partial for the current activation journey;
+history, deletion, and cancellation-related event acceptance remains open. M3-01, M3-03, M3-04, and the self-service
+parts of M3-05 are open.
 
 ### M4 â€” Commercial release
 

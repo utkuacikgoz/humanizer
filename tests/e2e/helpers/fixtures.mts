@@ -67,9 +67,9 @@ export const HOSTILE_DRAFTS = {
     "and the team must leverage every available channel today. " +
     "Moreover, stakeholders should utilize robust frameworks in order to facilitate optimal outcomes across the wider organization moving forward together this quarter.",
   markup:
-    "Furthermore, it is important to note that <script>window.__xssScript = 1</script> " +
-    "<img src=x onerror=\"window.__xssHandler = 1\"> <svg onload=\"window.__xssSvg = 1\"></svg> " +
-    "the team must leverage <b>bold</b> channels every single day. " +
+    "Markup stays literal. Furthermore, it is important to note that <script>window.__xssScript = 1</script> " +
+    "<img src=x onerror=\"window.__xssHandler = 1\"> <svg onload=\"window.__xssSvg = 1\"></svg> remains visible. " +
+    "The team must leverage <b>bold</b> channels every single day. " +
     "Moreover, stakeholders should utilize robust frameworks in order to facilitate optimal outcomes across the wider organization moving forward together this quarter.",
   markdown:
     "# Heading\n\nFurthermore, it is important to note that **bold** and _italic_ text with `code` and a " +

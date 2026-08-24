@@ -49,6 +49,11 @@ test("every interactive control is keyboard reachable with a visible focus indic
   const session = await openSession();
   t.after(() => session.close());
   const { page } = session;
+  await page.route("**/api/billing/readiness", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ available: true, signInRequired: true, message: "You will sign in with ChatGPT before checkout." }),
+  }));
   await gotoHydrated(page, "/");
 
   const stops: Focused[] = [];
@@ -79,6 +84,11 @@ test("the whole journey is operable from the keyboard alone", { skip: blocker ??
   const session = await openSession();
   t.after(() => session.close());
   const { page } = session;
+  await page.route("**/api/billing/readiness", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ available: true, signInRequired: true, message: "You will sign in with ChatGPT before checkout." }),
+  }));
   await gotoHydrated(page, "/");
 
   await draftInput(page).focus();

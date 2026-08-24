@@ -4,13 +4,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { MODES, productConfig } from "@/src/config/product";
 import { pricingConfig } from "@/src/config/pricing";
+import { SAMPLE_TEXT } from "@/src/config/sample";
 import { track } from "@/src/lib/analytics";
+import type { BillingReadiness } from "@/src/lib/billing-readiness";
 import { improvementLabel, MIN_PAYWALLABLE_INPUT_WORDS, shouldOfferUnlock } from "@/src/lib/preview-projection";
 import { subscriptionDisclosure } from "@/src/lib/subscription-disclosure";
 import { ManageBilling } from "@/src/components/manage-billing";
 import { MarkedText, describeMarks, diffRewrite, selectDisplayFacts } from "@/src/components/rewrite-marks";
 
 type Mode = (typeof MODES)[number]["id"];
+type UsageQuota = { consumed: number; allowance: number; remaining: number; periodEnd: string };
+type UsageSummary = UsageQuota & { paidUseCount: number };
 type PreviewResult = {
   original: string;
   unchanged?: false;
@@ -23,6 +27,16 @@ type PreviewResult = {
   capability?: string;
   capabilityExpiresAt?: string;
 };
+type PaidResult = {
+  original: string;
+  result: string;
+  paid: true;
+  issuesImproved: number;
+  naturalness: "Strong" | "Good";
+  meaningPreservation: "High" | "Review needed";
+  protectedItems: string[];
+  usage: UsageSummary;
+};
 /**
  * ACT-01. The server's terminal "nothing was rewritten" outcome. It
  * carries no preview, no hidden-word count and no capability by
@@ -30,7 +44,11 @@ type PreviewResult = {
  * a lock, or an improvement count against it.
  */
 type UnchangedResult = { original: string; unchanged: true };
-type Result = PreviewResult | UnchangedResult;
+type Result = PreviewResult | PaidResult | UnchangedResult;
+
+function isPaidResult(result: Result): result is PaidResult {
+  return "paid" in result && result.paid === true;
+}
 
 class UserFacingRequestError extends Error {}
 
@@ -45,18 +63,6 @@ async function readJsonResponse<T extends object>(response: Response): Promise<P
 }
 
 const starterPlan = pricingConfig.plans.starter;
-
-// ACT-06. The fastest path into the product has to demonstrate the one
-// thing competitors do not do. The previous sample returned an empty
-// `protectedItems`, so the highest-traffic demo proved the differentiator
-// zero times and the evidence band rendered its empty state. This one
-// carries a person, a date, a count, a percentage, a citation and a URL,
-// and trips five of the marker phrases in
-// src/lib/humanization/analysis.ts, so both the change marks and the
-// protection marks land inside the exposed preview. Verified against the
-// running endpoint: protectedItems non-empty, issuesImproved 5.
-const SAMPLE_TEXT =
-  "It is important to note that our pilot with Dr. Sarah Chen began on March 14, 2024, and the early results are encouraging. Furthermore, retention among the 240 participants rose 12% over the first quarter, which the team attributes to the new onboarding flow. The methodology follows the framework described in Chen et al. (2024), and the full dataset is published at https://example.org/pilot-data. We plan to leverage the same approach for the second cohort due to the fact that the instrumentation is already in place. In conclusion, the pilot supports a wider rollout in the second half of the year.";
 
 const MAX_FACT_CHIPS = 6;
 
@@ -107,8 +113,11 @@ export default function Home() {
   const [error, setError] = useState("");
   const [unlockStatus, setUnlockStatus] = useState<"idle" | "working" | "error">("idle");
   const [unlockError, setUnlockError] = useState("");
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const [billingReadiness, setBillingReadiness] = useState<BillingReadiness | null>(null);
   const hasTrackedText = useRef(false);
   const completedCount = useRef(0);
+  const submissionInFlight = useRef(false);
   const idempotency = useRef<{ request: string; key: string } | null>(null);
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
   const wordCount = useMemo(() => countWords(text), [text]);
@@ -119,7 +128,7 @@ export default function Home() {
   const marks = useMemo(() => {
     if (!result || result.unchanged) return null;
     return {
-      ...diffRewrite(result.original, result.preview),
+      ...diffRewrite(result.original, isPaidResult(result) ? result.result : result.preview),
       facts: selectDisplayFacts(result.protectedItems, result.original),
     };
   }, [result]);
@@ -160,57 +169,103 @@ export default function Home() {
 
   useEffect(() => { track("landing_view"); }, []);
 
-  async function humanize() {
-    if (status === "working") return;
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/billing/readiness", { signal: controller.signal, cache: "no-store" })
+      .then(async (response) => {
+        const payload = await readJsonResponse<BillingReadiness>(response);
+        if (typeof payload.available !== "boolean" || payload.signInRequired !== true || typeof payload.message !== "string") {
+          throw new Error("Invalid billing readiness response");
+        }
+        setBillingReadiness(payload as BillingReadiness);
+      })
+      .catch((caught) => {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        setBillingReadiness({
+          available: false,
+          signInRequired: true,
+          message: "Checkout is temporarily unavailable. Your preview is still yours to review.",
+        });
+      });
+    return () => controller.abort();
+  }, []);
+
+  function trySample() {
+    if (submissionInFlight.current) return;
+    setText(SAMPLE_TEXT);
+    setResult(null);
     setError("");
+    void humanize({ draft: SAMPLE_TEXT, source: "sample" });
+  }
+
+  async function humanize({ draft = text, source = "manual" }: { draft?: string; source?: "manual" | "sample" } = {}) {
+    // ACT-12. A ref closes the same-render double-click window that state
+    // alone cannot: the sample control loads and submits exactly once.
+    if (submissionInFlight.current) return;
+    setError("");
+    const draftWordCount = countWords(draft);
     // The server enforces MIN_PAYWALLABLE_INPUT_WORDS as a paywall-integrity
     // control (SEC-02). The client used to hardcode 12, so a 12-24 word draft
     // passed this check and came back as a server error the visitor could not
     // have predicted from anything on screen. One source of truth.
-    if (wordCount < MIN_PAYWALLABLE_INPUT_WORDS) {
+    if (draftWordCount < MIN_PAYWALLABLE_INPUT_WORDS) {
       setError(`Add a little more context. At least ${MIN_PAYWALLABLE_INPUT_WORDS} words works best.`);
       return;
     }
-    if (wordCount > 300) {
+    if (draftWordCount > 300) {
       setError("Keep this first pass to 300 words or fewer.");
       return;
     }
 
+    submissionInFlight.current = true;
+    setCopyStatus("idle");
     setStatus("working");
-    track("humanization_started", { mode, wordCount });
+    track("humanization_started", { mode, wordCount: draftWordCount, source });
     setResult(null);
     try {
-      const requestIdentity = `${mode}\0${text}`;
+      const requestIdentity = `${mode}\0${draft}`;
       if (idempotency.current?.request !== requestIdentity) {
         idempotency.current = { request: requestIdentity, key: crypto.randomUUID() };
       }
       const response = await fetch("/api/humanize", {
         method: "POST",
         headers: { "content-type": "application/json", "x-idempotency-key": idempotency.current.key },
-        body: JSON.stringify({ text, mode }),
+        body: JSON.stringify({ text: draft, mode }),
       });
-      const payload = await readJsonResponse<Result & { error?: string }>(response);
-      if (!response.ok) throw new UserFacingRequestError(payload.error ?? "The rewrite could not be completed. Please try again.");
+      const payload = await readJsonResponse<Result & { error?: string; usage?: UsageQuota }>(response);
+      if (!response.ok) {
+        const quotaDetail = response.status === 429 && payload.usage
+          ? ` ${payload.usage.remaining.toLocaleString("en-US")} words remain. Your allowance renews on ${new Date(payload.usage.periodEnd).toLocaleDateString()}.`
+          : "";
+        throw new UserFacingRequestError(`${payload.error ?? "The rewrite could not be completed. Please try again."}${quotaDetail}`);
+      }
       if (!("original" in payload)) throw new UserFacingRequestError("The rewrite could not be completed. Please try again.");
       const nextResult = payload as Result;
       setResultMode(mode);
       setResult(nextResult);
       completedCount.current += 1;
-      track("humanization_completed", { mode, wordCount, issuesImproved: nextResult.unchanged ? 0 : nextResult.issuesImproved });
-      track("preview_viewed", { mode });
-      if (completedCount.current === 2) track("second_humanization");
+      const customerState = !nextResult.unchanged && isPaidResult(nextResult) ? "paid" : "anonymous";
+      track("humanization_completed", { mode, wordCount: draftWordCount, issuesImproved: nextResult.unchanged ? 0 : nextResult.issuesImproved, source, customerState });
+      if (!nextResult.unchanged && isPaidResult(nextResult)) {
+        if (nextResult.usage.paidUseCount === 2) track("second_humanization", { customerState: "paid" });
+      } else {
+        track("preview_viewed", { mode, source });
+        if (completedCount.current === 2) track("repeat_preview", { source: "anonymous_preview" });
+      }
     } catch (caught) {
       setError(caught instanceof UserFacingRequestError ? caught.message : "The connection was interrupted. Please check your connection and try again.");
       setStatus("error");
+      submissionInFlight.current = false;
       return;
     }
+    submissionInFlight.current = false;
     setStatus("idle");
   }
 
   async function unlock(planId: string) {
     // ACT-01: an unchanged result has no capability and never reaches
     // checkout. This narrows the union as well as guarding reentry.
-    if (!result || result.unchanged || unlockStatus === "working") return;
+    if (!result || result.unchanged || isPaidResult(result) || unlockStatus === "working" || !billingReadiness?.available) return;
     setUnlockError("");
     if (!result.capability) {
       setUnlockError("Checkout is temporarily unavailable for this preview. Please try the rewrite again in a moment.");
@@ -235,6 +290,17 @@ export default function Home() {
     } catch (caught) {
       setUnlockError(caught instanceof UserFacingRequestError ? caught.message : "The connection was interrupted. Please check your connection and try again.");
       setUnlockStatus("error");
+    }
+  }
+
+  async function copyPaidResult() {
+    if (!result || result.unchanged || !isPaidResult(result)) return;
+    try {
+      await navigator.clipboard.writeText(result.result);
+      setCopyStatus("copied");
+      track("result_copied", { customerState: "paid" });
+    } catch {
+      setCopyStatus("failed");
     }
   }
 
@@ -279,7 +345,14 @@ export default function Home() {
                   <><span className={wordCount > 300 ? "over" : ""}>{wordCount}</span> / 300 words</>
                 )}
               </p>
-              <button className="sample-button" type="button" onClick={() => { setText(SAMPLE_TEXT); setResult(null); }}>Try an example</button>
+              <button
+                className="sample-button"
+                type="button"
+                aria-disabled={status === "working"}
+                onClick={trySample}
+              >
+                Try an example
+              </button>
             </div>
           </div>
 
@@ -313,7 +386,7 @@ export default function Home() {
                 </button>
               ))}
             </div>
-            <button className="humanize-button" type="button" onClick={humanize} aria-disabled={status === "working"}>
+            <button className="humanize-button" type="button" onClick={() => void humanize()} aria-disabled={status === "working"}>
               {status === "working" ? (
                 <>Checking meaning… <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span></>
               ) : (
@@ -350,8 +423,8 @@ export default function Home() {
         {result && !result.unchanged && marks ? (
           <section className="result" id="result">
             <div className="result-heading">
-              <div><span className="step-number">02</span><h2 ref={resultHeadingRef} tabIndex={-1}>Your rewrite is ready</h2></div>
-              <p>We rewrote the awkward parts and left the meaning alone.</p>
+              <div><span className="step-number">02</span><h2 ref={resultHeadingRef} tabIndex={-1}>{isPaidResult(result) ? "Your full rewrite is ready" : "Your rewrite is ready"}</h2></div>
+              <p>{isPaidResult(result) ? "This rewrite counts toward your monthly allowance." : "We rewrote the awkward parts and left the meaning alone."}</p>
             </div>
             {/* One ledger line, not three dashboard tiles: these are three
                 readings taken on one rewrite, so they read as one row of
@@ -375,13 +448,13 @@ export default function Home() {
                 ) : null}
               </article>
               <article className="humanized-panel">
-                <div className="panel-label"><span>Humanized</span><small>{modeLabel}</small></div>
+                <div className="panel-label"><span>Humanized</span><small>{isPaidResult(result) ? "complete" : modeLabel}</small></div>
                 <p className="sr-only">{describeMarks(marks.result)}</p>
                 <p><MarkedText segments={marks.result} facts={marks.facts} /></p>
                 {/* The withheld remainder, shown as shape only. It stays
                     inside the panel because it is evidence about *this*
                     rewrite. The offer to buy it does not. */}
-                {shouldOfferUnlock(result) ? (
+                {!isPaidResult(result) && shouldOfferUnlock(result) ? (
                   <div className="locked-copy" aria-hidden="true">
                     {Array.from({ length: Math.min(56, Math.max(10, result.hiddenWordCount)) }, (_, index) => (
                       <span key={index} style={{ width: `${38 + ((index * 17) % 48)}px` }} />
@@ -390,6 +463,16 @@ export default function Home() {
                 ) : null}
               </article>
             </div>
+
+            {isPaidResult(result) ? (
+              <div className="paid-result-actions">
+                <p>{result.usage.remaining.toLocaleString("en-US")} of {result.usage.allowance.toLocaleString("en-US")} words remain this billing period.</p>
+                <button type="button" className="copy-result" onClick={() => void copyPaidResult()}>Copy full rewrite</button>
+                <p className="copy-status" role="status" aria-live="polite">
+                  {copyStatus === "copied" ? "Copied to your clipboard." : copyStatus === "failed" ? "Copy was blocked. Select the text and copy it manually." : ""}
+                </p>
+              </div>
+            ) : null}
 
             {/* ACT-04 + ACT-08. The marks explain themselves, and the facts
                 the product held still are named rather than implied. The
@@ -426,18 +509,30 @@ export default function Home() {
                 paragraph the visitor came to judge, and not dressed as a
                 poster. It is a footer to a decision the visitor has already
                 been given everything to make. */}
-            {shouldOfferUnlock(result) ? (
+            {!isPaidResult(result) && shouldOfferUnlock(result) ? (
               <div className="unlock-card">
                 <strong><span className="lock" aria-hidden="true"><IconLock /></span>There’s more to this rewrite</strong>
                 <p>{result.hiddenWordCount} more words of this rewrite are ready. The same protected facts were checked in the same way.</p>
-                <button type="button" onClick={() => unlock(starterPlan.id)} aria-disabled={unlockStatus === "working"}>
-                  {unlockStatus === "working" ? "Redirecting to checkout…" : `Unlock full rewrite for $${starterPlan.monthlyPrice}/mo`}
+                <button
+                  type="button"
+                  onClick={() => void unlock(starterPlan.id)}
+                  disabled={!billingReadiness?.available || unlockStatus === "working"}
+                  aria-disabled={!billingReadiness?.available || unlockStatus === "working"}
+                >
+                  {unlockStatus === "working"
+                    ? "Redirecting to checkout…"
+                    : billingReadiness?.available
+                      ? `Unlock full rewrite for $${starterPlan.monthlyPrice}/mo`
+                      : billingReadiness
+                        ? "Checkout temporarily unavailable"
+                        : "Checking checkout availability…"}
                 </button>
                 {/* ACT-10: the whole offer before the click includes the amount, that it
                     recurs, the included monthly allowance, and the cancellation
                     path (ACT-09). No countdown, no scarcity, no preselected
                     upsell. */}
                 <small className="unlock-terms">
+                  <span role="status">{billingReadiness?.message ?? "Checking checkout availability before you continue."}</span><br />
                   {subscriptionDisclosure(starterPlan)}{" "}
                   <a href="#manage-billing">Cancel anytime</a>. No cancellation fee.
                 </small>

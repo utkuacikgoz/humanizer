@@ -220,8 +220,10 @@ export async function upsertSubscriptionFromStripe(db: AppDatabase, input: Subsc
 const ACTIVE_ENTITLEMENT_STATUSES: ReadonlySet<SubscriptionStatus> = new Set(["active", "trialing"]);
 
 export interface Entitlement {
+  subscriptionId: string;
   planId: string;
   status: SubscriptionStatus;
+  currentPeriodStart: Date;
   currentPeriodEnd: Date;
   stripeCustomerId: string;
 }
@@ -268,7 +270,14 @@ export async function getActiveEntitlement(db: AppDatabase, userId: string): Pro
   const now = Date.now();
   const active = rows.find((row) => ACTIVE_ENTITLEMENT_STATUSES.has(row.status) && !isExpiredCancellation(row, now));
   if (!active) return null;
-  return { planId: active.planId, status: active.status, currentPeriodEnd: active.currentPeriodEnd, stripeCustomerId: active.stripeCustomerId };
+  return {
+    subscriptionId: active.id,
+    planId: active.planId,
+    status: active.status,
+    currentPeriodStart: active.currentPeriodStart,
+    currentPeriodEnd: active.currentPeriodEnd,
+    stripeCustomerId: active.stripeCustomerId,
+  };
 }
 
 /** Returns the authenticated user's Stripe customer ID, if any subscription row exists for them. */
@@ -280,6 +289,10 @@ export async function getStripeCustomerId(db: AppDatabase, userId: string): Prom
 export interface UnlockedResult {
   original: string;
   result: string;
+  issuesImproved: number;
+  naturalness: "Strong" | "Good";
+  meaningPreservation: "High" | "Review needed";
+  protectedItems: string[];
 }
 
 /**
@@ -308,7 +321,20 @@ export async function getUnlockedResult(db: AppDatabase, input: { userId: string
   if (!job || job.ownerUserId !== input.userId || job.state !== "succeeded") return null;
 
   const [payload] = await db.select().from(schema.jobPayloads).where(eq(schema.jobPayloads.jobId, job.id)).limit(1);
-  if (!payload?.resultRef || payload.purgedAt) return null;
+  if (!payload?.resultRef || !payload.previewProjection || payload.purgedAt) return null;
 
-  return { original: payload.sourceRef, result: payload.resultRef };
+  const projection = JSON.parse(payload.previewProjection) as {
+    issuesImproved: number;
+    naturalness: "Strong" | "Good";
+    meaningPreservation: "High" | "Review needed";
+    protectedItems: string[];
+  };
+  return {
+    original: payload.sourceRef,
+    result: payload.resultRef,
+    issuesImproved: projection.issuesImproved,
+    naturalness: projection.naturalness,
+    meaningPreservation: projection.meaningPreservation,
+    protectedItems: projection.protectedItems,
+  };
 }

@@ -110,6 +110,14 @@ test("indexes completed legal pages only on the canonical host", async () => {
   }
 });
 
+test("never indexes the private checkout result surface", async () => {
+  const response = await render("/checkout/success?job=9a3a2a68-ec26-49a3-a8b3-fbd5950d88e6", "ownword.pro");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /name="robots" content="noindex, nofollow, nocache"/);
+  assert.doesNotMatch(html, /rel="canonical" href="https:\/\/ownword\.pro\/checkout/);
+});
+
 test("renders the configured price, not a stale hardcoded one", async () => {
   const html = await (await render()).text();
   assert.match(html, /9\.99/);

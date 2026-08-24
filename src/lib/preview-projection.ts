@@ -4,7 +4,7 @@
 // `next/navigation` so both the route handler and the client page can
 // import it, and so plain-Node tests can assert the paywall decision
 // directly instead of inferring it from rendered markup.
-import { normalizeForComparison } from "@/src/lib/humanization/text";
+import { countWords, normalizeForComparison, splitSentences } from "@/src/lib/humanization/text";
 
 /**
  * ACT-01. True when the pipeline handed back a candidate that is
@@ -53,6 +53,10 @@ export interface PreviewSplit {
 
 /**
  * Splits a rewrite into the visible preview and the withheld remainder.
+ * The visible prefix always ends at a complete sentence boundary. We select
+ * the last complete sentence that fits inside the existing fractional/capped
+ * word budget; we never round up to a later boundary because that would leak
+ * more of a short rewrite than the transparent preview policy permits.
  *
  * When the rewrite is too short to withhold MIN_HIDDEN_WORDS, this reports
  * `paywallable: false` rather than exposing everything behind a purchase
@@ -60,14 +64,30 @@ export interface PreviewSplit {
  * rewrite with a price attached to it.
  */
 export function projectPreview(rewrite: string): PreviewSplit {
-  const words = rewrite.trim().split(/\s+/).filter(Boolean);
-  const visibleWords = Math.min(MAX_VISIBLE_WORDS, Math.floor(words.length * VISIBLE_FRACTION));
-  const hiddenWordCount = words.length - visibleWords;
-
-  if (visibleWords < 1 || hiddenWordCount < MIN_HIDDEN_WORDS) {
+  const totalWordCount = countWords(rewrite);
+  const visibleWordBudget = Math.min(MAX_VISIBLE_WORDS, Math.floor(totalWordCount * VISIBLE_FRACTION));
+  if (visibleWordBudget < 1) {
     return { preview: "", hiddenWordCount: 0, paywallable: false };
   }
-  return { preview: words.slice(0, visibleWords).join(" "), hiddenWordCount, paywallable: true };
+
+  let previewEnd = 0;
+  let visibleWordCount = 0;
+  for (const sentence of splitSentences(rewrite)) {
+    // A trailing fragment (or a newline-delimited fragment with no terminal
+    // punctuation) is not a complete sentence and therefore cannot be the
+    // public edge of a paid preview.
+    if (!/[.!?]$/u.test(sentence.text)) continue;
+    const candidateWordCount = countWords(rewrite.slice(0, sentence.end));
+    if (candidateWordCount > visibleWordBudget) break;
+    previewEnd = sentence.end;
+    visibleWordCount = candidateWordCount;
+  }
+
+  const hiddenWordCount = totalWordCount - visibleWordCount;
+  if (previewEnd === 0 || hiddenWordCount < MIN_HIDDEN_WORDS) {
+    return { preview: "", hiddenWordCount: 0, paywallable: false };
+  }
+  return { preview: rewrite.slice(0, previewEnd).trim(), hiddenWordCount, paywallable: true };
 }
 
 /** The subset of a preview response the paywall decision depends on. */

@@ -143,6 +143,22 @@ test("a genuinely entitled owner is unaffected by whatever junk the redirect car
   assert.deepEqual(await clean.json(), await noisy.json());
 });
 
+test("an unlocked result carries the same qualitative evidence as its preview", async () => {
+  const { db, job, owner } = await scenario();
+  await grantEntitlement(db, owner.userId);
+
+  const response = await get(db, `?job=${job.jobId}`, authHeaders("owner"));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    original: "The original text a user submitted.",
+    result: FULL_RESULT,
+    issuesImproved: 1,
+    naturalness: "Strong",
+    meaningPreservation: "High",
+    protectedItems: [],
+  });
+});
+
 test("an entitled stranger cannot read another user's job", async () => {
   const { db, job, stranger } = await scenario();
   await grantEntitlement(db, stranger.userId, { stripeSubscriptionId: "sub_stranger" });

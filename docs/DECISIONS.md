@@ -1,6 +1,6 @@
 # Decision Log
 
-Last updated: 2026-08-23
+Last updated: 2026-08-25
 
 Accepted decisions are durable until replaced by a new dated entry. Implementation discoveries should amend this log rather than silently diverge.
 
@@ -88,9 +88,12 @@ Consequence: Applies to every agent's output from this point forward, not just c
 
 ## Proposed; must resolve before named milestone
 
-### D-P01 — Anonymous/result retention duration (before M1)
+### D-P01 — Paid-history retention duration (anonymous portion superseded by D-017)
 
-Proposal: Expire unclaimed anonymous source/output within 24 hours; default paid history retention is user-controlled with a documented maximum and deletion-on-request workflow. Shorter anonymous retention lowers privacy exposure but can hurt delayed checkout recovery. Legal and Product must ratify exact periods.
+Proposal: Default paid history retention is user-controlled with a documented maximum and deletion-on-request
+workflow. Legal and Product must ratify exact paid-history and backup periods. The earlier proposal to expire all
+anonymous source/output within 24 hours is historical and is superseded by D-017's implemented split between a
+24-hour capability and payload retention of up to 30 days.
 
 ### D-P02 — Subscription period usage semantics (before M2)
 
@@ -108,15 +111,24 @@ Proposal: Keep searchable metadata in D1 and encrypted text payloads in a separa
 
 Proposal: Prefer providers/settings offering no-training and zero/short retention. If unavailable, surface the exact processor retention in the privacy notice and shorten internal retention. Legal and Security must approve the production provider set.
 
+## Accepted implementation decisions
+
 ### D-013 — M2 billing is built while production Stripe details remain pending
+
+Status: Historical implementation record. Its ledger deferral was superseded by D-015 and its claim that the
+ledger had no route consumer was superseded by D-016. Its production-credential and release-signoff cautions remain
+current.
 
 Decision: Product Orchestrator directed engineering to proceed with the M2 payment and entitlement backlog before every commercial detail was available. Ownword, `ownword.pro`, Bosphorus Elevate LLC, and `support@ownword.pro` are now configured. Official visual assets and live Stripe credentials remain pending. Values stay centralized through `productConfig`, `STRIPE_*` environment variables, and the versioned Stripe price mapping. Missing required payment configuration must fail closed.
 Reason: User-directed acceleration toward a same-day paid launch; this is the explicit tradeoff being made, not an oversight.
-Consequence: The following remain genuinely open and are NOT satisfied by placeholder-driven engineering — they require the user's real values and cannot be closed by code alone: D-P01 (retention duration), D-P04 (payload storage/encryption), D-P05 (provider retention), and M4-03 (Legal disclosure approval). M2-13's payment gate and M4-07's commercial-launch authorization are not self-granted by this decision; PO/SEC/LEGAL sign-off is still required before real customer charges go live, per `AGENTS.md`'s working agreement. This entry exists so a later reviewer sees *why* placeholders are present, rather than mistaking them for an unnoticed gap.
-
-M2-01 through M2-06, M2-08, M2-09, and M2-10 are implemented (identity/claim, catalog, Checkout Session creation, verified webhook ingress and inbox, subscription projection, server-authoritative unlock, the checkout-return polling page, and the Billing Portal). **M2-07 (append-only usage ledger) is deliberately NOT implemented this session**, not an oversight: a correct implementation needs atomic, concurrency-safe admission control ("committed + active reservations + request <= allowance" checked and reserved as one atomic step), and this session's own claim-transaction work twice found real races in exactly this class of problem (an unsound timestamp-comparison check, then a capability-lockout gap — see db/billing-repository.ts's git history) before landing a correct fix each time. Shipping a superficially-plausible `reserveUsage()` that races under concurrent requests would be worse than not shipping it: it looks like the security-critical control D-006 requires while not actually providing it. There is also no consumer yet — nothing in M1-M2's scope calls it; the first real caller is M3-03 (sentence regeneration). ARCHITECTURE.md already flags this exact concern as an open risk ("D1 usage ledger concurrency... ENG + MON load/concurrency spike before M2-07") — implement M2-07 as part of that spike, with a real concurrency test (mirroring tests/billing-repository.test.mts's concurrent-claim test) proving no over-reservation before trusting it.
+Consequence: Production Stripe credentials, production D1/guard bindings, D-P04 payload-storage resolution, D-P05
+provider retention, M4-03 Legal approval, and the M2/M4 release gates cannot be closed by repository code alone.
+The original choice to defer M2-07 was justified by the absence of proven atomic admission; D-015 records the
+test-backed implementation that lifted that deferral. D-016 records its subsequent route integration.
 
 ### D-015 — M2-07 usage ledger is implemented and the D-013 deferral is lifted
+
+Status: Accepted. Extended by D-016 for request-path enforcement.
 
 Decision: the append-only usage ledger and its admission control now exist (`db/usage-ledger.ts`). D-013 deferred this because a `reserveUsage()` that races looks like the control D-006 requires without being one — that objection is answered, not waived.
 
@@ -126,7 +138,42 @@ Evidence, not assertion: `tests/usage-ledger.test.mts` runs 20 concurrent 100-wo
 
 The README guardrail "never charge quota for failed attempts or internal retries" is enforced by construction: a reservation is held during the attempt, a commit records only the words that actually succeeded, and the difference is released. A failed attempt costs the customer nothing. Replays are idempotent through the `(operation_key, entry_type)` unique index.
 
-Consequence: the ledger is correct and tested, but **nothing calls it yet** — the 50,000-word allowance is still not enforced on any request path. Wiring it into the humanize route is the next step and is a separate change; this entry exists so a reader does not mistake a working ledger for an enforced quota.
+Historical consequence at acceptance: the ledger initially had no route consumer. D-016 supersedes that state; the
+allowance is now enforced for entitled `/api/humanize` requests.
+
+### D-016 — Entitled humanization requests enforce the usage ledger
+
+Status: Accepted and implemented.
+
+Decision: Every entitled `/api/humanize` request reserves its normalized input word count through the D-015 ledger
+before generation. Over-quota requests fail with 429 and current usage. Failed and no-op attempts release the
+reservation; a successful attempt commits only the successful words. Operation keys keep retries idempotent.
+
+The successful paid response returns the full verified result and a usage projection containing consumed,
+allowance, remaining, period end, and paid-use count. Anonymous or unentitled callers continue to receive only the
+safe preview contract. This does not implement paid history, persisted editing, sentence restore/regeneration, or
+protected-phrase controls; those remain M3 work.
+
+Reason: An implemented ledger is not a quota control until it is in the request path, and the paid experience must
+show authoritative remaining usage without trusting client state.
+
+Consequence: M2-07 is enforced for the current paid generation path. Production D1 bindings and concurrency
+behavior still require production-like release evidence, and future chargeable operations must use the same
+reservation/commit/release invariant.
+
+### D-017 — Anonymous capability and payload retention use separate windows
+
+Status: Accepted implementation record; final Legal approval remains part of M4-03.
+
+Decision: Anonymous preview capabilities expire after 24 hours. Unclaimed anonymous source/result payloads may be
+retained for up to 30 days and are purged opportunistically by repository cleanup. Public Privacy copy states those
+two distinct windows; no document may imply that a 24-hour capability automatically deletes the stored payload.
+
+Reason: Checkout recovery authority and stored-data lifecycle are separate controls. Recording them separately
+prevents an expired link from being misrepresented as immediate deletion.
+
+Consequence: D-P01's earlier anonymous 24-hour deletion proposal is superseded. Authenticated paid-history
+retention, self-service deletion, guaranteed purge scheduling, backup retention, and counsel approval remain open.
 
 ## Rejected
 

@@ -6,11 +6,17 @@ import { productConfig } from "@/src/config/product";
 import { pricingConfig } from "@/src/config/pricing";
 import { subscriptionDisclosure } from "@/src/lib/subscription-disclosure";
 import { ManageBilling } from "@/src/components/manage-billing";
-import { MarkedText, describeMarks, diffRewrite } from "@/src/components/rewrite-marks";
+import { MarkedText, describeMarks, diffRewrite, selectDisplayFacts } from "@/src/components/rewrite-marks";
+import { improvementLabel } from "@/src/lib/preview-projection";
+import { track } from "@/src/lib/analytics";
 
 type UnlockedResult = {
   original: string;
   result: string;
+  issuesImproved: number;
+  naturalness: "Strong" | "Good";
+  meaningPreservation: "High" | "Review needed";
+  protectedItems: string[];
 };
 
 function countWords(value: string) {
@@ -43,8 +49,14 @@ export default function CheckoutSuccessPage() {
   const jobId = useSyncExternalStore(subscribeToLocation, readJobIdFromLocation, noServerJobId);
   const [status, setStatus] = useState<"confirming" | "unlocked" | "delayed" | "missing" | "signed-out">("confirming");
   const [result, setResult] = useState<UnlockedResult | null>(null);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const attempts = useRef(0);
+  const completionEventsFired = useRef(false);
   const marks = useMemo(() => (result ? diffRewrite(result.original, result.result) : null), [result]);
+  const facts = useMemo(
+    () => result ? selectDisplayFacts(result.protectedItems, result.original) : [],
+    [result],
+  );
   const visibleStatus = hydrated && !jobId ? "missing" : status;
 
   // Hydration marker, matching the landing page. The post-purchase surface
@@ -66,8 +78,14 @@ export default function CheckoutSuccessPage() {
           return;
         }
         if (response.ok) {
-          setResult((await response.json()) as UnlockedResult);
+          const unlocked = (await response.json()) as UnlockedResult;
+          setResult(unlocked);
           setStatus("unlocked");
+          if (!completionEventsFired.current) {
+            completionEventsFired.current = true;
+            track("checkout_completed", { jobId: jobId! });
+            track("full_result_unlocked", { jobId: jobId! });
+          }
           return;
         }
       } catch {
@@ -84,6 +102,17 @@ export default function CheckoutSuccessPage() {
     void poll();
     return () => { cancelled = true; };
   }, [jobId]);
+
+  async function copyResult() {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(result.result);
+      setCopyStatus("copied");
+      if (jobId) track("result_copied", { jobId });
+    } catch {
+      setCopyStatus("failed");
+    }
+  }
 
   return (
     <main>
@@ -131,15 +160,20 @@ export default function CheckoutSuccessPage() {
 
         {visibleStatus === "unlocked" && result && marks ? (
           <>
+            <div className="checks" aria-label="Rewrite checks">
+              <article><small>Naturalness</small><strong>{result.naturalness}</strong></article>
+              <article><small>Meaning preservation</small><strong>{result.meaningPreservation}</strong></article>
+              <article className="warm"><small>Changes</small><strong>{improvementLabel(result.issuesImproved)}</strong></article>
+            </div>
             <div className="comparison">
               <article>
                 <div className="panel-label"><span>Original</span><small>{countWords(result.original)} words</small></div>
-                <p><MarkedText segments={marks.source} /></p>
+                <p><MarkedText segments={marks.source} facts={facts} /></p>
               </article>
               <article className="humanized-panel">
                 <div className="panel-label"><span>Humanized</span><small>complete</small></div>
                 <p className="sr-only">{describeMarks(marks.result)}</p>
-                <p><MarkedText segments={marks.result} /></p>
+                <p><MarkedText segments={marks.result} facts={facts} /></p>
               </article>
             </div>
             {/* ACT-15: the paid screen carries the same evidence as the
@@ -147,11 +181,17 @@ export default function CheckoutSuccessPage() {
                 into the workspace, because nothing else invites a second
                 draft. */}
             <div className="evidence">
-              <p className="diff-legend" aria-hidden="true">
-                <span><i className="k-cut" /> Cut</span>
-                <span><i className="k-add" /> Rewritten</span>
-              </p>
-              <p className="protected-note"><Link className="next-action" href="/">Rewrite another draft</Link></p>
+              <div className="protected-note">
+                <b>Held exactly as you wrote them</b>
+                {facts.length ? <ul>{facts.slice(0, 6).map((fact) => <li key={fact}>{fact}</li>)}</ul> : <p>No names, dates, numbers, citations, or links needed special protection.</p>}
+              </div>
+              <div className="paid-actions">
+                <button type="button" className="copy-result" onClick={copyResult}>Copy full rewrite</button>
+                <Link className="next-action" href="/">Rewrite another draft</Link>
+                <p className="copy-status" role="status" aria-live="polite">
+                  {copyStatus === "copied" ? "Copied to your clipboard." : copyStatus === "failed" ? "Copy was blocked. Select the text and copy it manually." : ""}
+                </p>
+              </div>
             </div>
           </>
           ) : null}
