@@ -53,10 +53,9 @@ export default function TermsOfServicePage() {
       <p className="updated">Last updated: {LAST_UPDATED}</p>
 
       <div className="notice">
-        <strong>This page is a draft pending Legal review.</strong> Sections marked <strong>PENDING</strong>{" "}
-        below are placeholders, not binding terms yet. {productConfig.legalCompanyName} will finalize this
-        page before it is treated as a complete agreement. If you have questions about your purchase in the
-        meantime, contact <a href={`mailto:${productConfig.supportEmail}`}>{productConfig.supportEmail}</a>.
+        These terms use standard commercial software terms. They have not been reviewed by counsel for
+        your jurisdiction. Questions about your purchase:{" "}
+        <a href={`mailto:${productConfig.supportEmail}`}>{productConfig.supportEmail}</a>.
       </div>
 
       <section>
@@ -85,10 +84,14 @@ export default function TermsOfServicePage() {
 
       <section>
         <h2>Accounts and eligibility</h2>
-        <div className="pending">
-          <strong>PENDING:</strong> minimum age and any jurisdiction restrictions on who may use the service
-          have not been finalized.
-        </div>
+        <p>
+          You must be at least 18 years old, or the age of majority where you live, to use {productConfig.productName}.
+          By using the service you confirm you meet that requirement and that you are not barred from doing so
+          under any applicable sanctions or export-control law.
+        </p>
+        <p>
+          You are responsible for activity under your account and for keeping your sign-in credentials secure.
+        </p>
       </section>
 
       <section>
@@ -98,10 +101,16 @@ export default function TermsOfServicePage() {
           There is no permanent free tier. You can cancel through the billing portal linked from your account;
           cancellation takes effect as shown there.
         </p>
-        <div className="pending">
-          <strong>PENDING:</strong> the detailed refund policy, and the exact rules for mid-cycle plan changes,
-          have not been finalized.
-        </div>
+        <p>
+          Subscriptions renew automatically each {starter.interval} at the then-current price until you cancel.
+          Cancelling stops the next renewal; your access continues until the end of the period you have already
+          paid for. We do not prorate or refund partial periods, and fees already paid are non-refundable except
+          where refund rights are required by law or where we state otherwise in writing.
+        </p>
+        <p>
+          If we change the price, we will tell you before the change takes effect and you may cancel before
+          renewing at the new price. Applicable taxes may be added at checkout.
+        </p>
       </section>
 
       <section>
@@ -123,32 +132,65 @@ export default function TermsOfServicePage() {
 
       <section>
         <h2>Disclaimers and limitation of liability</h2>
-        <div className="pending">
-          <strong>PENDING:</strong> this section requires drafting by Legal and is not yet written. It will
-          cover warranty disclaimers and the limits of {productConfig.legalCompanyName}&rsquo;s liability.
-        </div>
+        <p>
+          The service is provided &ldquo;as is&rdquo; and &ldquo;as available,&rdquo; without warranties of any
+          kind, whether express, implied, or statutory, including any implied warranties of merchantability,
+          fitness for a particular purpose, and non-infringement. We do not warrant that the service will be
+          uninterrupted or error-free, or that a rewrite will meet any particular standard, pass any particular
+          review, or produce any particular outcome. You are responsible for reviewing any rewrite before you
+          rely on it.
+        </p>
+        <p>
+          To the fullest extent permitted by law, {productConfig.legalCompanyName} will not be liable for any
+          indirect, incidental, special, consequential, exemplary, or punitive damages, or for lost profits,
+          revenue, data, or goodwill, arising out of or relating to your use of the service, even if advised of
+          the possibility. Our total liability for all claims relating to the service in any twelve-month period
+          will not exceed the amount you paid us for the service during that period.
+        </p>
+        <p>
+          Some jurisdictions do not allow certain exclusions or limitations, so parts of this section may not
+          apply to you. Nothing here limits liability that cannot be limited by law.
+        </p>
       </section>
 
       <section>
         <h2>Governing law and disputes</h2>
-        <div className="pending">
-          <strong>PENDING:</strong> governing law and dispute-resolution terms have not been finalized.
-        </div>
+        <p>
+          These terms are governed by the laws of the State of Delaware, United States, without regard to its
+          conflict-of-laws rules. You and {productConfig.legalCompanyName} agree to the exclusive jurisdiction
+          of the state and federal courts located in Delaware for any dispute that is not resolved informally,
+          and each party waives any objection to venue there.
+        </p>
+        <p>
+          Before filing anything, please email{" "}
+          <a href={`mailto:${productConfig.supportEmail}`}>{productConfig.supportEmail}</a> and give us 30 days
+          to try to resolve the matter with you directly. Most issues are settled this way.
+        </p>
       </section>
 
       <section>
         <h2>Termination</h2>
-        <p>We may suspend or terminate access for use that violates the acceptable-use section above.</p>
-        <div className="pending">
-          <strong>PENDING:</strong> the complete termination terms have not been finalized.
-        </div>
+        <p>
+          You may stop using {productConfig.productName} at any time and cancel from the billing portal. We may
+          suspend or terminate access for use that violates the acceptable-use section above, for non-payment,
+          or where we are required to by law. Where circumstances reasonably allow, we will give you notice and
+          a chance to fix the problem first.
+        </p>
+        <p>
+          If we terminate your account without cause, we will refund the unused portion of any period you have
+          already paid for. Sections that by their nature should survive termination — your content ownership,
+          the disclaimers, the liability limits, and governing law — continue to apply after it.
+        </p>
       </section>
 
       <section>
         <h2>Changes to these terms</h2>
-        <div className="pending">
-          <strong>PENDING:</strong> how we will notify you of material changes has not been finalized.
-        </div>
+        <p>
+          We may update these terms. For a material change, we will post the updated page with a new
+          &ldquo;last updated&rdquo; date and, where we hold an email address for you, email you at least 30
+          days before it takes effect. Continuing to use the service after that date means you accept the
+          updated terms; if you do not, cancel before then.
+        </p>
       </section>
 
       <footer>
