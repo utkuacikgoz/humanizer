@@ -14,7 +14,7 @@
 // runtime). A crash mid-write leaves an orphaned job row rather than
 // nothing; these are sequential inserts, not a D1 `batch()`/transaction.
 // Revisit that before this path gates real money movement in M2.
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, lt } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "./schema";
 import type { JobState, WritingModeValue } from "./schema";
@@ -114,6 +114,46 @@ function base64UrlEncode(bytes: Uint8Array): string {
  * capability tied to exactly that job. Only called for `succeeded` jobs —
  * D-007 means a failed/unverified candidate is never written here.
  */
+/**
+ * SEC-06 / D-011. Anonymous drafts are kept for a bounded window and then
+ * removed — /privacy states 30 days, and nothing was enforcing it: every
+ * job_payloads row had purged_at NULL with no purge writer anywhere.
+ *
+ * Deliberately opportunistic rather than a scheduled job: it runs on the
+ * write path, needs no cron trigger or new infrastructure, and the bound is
+ * small so it never turns one preview into an expensive request. A row that
+ * survives a pass is simply collected on a later one.
+ *
+ * Only unclaimed anonymous work is eligible. A job with an owner has been
+ * paid for and is out of scope here.
+ */
+export const ANONYMOUS_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const PURGE_BATCH = 25;
+
+export async function purgeExpiredAnonymousPayloads(db: AppDatabase, now = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - ANONYMOUS_RETENTION_MS);
+  const stale = await db
+    .select({ id: jobPayloads.id, jobId: jobPayloads.jobId })
+    .from(jobPayloads)
+    .innerJoin(humanizationJobs, eq(humanizationJobs.id, jobPayloads.jobId))
+    .where(and(isNull(jobPayloads.purgedAt), isNull(humanizationJobs.ownerUserId), lt(jobPayloads.createdAt, cutoff)))
+    .limit(PURGE_BATCH);
+
+  let purged = 0;
+  for (const row of stale) {
+    // Drop the text, keep the row as a tombstone: purged_at is the record
+    // that this content was removed rather than never stored.
+    await db.update(jobPayloads)
+      .set({ sourceRef: "", resultRef: null, previewProjection: null, purgedAt: now })
+      .where(eq(jobPayloads.id, row.id));
+    await db.update(protectedItems)
+      .set({ valueRef: null, purgedAt: now })
+      .where(and(eq(protectedItems.jobId, row.jobId), isNull(protectedItems.purgedAt)));
+    purged += 1;
+  }
+  return purged;
+}
+
 export async function persistHumanizationJob(db: AppDatabase, input: PersistJobInput): Promise<PersistedJob> {
   const now = new Date();
   const jobId = crypto.randomUUID();
@@ -167,6 +207,9 @@ export async function persistHumanizationJob(db: AppDatabase, input: PersistJobI
     createdAt: now,
     expiresAt: capabilityExpiresAt,
   });
+
+  // Best-effort retention sweep; a failure here must never fail the preview.
+  try { await purgeExpiredAnonymousPayloads(db); } catch { /* retention is opportunistic */ }
 
   return { jobId, capabilityToken, capabilityExpiresAt };
 }
