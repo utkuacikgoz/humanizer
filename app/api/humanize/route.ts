@@ -1,6 +1,7 @@
 import { createHumanizationPipeline, HumanizationFailedError, PIPELINE_VERSION } from "@/src/lib/humanization";
 import type { WritingMode } from "@/src/lib/humanization";
 import { PreviewRequestGuard } from "@/src/lib/preview-request-guard";
+import { isMateriallyUnchanged } from "@/src/lib/preview-projection";
 import type { PreviewProjection } from "../../../db/repository";
 
 const allowedModes = new Set<WritingMode>(["natural", "professional", "academic", "casual"]);
@@ -9,12 +10,27 @@ const MAX_REQUEST_BYTES = 10_000;
 const MAX_PROCESSING_MS = 5_000;
 const IDEMPOTENCY_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{7,127}$/;
 
-type PreviewPayload = PreviewProjection & {
+/**
+ * ACT-01. The terminal, un-sellable outcome: the pipeline returned a
+ * candidate materially identical to the submitted draft. Structurally it
+ * carries no `preview`, no `hiddenWordCount` and no `capability` — there
+ * is no withheld remainder to unlock, so there is nothing to charge for
+ * and no checkout can be started against it.
+ */
+type UnchangedPayload = {
   original: string;
-  /** Present only when the job was durably persisted; absent is not an error. */
-  capability?: string;
-  capabilityExpiresAt?: string;
+  unchanged: true;
 };
+
+type PreviewPayload =
+  | (PreviewProjection & {
+      original: string;
+      unchanged?: false;
+      /** Present only when the job was durably persisted; absent is not an error. */
+      capability?: string;
+      capabilityExpiresAt?: string;
+    })
+  | UnchangedPayload;
 
 /**
  * Best-effort persistence: durably stores the succeeded job and issues an
@@ -173,11 +189,26 @@ export async function POST(request: Request) {
       execute: async () => {
         try {
           const result = await pipeline.humanize({ text, mode: mode as WritingMode, signal: controller.signal });
+
+          // ACT-01: never truncate, price, or persist a rewrite that did
+          // not rewrite anything. Derived from the normalized full
+          // rewrite versus the normalized original — not from
+          // `improvements` — and returned before any preview projection,
+          // persistence, or capability minting happens, so no unlock CTA
+          // can exist for this outcome anywhere downstream.
+          if (isMateriallyUnchanged(result.original, result.text)) {
+            return { original: result.original, unchanged: true } satisfies UnchangedPayload;
+          }
+
           const preview = partialPreview(result.text);
           const projection: PreviewProjection = {
             preview,
             hiddenWordCount: Math.max(0, result.text.trim().split(/\s+/).length - preview.trim().split(/\s+/).length),
-            issuesImproved: Math.max(1, result.improvements),
+            // ACT-02: the measured count, with no `Math.max(1, …)` floor.
+            // A floored "1 improvement" is a fabricated evidence claim
+            // (docs/MONETIZATION.md), and it was the mechanism that made
+            // the ACT-01 no-op look legitimate.
+            issuesImproved: result.improvements,
             naturalness: result.evaluation.scores.naturalness >= 0.7 ? "Strong" : "Good",
             meaningPreservation: result.verification.passed ? "High" : "Review needed",
             protectedItems: result.protectedContent.map((item) => item.value),

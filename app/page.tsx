@@ -4,10 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MODES, productConfig } from "@/src/config/product";
 import { pricingConfig } from "@/src/config/pricing";
 import { track } from "@/src/lib/analytics";
+import { improvementLabel, shouldOfferUnlock } from "@/src/lib/preview-projection";
+import { subscriptionDisclosure } from "@/src/lib/subscription-disclosure";
+import { ManageBilling } from "@/src/components/manage-billing";
 
 type Mode = (typeof MODES)[number]["id"];
-type Result = {
+type PreviewResult = {
   original: string;
+  unchanged?: false;
   preview: string;
   hiddenWordCount: number;
   issuesImproved: number;
@@ -17,6 +21,16 @@ type Result = {
   capability?: string;
   capabilityExpiresAt?: string;
 };
+/**
+ * ACT-01. The server's terminal "nothing was rewritten" outcome. It
+ * carries no preview, no hidden-word count and no capability by
+ * construction, so the union makes it a type error to render a price,
+ * a lock, or an improvement count against it.
+ */
+type UnchangedResult = { original: string; unchanged: true };
+type Result = PreviewResult | UnchangedResult;
+
+const starterPlan = pricingConfig.plans.starter;
 
 const SAMPLE_TEXT =
   "In today’s busy world, it is important to note that clear communication plays a crucial role. Furthermore, teams should leverage simple strategies to collaborate well. These strategies enhance productivity. They also help teams reach lasting goals. In conclusion, thoughtful communication helps people solve problems and do their best work.";
@@ -114,7 +128,7 @@ export default function Home() {
       if (!response.ok) throw new Error(payload.error ?? "The rewrite could not be completed.");
       setResult(payload);
       completedCount.current += 1;
-      track("humanization_completed", { mode, wordCount, issuesImproved: payload.issuesImproved });
+      track("humanization_completed", { mode, wordCount, issuesImproved: payload.unchanged ? 0 : payload.issuesImproved });
       track("preview_viewed", { mode });
       if (completedCount.current === 2) track("second_humanization");
     } catch (caught) {
@@ -126,7 +140,9 @@ export default function Home() {
   }
 
   async function unlock(planId: string) {
-    if (!result?.capability || unlockStatus === "working") return;
+    // ACT-01: an unchanged result has no capability and never reaches
+    // checkout — this narrows the union as well as guarding re-entry.
+    if (!result || result.unchanged || !result.capability || unlockStatus === "working") return;
     setUnlockError("");
     setUnlockStatus("working");
     track("checkout_started", { planId });
@@ -171,7 +187,8 @@ export default function Home() {
         <div className="trust-line reveal-hero d4">
           <span>Checked before you see it</span>
           <span>Names, numbers &amp; citations protected</span>
-          <span>Cancel anytime</span>
+          {/* ACT-09: the claim links to the path that honours it. */}
+          <span><a href="#manage-billing">Cancel anytime</a></span>
         </div>
       </section>
 
@@ -233,7 +250,23 @@ export default function Home() {
         {error ? <p className="error" role="alert">{error}</p> : null}
       </section>
 
-      {result ? (
+      {result?.unchanged ? (
+        // ACT-01. Terminal, honest, and unsellable: no preview, no lock,
+        // no improvement count, no price. Nothing here can be paid for,
+        // because nothing was withheld.
+        <section className="result" id="result" aria-live="polite">
+          <div className="result-heading">
+            <div><span className="step-number">02</span><h2 ref={resultHeadingRef} tabIndex={-1}>No rewrite needed</h2></div>
+            <p>Nothing to unlock, and nothing to pay for.</p>
+          </div>
+          <p className="no-change-note">
+            This draft already reads naturally — we found nothing worth rewriting, so we left every word as you wrote it.
+            Try another draft, or a different writing mode if you want a change in tone.
+          </p>
+        </section>
+      ) : null}
+
+      {result && !result.unchanged ? (
         <section className="result" id="result" aria-live="polite">
           <div className="result-heading">
             <div><span className="step-number">02</span><h2 ref={resultHeadingRef} tabIndex={-1}>Your rewrite is ready</h2></div>
@@ -242,7 +275,12 @@ export default function Home() {
           <div className="checks">
             <article><span className="check-icon">✓</span><div><small>Naturalness</small><strong>{result.naturalness}</strong></div></article>
             <article><span className="check-icon">✓</span><div><small>Meaning preservation</small><strong>{result.meaningPreservation}</strong></div></article>
-            <article><span className="check-icon warm">↗</span><div><small>Changes</small><strong>{result.issuesImproved} improvements</strong></div></article>
+            {/* ACT-02: the measured count, correctly pluralized, and shown
+                only when there is one to report — never a floored or
+                zero badge sitting next to a price. */}
+            {result.issuesImproved > 0 ? (
+              <article><span className="check-icon warm">↗</span><div><small>Changes</small><strong>{improvementLabel(result.issuesImproved)}</strong></div></article>
+            ) : null}
           </div>
           <div className="comparison">
             <article>
@@ -252,24 +290,36 @@ export default function Home() {
             <article className="humanized-panel">
               <div className="panel-label"><span>Humanized</span><small>{mode}</small></div>
               <p>{result.preview}</p>
-              <div className="locked-copy" aria-hidden="true">
-                {Array.from({ length: Math.min(32, Math.max(10, result.hiddenWordCount)) }, (_, index) => (
-                  <span key={index} style={{ width: `${38 + ((index * 17) % 48)}px` }} />
-                ))}
-              </div>
-              <div className="unlock-card">
-                <span className="lock" aria-hidden="true">●</span>
-                <strong>There’s more to this rewrite</strong>
-                <p>Unlock the complete result.</p>
-                {result.capability ? (
-                  <button type="button" onClick={() => unlock("starter")} aria-disabled={unlockStatus === "working"}>
-                    {unlockStatus === "working" ? "Redirecting to checkout…" : `Unlock full rewrite for $${pricingConfig.plans.starter.monthlyPrice}/mo`}
-                  </button>
-                ) : (
-                  <button type="button" disabled title="Checkout isn't available for this result yet">Unlock full rewrite for ${pricingConfig.plans.starter.monthlyPrice}/mo</button>
-                )}
-                {unlockStatus === "error" ? <small role="alert">{unlockError}</small> : null}
-              </div>
+              {shouldOfferUnlock(result) ? (
+                <>
+                  <div className="locked-copy" aria-hidden="true">
+                    {Array.from({ length: Math.min(32, Math.max(10, result.hiddenWordCount)) }, (_, index) => (
+                      <span key={index} style={{ width: `${38 + ((index * 17) % 48)}px` }} />
+                    ))}
+                  </div>
+                  <div className="unlock-card">
+                    <span className="lock" aria-hidden="true">●</span>
+                    <strong>There’s more to this rewrite</strong>
+                    <p>{result.hiddenWordCount} more words of this rewrite are ready. Unlock the complete result.</p>
+                    {result.capability ? (
+                      <button type="button" onClick={() => unlock(starterPlan.id)} aria-disabled={unlockStatus === "working"}>
+                        {unlockStatus === "working" ? "Redirecting to checkout…" : `Unlock full rewrite for $${starterPlan.monthlyPrice}/mo`}
+                      </button>
+                    ) : (
+                      <button type="button" disabled title="Checkout isn't available for this result yet">Unlock full rewrite for ${starterPlan.monthlyPrice}/mo</button>
+                    )}
+                    {/* ACT-10: the whole offer, before the click — amount,
+                        that it recurs, the included monthly allowance, and
+                        the cancellation path (ACT-09). No countdown, no
+                        scarcity, no preselected upsell. */}
+                    <small className="unlock-terms">
+                      {subscriptionDisclosure(starterPlan)}{" "}
+                      <a href="#manage-billing">Cancel anytime</a> — no cancellation fee.
+                    </small>
+                    {unlockStatus === "error" ? <small role="alert">{unlockError}</small> : null}
+                  </div>
+                </>
+              ) : null}
             </article>
           </div>
           {result.protectedItems.length ? (
@@ -295,6 +345,18 @@ export default function Home() {
           <ul>{pricingConfig.plans.starter.features.map((feature) => <li key={feature}>✓ {feature}</li>)}</ul>
           <a href="#top">Try it with your text</a>
         </article>
+      </section>
+
+      {/* ACT-09: the hero promises "Cancel anytime", so the path has to
+          exist on the product surface. One click opens the Stripe Billing
+          Portal for the signed-in customer; every failure the route can
+          return is surfaced with what to do next. */}
+      <section className="billing-strip" id="manage-billing" aria-labelledby="manage-billing-title">
+        <div>
+          <h2 id="manage-billing-title">Already subscribed?</h2>
+          <p>Change your plan, update your card, or cancel your subscription. The billing portal shows the exact effective date before you confirm anything.</p>
+        </div>
+        <ManageBilling returnTo="/#manage-billing" />
       </section>
 
       <footer>
