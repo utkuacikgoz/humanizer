@@ -2,7 +2,9 @@
 
 `PROJECT_CODENAME=humanizer`
 
-Ownword is a paid-first writing product that turns generic AI-assisted drafts into natural writing while preserving the author's meaning. The customer-facing name lives in one configuration source (`src/config/product.ts`); `humanizer` remains the internal codename and repository name.
+Ownword is a paid-first writing product at [ownword.pro](https://ownword.pro) that turns generic AI-assisted drafts into natural writing while preserving the author's meaning. The customer-facing name and domain live in one configuration source (`src/config/product.ts`); `humanizer` remains the internal codename and repository name.
+
+The legal company name and support mailbox are not yet confirmed. The configuration keeps both values unset, and the draft legal pages are excluded from search, so the application does not publish plausible looking placeholders as business facts. The public brand uses a text wordmark until the founder supplies an approved logo and favicon.
 
 ## Current foundation
 
@@ -52,6 +54,14 @@ The current test suite covers protected-content extraction, targeted rewriting, 
 - Stripe plan-to-price mapping: `src/config/stripe.ts`
 - Evaluation thresholds: `src/lib/humanization/pipeline.ts`
 - Hosting metadata: `.openai/hosting.json`
+- Anonymous preview abuse protection: D1 migrations plus `PREVIEW_GUARD_SECRET`
+
+Production deploys must set `PREVIEW_GUARD_SECRET` to at least 32 random bytes
+with `wrangler secret put PREVIEW_GUARD_SECRET`, set `D1_DATABASE_ID`, and apply
+all `drizzle/*.sql` migrations before serving traffic. The in-memory request
+guard is used only by plain-Node tests and builds explicitly marked `local`,
+`development`, or `test`; production fails closed when D1 or the secret is
+unavailable.
 - Local Stripe/D1 secrets: copy `.dev.vars.example` to `.dev.vars` (gitignored) — see that file for where each value comes from. Production secrets are set through the deployment platform's own secret store, not this repo.
 
 Do not scatter the temporary name, pricing values, or plan rules through application logic.

@@ -70,6 +70,20 @@ test("ACT-01: no unlock CTA can be produced for an unchanged rewrite", async () 
   }
 });
 
+test("ACT-01: a cosmetic edit with zero measured improvements is never sold", async () => {
+  const cosmeticOnly =
+    "The quarterly report was very long , and the team read it twice before the meeting on Tuesday " +
+    "morning in the small room near the stairs, and nobody raised a single question about it afterwards.";
+  const body = await humanize(cosmeticOnly);
+
+  assert.equal(body.unchanged, true);
+  assert.equal(body.preview, undefined);
+  assert.equal(body.hiddenWordCount, undefined);
+  assert.equal(body.issuesImproved, undefined);
+  assert.equal(body.capability, undefined);
+  assert.equal(shouldOfferUnlock(body), false);
+});
+
 test("ACT-01: a genuine rewrite still produces a preview and an offer", async () => {
   const body = await humanize(
     "In today's fast-paced world, it is important to note that clear communication helps teams. Furthermore, people should utilize simple language whenever possible to avoid confusion. It should be emphasized that stakeholders must leverage robust frameworks in order to facilitate optimal outcomes across the organization moving forward together.",
@@ -165,8 +179,8 @@ test("ACT-09: every portal failure is an honest, actionable state rather than a 
   assert.match(noAccount.message, /no subscription/i);
 
   const unconfigured = describePortalFailure(503, "Billing is not available yet.");
-  assert.equal(unconfigured.action.kind, "email");
-  assert.ok(unconfigured.action.kind === "email" && unconfigured.action.href.startsWith("mailto:"));
+  assert.equal(unconfigured.action.kind, "none");
+  assert.doesNotMatch(unconfigured.message, /email/i, "do not publish an unverified support mailbox");
 
   const failed = describePortalFailure(502, "Billing portal could not be opened. Please try again.");
   assert.match(failed.message, /could not be opened/i);

@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function render(path = "/") {
+async function render(path = "/", host = "localhost") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
   return worker.fetch(
-    new Request(`http://localhost${path}`, { headers: { accept: "text/html", host: "localhost" } }),
+    new Request(`https://${host}${path}`, { headers: { accept: "text/html", host } }),
     { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
     { waitUntil() {}, passThroughOnException() {} },
   );
@@ -28,7 +28,8 @@ test("server-renders the paid-first writing experience", async () => {
   assert.doesNotMatch(html, /Meaning-first writing|No signup to try/);
   assert.match(html, /application\/ld\+json/);
   assert.match(html, /SoftwareApplication/);
-  assert.match(html, /AI Humanizer for Natural Rewrites That Preserve Meaning/);
+  assert.match(html, /Ownword \| Natural AI Rewrites That Preserve Meaning/);
+  assert.match(html, />Ownword</);
   assert.match(html, /name="robots" content="noindex, nofollow, nocache"/);
   assert.doesNotMatch(html, /rel="canonical"/);
   assert.doesNotMatch(html, /property="og:image"/);
@@ -55,9 +56,26 @@ test("does not trust an inbound host header as a canonical origin", async () => 
   assert.doesNotMatch(html, /<meta property="og:url" content="http:\/\/localhost\/?"/);
 });
 
+test("publishes one coherent Ownword identity on the canonical host", async () => {
+  const [html, sitemap] = await Promise.all([
+    render("/", "ownword.pro").then((response) => response.text()),
+    render("/sitemap.xml", "ownword.pro").then((response) => response.text()),
+  ]);
+  assert.match(html, /<title>Ownword \| Natural AI Rewrites That Preserve Meaning<\/title>/);
+  assert.match(html, /<link rel="canonical" href="https:\/\/ownword\.pro"/);
+  assert.match(html, /<meta property="og:site_name" content="Ownword"/);
+  assert.match(html, /<meta property="og:image:width" content="1731"/);
+  assert.doesNotMatch(html, /Humanizer|Bosphorus Elevate|support@ownword\.pro|favicon\.svg|brand-mark/);
+  assert.match(sitemap, /<loc>https:\/\/ownword\.pro\/<\/loc>/);
+  assert.doesNotMatch(sitemap, /<loc>https:\/\/ownword\.pro\/(privacy|terms)<\/loc>/);
+});
+
 test("keeps brand and pricing copy centralized", async () => {
-  const [page, productConfig, pricingConfig] = await Promise.all([
+  const [page, layout, privacy, terms, productConfig, pricingConfig] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/privacy/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/terms/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/config/product.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/config/pricing.ts", import.meta.url), "utf8"),
   ]);
@@ -65,9 +83,25 @@ test("keeps brand and pricing copy centralized", async () => {
   assert.match(page, /pricingConfig\.plans\.starter/);
   assert.doesNotMatch(page, /\$9(\.99)?\/month/);
   assert.match(productConfig, /productName:\s*"Ownword"/);
+  assert.match(productConfig, /domain:\s*"ownword\.pro"/);
+  assert.match(productConfig, /supportEmail:\s*null/);
+  assert.match(productConfig, /legalCompanyName:\s*null/);
+  assert.doesNotMatch(`${page}\n${layout}\n${privacy}\n${terms}`, /Bosphorus Elevate|support@ownword\.pro|favicon\.svg|brand-mark/);
+  assert.doesNotMatch(page, /[—–]/, "landing copy uses sentence punctuation instead of em or en dashes");
   // Anchored: a bare /monthlyPrice:\s*9/ also matches 9.99, so it would
   // silently keep passing across a price change (MON finding).
   assert.match(pricingConfig, /monthlyPrice:\s*9\.99,/);
+});
+
+test("keeps unfinished legal pages out of search", async () => {
+  for (const path of ["/privacy", "/terms"]) {
+    const response = await render(path);
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, /Draft/);
+    assert.match(html, /name="robots" content="noindex, nofollow, nocache"/);
+    assert.doesNotMatch(html, /Bosphorus Elevate|support@ownword\.pro/);
+  }
 });
 
 test("renders the configured price, not a stale hardcoded one", async () => {

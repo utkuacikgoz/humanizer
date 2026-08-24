@@ -1,9 +1,9 @@
-# Humanizer SEO/GEO Strategy (V1)
+# Ownword SEO/GEO Strategy (V1)
 
 **Owner:** SEO/GEO Agent
 **Status:** V1 acquisition architecture
 **Updated:** 2026-08-23
-**Product codename:** `humanizer` (customer-facing name and domain remain configuration-driven)
+**Canonical brand:** Ownword at `ownword.pro` (`humanizer` remains the internal codename and a generic query category)
 
 ## 0. Current build reality (verified 2026-08-23)
 
@@ -22,21 +22,19 @@ Verified working today:
   matching `productConfig.domain` (`ownword.pro`) exactly (case-insensitive). Off that host — including
   localhost/staging/preview — robots.txt returns a blanket `Disallow: /` and the sitemap is an empty
   `<urlset>`. This is enforced by `tests/rendered-html.test.mjs` and is by design (SEO-002), not a defect.
-  On the real `ownword.pro` Host, robots.txt allows crawling (with `/api/`, `/account/`, `/admin/`,
+  When the application serves a request on the `ownword.pro` Host, robots.txt allows crawling (with `/api/`, `/account/`, `/admin/`,
   `/billing/`, `/checkout/`, `/history/`, `/result/`, `/signin-with-chatgpt` disallowed) and references the
-  sitemap; the sitemap lists only routes that genuinely exist and return 200 (`/`, `/privacy`, `/terms`).
-- Homepage (`app/page.tsx`, COPY-owned) emits `SoftwareApplication` JSON-LD, but **the `Offer` block is
-  conditional on `productConfig.billingEnabled`, which is currently `false`** (`src/config/product.ts`). On a
-  commercial-launch day with a live Starter price and a working `/api/checkout`, this means the structured
-  data will not describe the product as purchasable at all until that flag flips. This is a handoff item, not
-  something SEO can fix — see the report for this session.
-- `/privacy` and `/terms` (SEO-owned, new this session) exist, return 200, and carry their own unique
-  title/description/canonical/robots metadata following the same Host-gated pattern as the root layout. Their
-  content is restricted to what `docs/SECURITY.md` and `docs/DECISIONS.md` actually establish; sections that
-  require a real legal decision (retention duration — D-P01; AI processor identity/retention — D-P05; refund
-  policy; governing law; liability limitation; termination terms; age/eligibility) are explicitly marked
-  `PENDING` rather than invented. **These pages are not a substitute for Legal sign-off (M4-03) before real
-  subscription charges go live** — see Section 13.
+  sitemap. The sitemap currently lists only `/`. The draft `/privacy` and `/terms` pages remain reachable from
+  the product footer but are marked `noindex` and omitted from the sitemap until Legal approves the operator,
+  support route, provider disclosure, retention policy, and binding terms.
+- Homepage (`app/page.tsx`, COPY-owned) emits `SoftwareApplication` JSON-LD. The `Offer` block is conditional
+  on `productConfig.billingEnabled`, which is currently `true`. Commercial launch still requires working live
+  Checkout and the legal, security, and pricing release gates; structured data must be disabled if those are
+  not satisfied on the production host.
+- `/privacy` and `/terms` exist and return 200 as transparent drafts. Both carry unique Ownword metadata and
+  an unconditional `noindex, nofollow, nocache` directive. They avoid unsupported company and mailbox claims,
+  and keep unresolved provider, retention, refund, governing law, liability, termination, and eligibility
+  sections marked `PENDING`. They are not a substitute for Legal sign-off (M4-03).
 
 ## 1. Outcome and guardrails
 
@@ -89,7 +87,7 @@ Every commercial page should prove the promise in this order:
 - Trustworthy assessment without invented percentages
 - Personal voice as a future capability, not a V1 claim
 
-The final brand name, canonical domain, organization name, support email, social profiles, and logo URL must all resolve from centralized product configuration. Until naming is final, avoid hardcoded public brand references in content specifications and structured data.
+The canonical brand is Ownword and the canonical domain is `ownword.pro`. Both resolve from centralized product configuration. The legal organization, support email, social profiles, and official logo remain unconfirmed and must not be inferred from the domain or invented for structured data. Use a text wordmark until approved visual assets are supplied.
 
 ## 3. Search-intent map
 
@@ -181,7 +179,7 @@ The workspace and content can share the homepage only if the product input remai
 ### Homepage (`/`)
 
 - **Primary intent:** AI humanizer / humanize AI text.
-- **Title direction:** `AI Humanizer for Natural, Meaning-Preserving Rewrites | {productName}`.
+- **Title direction:** `Ownword | Natural AI Rewrites That Preserve Meaning`.
 - **H1 direction:** `Make AI-assisted writing sound naturally yours.`
 - **Required modules:** working input, four modes, partial preview explanation, real before/after, protected-content proof, semantic-verification explanation, pricing summary, privacy statement, responsible-use boundary, concise FAQ.
 - **Success event:** `humanization_started`; commercial success: `checkout_completed`; quality success: `second_humanization`.

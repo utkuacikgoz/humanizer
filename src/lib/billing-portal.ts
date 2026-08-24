@@ -23,6 +23,13 @@ export interface PortalFailure {
   action: PortalFailureAction;
 }
 
+function supportAction(): PortalFailureAction {
+  const supportEmail: string | null = productConfig.supportEmail;
+  return supportEmail
+    ? { kind: "email", href: `mailto:${supportEmail}`, label: supportEmail }
+    : { kind: "none" };
+}
+
 /**
  * @param status HTTP status from the portal route.
  * @param error  The route's own `error` string, when it sent one.
@@ -42,13 +49,13 @@ export function describePortalFailure(status: number, error?: string, returnTo =
       };
     case 503:
       return {
-        message: "Billing management is not available right now. Email us and we will cancel or change your subscription for you.",
-        action: { kind: "email", href: `mailto:${productConfig.supportEmail}`, label: productConfig.supportEmail },
+        message: "Billing management is not available right now. Please try again later.",
+        action: supportAction(),
       };
     default:
       return {
         message: error?.trim() || "Billing management could not be opened. Please try again.",
-        action: { kind: "email", href: `mailto:${productConfig.supportEmail}`, label: productConfig.supportEmail },
+        action: supportAction(),
       };
   }
 }

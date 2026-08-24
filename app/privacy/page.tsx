@@ -1,86 +1,57 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { headers } from "next/headers";
 import { productConfig } from "@/src/config/product";
 import { pricingConfig } from "@/src/config/pricing";
 import { MIN_PAYWALLABLE_INPUT_WORDS } from "@/src/lib/preview-projection";
 
-// Mirrors app/robots.txt/route.ts and app/sitemap.xml/route.ts: canonical/OG/
-// index output is gated on the request Host matching productConfig.domain
-// exactly, so a staging/preview/localhost Host never gets indexed or a
-// canonical it can't actually serve. Duplicated locally rather than shared
-// because SEO owns these route files independently of app/layout.tsx.
-function configuredSiteUrl() {
-  const configuredDomain = productConfig.domain.trim();
-  if (!configuredDomain) return null;
-  try {
-    const url = new URL(/^https?:\/\//i.test(configuredDomain) ? configuredDomain : `https://${configuredDomain}`);
-    return new URL("/privacy", url);
-  } catch {
-    return null;
-  }
-}
-
-export async function generateMetadata(): Promise<Metadata> {
-  const configuredUrl = configuredSiteUrl();
-  const requestHeaders = await headers();
-  const requestHost = (requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "")
-    .split(",")[0]
-    .trim()
-    .toLowerCase();
-  const canonicalUrl = configuredUrl && requestHost === configuredUrl.host.toLowerCase() ? configuredUrl : null;
-  const title = `Privacy Policy | ${productConfig.productName}`;
-  const description = `How ${productConfig.productName}, operated by ${productConfig.legalCompanyName}, handles the text you paste and your account data.`;
+export function generateMetadata(): Metadata {
+  const title = `Privacy Policy Draft | ${productConfig.productName}`;
+  const description = `Draft information about how ${productConfig.productName} handles pasted text and account data.`;
 
   return {
     title,
     description,
-    alternates: canonicalUrl ? { canonical: canonicalUrl } : undefined,
-    robots: canonicalUrl ? { index: true, follow: true, nocache: false } : { index: false, follow: false, nocache: true },
-    openGraph: { title, description, type: "article", url: canonicalUrl ?? undefined, siteName: productConfig.productName },
+    robots: { index: false, follow: false, nocache: true },
+    openGraph: { title, description, type: "article", siteName: productConfig.productName },
     twitter: { card: "summary", title, description },
   };
 }
 
-const LAST_UPDATED = "2026-08-23";
+const LAST_UPDATED = "2026-08-24";
 
 export default function PrivacyPolicyPage() {
   return (
     <main className="legal-doc">
-
       <Link className="back-link" href="/">&larr; Back to {productConfig.productName}</Link>
-      <h1>Privacy Policy</h1>
+      <h1>Privacy Policy Draft</h1>
       <p className="updated">Last updated: {LAST_UPDATED}</p>
 
       <div className="notice">
-        This page describes how {productConfig.productName} currently handles the text you paste and your
-        account data. Two sections below are marked <strong>PENDING</strong> because they depend on a
-        decision that has not been finalized internally yet. Nothing on this page should be read as final
-        legal advice until those sections are resolved.
+        <strong>This page is a draft pending Legal review.</strong> It describes the intended privacy design,
+        not a finalized legal policy. It will remain out of search results until the operator, contact route,
+        providers, and retention periods are confirmed.
       </div>
 
       <section>
-        <h2>Who operates {productConfig.productName}</h2>
+        <h2>Brand and contact details</h2>
         <p>
-          {productConfig.productName} ({productConfig.domain}) is operated by {productConfig.legalCompanyName}.
-          You can reach us at{" "}
-          <a href={`mailto:${productConfig.supportEmail}`}>{productConfig.supportEmail}</a> for any privacy
-          question or request.
+          {productConfig.productName} is the confirmed brand and {productConfig.domain} is the confirmed
+          domain. The contracting legal entity and a monitored privacy contact have not been confirmed, so
+          this draft does not publish placeholder details for either one.
         </p>
       </section>
 
       <section>
         <h2>What we process</h2>
         <ul>
-          <li>The text you paste (an anonymous first pass is limited to roughly {MIN_PAYWALLABLE_INPUT_WORDS}–300 words) and the mode you select.</li>
+          <li>The text you paste, limited to roughly {MIN_PAYWALLABLE_INPUT_WORDS} to 300 words for the anonymous first pass, and the mode you select.</li>
           <li>
             The complete rewrite is generated and checked on our servers before you see anything. Your browser
-            only ever receives the portion we intentionally show you as a preview — the locked remainder is
-            never sent to it.
+            only receives the portion intentionally shown as a preview. The locked remainder is never sent to it.
           </li>
           <li>
-            If you subscribe, the billing details Stripe collects to process payment. We never receive or
-            store your card number ourselves; Stripe handles that directly.
+            If you subscribe, Stripe collects billing details to process payment. We never receive or store
+            your card number ourselves.
           </li>
         </ul>
       </section>
@@ -88,76 +59,67 @@ export default function PrivacyPolicyPage() {
       <section>
         <h2>AI processing</h2>
         <p>
-          Your pasted text is sent to a third-party AI provider so we can identify what needs to be protected
-          (names, dates, numbers, citations, terminology, and similar details), generate the rewrite, and
-          verify that its meaning matches your original before you see it.
+          Your pasted text is sent to a third party AI provider so the service can identify details that need
+          protection, generate the rewrite, and verify that its meaning matches your original before you see it.
         </p>
         <p>
-          We do not use your text to train our own models, and we do not permit a provider to train on it,
-          without your separate, explicit, revocable consent. No such consent flow exists today, so no
-          customer text is used for training.
+          Customer text is not used to train our own models. No consent flow for training exists today.
         </p>
         <div className="pending">
-          <strong>PENDING:</strong> the specific AI provider(s) used in production, their data-processing
-          agreement, hosting region, and exact retention/training configuration are still being finalized
-          by Legal and Security. This section will name the provider(s) and their retention terms once that
-          review closes.
+          <strong>PENDING:</strong> the production AI providers, their data processing agreements, hosting
+          regions, and exact retention and training settings still require Legal and Security approval.
         </div>
       </section>
 
       <section>
-        <h2>What we store, and for how long</h2>
+        <h2>What we store and for how long</h2>
         <div className="pending">
-          <strong>PENDING:</strong> the exact retention period for text from an anonymous session that is
-          never turned into a purchase has not been finalized. The intended design is a short, bounded
-          window measured in hours, not indefinite storage — but the precise number requires a decision we
-          have not made yet.
+          <strong>PENDING:</strong> the exact retention period for text from an anonymous session has not been
+          finalized. The intended design uses a short, bounded period measured in hours rather than indefinite
+          storage.
         </div>
         <p>
-          Retention and self-service deletion for paid history will be documented here, and will be
-          user-controlled, once that part of the product ships. It is not available yet.
+          Retention and self service deletion for paid history will be documented here once that part of the
+          product ships. It is not available yet.
         </p>
         <p>
-          Regardless of the above, your source text, the rewritten output, and any protected terms are never
-          placed in analytics events, ordinary application logs, error reports, or URLs.
+          Source text, rewritten output, and protected terms are not placed in analytics events, ordinary
+          application logs, error reports, or URLs.
         </p>
       </section>
 
       <section>
         <h2>Payment data</h2>
         <p>
-          Stripe processes your subscription payment and stores your card details directly — we never collect
-          or store them. We keep the minimum billing records needed to run your subscription, such as which
-          plan you are on and a reference to your Stripe customer record.
+          Stripe processes subscription payments and stores card details directly. We keep the minimum billing
+          records needed to run a subscription, such as the plan and a reference to the Stripe customer record.
         </p>
       </section>
 
       <section>
         <h2>Deletion requests</h2>
         <p>
-          Self-service deletion of your history and account data is planned but not yet available in the
-          product. Until it ships, email{" "}
-          <a href={`mailto:${productConfig.supportEmail}`}>{productConfig.supportEmail}</a> from your account
-          email address to request deletion, and we will act on it manually.
+          Self service deletion of history and account data is planned but not yet available. A verified privacy
+          contact and deletion request route must be published before commercial launch. This draft does not
+          direct requests to an unverified mailbox.
         </p>
       </section>
 
       <section>
         <h2>Cookies and analytics</h2>
         <p>
-          We use privacy-safe, aggregate product analytics — for example, that a rewrite was started or
-          completed — tied to a pseudonymous session or job identifier, never to the content you submitted.
+          We use privacy safe, aggregate product analytics, such as whether a rewrite was started or completed,
+          tied to a pseudonymous session or job identifier and never to submitted content.
         </p>
       </section>
 
       <section>
-        <h2>Changes to this policy</h2>
-        <p>We will update this page as our practices change and update the date at the top when we do.</p>
+        <h2>Changes to this draft</h2>
+        <p>We will update this page as decisions and practices change and update the date above.</p>
       </section>
 
       <footer>
-        Questions about this policy: <a href={`mailto:${productConfig.supportEmail}`}>{productConfig.supportEmail}</a>.
-        See also our <Link href="/terms">Terms of Service</Link>. Starter plan reference: $
+        See also our <Link href="/terms">Terms of Service draft</Link>. Starter plan reference: $
         {pricingConfig.plans.starter.monthlyPrice}/{pricingConfig.plans.starter.interval}.
       </footer>
     </main>
