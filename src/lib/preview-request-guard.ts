@@ -193,28 +193,64 @@ export class DistributedPreviewRequestGuard<T> {
       const leaseExpiresAt = now + this.options.leaseMs;
       const expiresAt = now + this.options.replayTtlMs;
       const leaseToken = crypto.randomUUID();
+      const admissionToken = crypto.randomUUID();
       let admitted = false;
 
       try {
+        const counter = this.db.prepare(
+          `INSERT INTO preview_guard_windows (client_key, window_start, request_count, updated_at, admission_token)
+           VALUES (?, ?, 1, ?, ?)
+           ON CONFLICT(client_key, window_start) DO UPDATE SET
+             request_count = preview_guard_windows.request_count + 1,
+             updated_at = excluded.updated_at,
+             admission_token = excluded.admission_token
+           WHERE preview_guard_windows.request_count < ?`,
+        ).bind(clientKey, windowStart, now, admissionToken, PREVIEW_GUARD_LIMITS.maxRequests);
+
         if (existing) {
-          const result = await this.db.prepare(
+          const request = this.db.prepare(
             `UPDATE preview_guard_requests
              SET client_key = ?, fingerprint = ?, window_start = ?, status = 'active', lease_token = ?, lease_expires_at = ?,
                  response_ciphertext = NULL, response_iv = NULL, expires_at = ?, updated_at = ?
-             WHERE request_key = ? AND (status = 'failed' OR lease_expires_at <= ? OR expires_at <= ?)`,
-          ).bind(clientKey, contentKey, windowStart, leaseToken, leaseExpiresAt, expiresAt, now, requestKey, now, now).run();
-          admitted = Number(result.meta.changes ?? 0) === 1;
+             WHERE request_key = ? AND (status = 'failed' OR lease_expires_at <= ? OR expires_at <= ?)
+               AND EXISTS (
+                 SELECT 1 FROM preview_guard_windows
+                 WHERE client_key = ? AND window_start = ? AND admission_token = ?
+               )
+               AND (
+                 SELECT COUNT(*) FROM preview_guard_requests
+                 WHERE client_key = ? AND request_key != ? AND status = 'active' AND lease_expires_at > ?
+               ) < ?`,
+          ).bind(
+            clientKey, contentKey, windowStart, leaseToken, leaseExpiresAt, expiresAt, now,
+            requestKey, now, now,
+            clientKey, windowStart, admissionToken,
+            clientKey, requestKey, now, PREVIEW_GUARD_LIMITS.maxConcurrent,
+          );
+          const results = await this.db.batch([counter, request]);
+          admitted = Number(results[1]?.meta.changes ?? 0) === 1;
         } else {
-          await this.db.prepare(
+          const request = this.db.prepare(
             `INSERT INTO preview_guard_requests
               (request_key, client_key, fingerprint, window_start, status, lease_token, lease_expires_at, expires_at, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
-          ).bind(requestKey, clientKey, contentKey, windowStart, leaseToken, leaseExpiresAt, expiresAt, now, now).run();
-          admitted = true;
+             SELECT ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?
+             WHERE EXISTS (
+               SELECT 1 FROM preview_guard_windows
+               WHERE client_key = ? AND window_start = ? AND admission_token = ?
+             )
+               AND (
+                 SELECT COUNT(*) FROM preview_guard_requests
+                 WHERE client_key = ? AND status = 'active' AND lease_expires_at > ?
+               ) < ?`,
+          ).bind(
+            requestKey, clientKey, contentKey, windowStart, leaseToken, leaseExpiresAt, expiresAt, now, now,
+            clientKey, windowStart, admissionToken,
+            clientKey, now, PREVIEW_GUARD_LIMITS.maxConcurrent,
+          );
+          const results = await this.db.batch([counter, request]);
+          admitted = Number(results[1]?.meta.changes ?? 0) === 1;
         }
       } catch (error) {
-        const limited = this.classifyAdmissionError(error, now, windowStart);
-        if (limited) return limited;
         const raced = await this.read(requestKey);
         if (raced) {
           const racedResult = await this.handleExisting(raced, contentKey, requestKey);
@@ -229,6 +265,8 @@ export class DistributedPreviewRequestGuard<T> {
           const racedResult = await this.handleExisting(raced, contentKey, requestKey);
           if (racedResult) return racedResult;
         }
+        const limited = await this.classifyAdmission(clientKey, now, windowStart);
+        if (limited) return limited;
         throw new Error("Preview admission changed without a readable request row.");
       }
 
@@ -294,9 +332,18 @@ export class DistributedPreviewRequestGuard<T> {
     ).bind(requestKey).first<RequestRow>();
   }
 
-  private classifyAdmissionError(error: unknown, now: number, windowStart: number): GuardResult<T> | null {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("preview_rate_limit")) {
+  private async classifyAdmission(clientKey: string, now: number, windowStart: number): Promise<GuardResult<T> | null> {
+    const state = await this.db.prepare(
+      `SELECT
+         COALESCE((
+           SELECT request_count FROM preview_guard_windows WHERE client_key = ? AND window_start = ?
+         ), 0) AS request_count,
+         (
+           SELECT COUNT(*) FROM preview_guard_requests
+           WHERE client_key = ? AND status = 'active' AND lease_expires_at > ?
+         ) AS active_count`,
+    ).bind(clientKey, windowStart, clientKey, now).first<{ request_count: number; active_count: number }>();
+    if (Number(state?.request_count ?? 0) >= PREVIEW_GUARD_LIMITS.maxRequests) {
       return {
         ok: false,
         status: 429,
@@ -304,7 +351,7 @@ export class DistributedPreviewRequestGuard<T> {
         retryAfterSeconds: Math.max(1, Math.ceil((windowStart + this.options.windowMs - now) / 1_000)),
       };
     }
-    if (message.includes("preview_concurrency_limit")) {
+    if (Number(state?.active_count ?? 0) >= PREVIEW_GUARD_LIMITS.maxConcurrent) {
       return { ok: false, status: 429, error: "Two previews are already being processed. Please wait for one to finish.", retryAfterSeconds: 1 };
     }
     return null;

@@ -80,14 +80,15 @@ const sqlEnumList = (values: readonly string[]) => sql.raw(values.map((value) =>
 /**
  * Privacy-safe, fixed-window counters for anonymous preview admission. The
  * client key is an HMAC of Cloudflare's trusted connecting IP, never the raw
- * address. Admission triggers in the migration serialize the limit check and
- * increment with the request-row write.
+ * address. A unique, short-lived admission token couples each counter update
+ * to its request-row write inside one transactional D1 batch.
  */
 export const previewGuardWindows = sqliteTable("preview_guard_windows", {
   clientKey: text("client_key").notNull(),
   windowStart: integer("window_start").notNull(),
   requestCount: integer("request_count").notNull().default(0),
   updatedAt: integer("updated_at").notNull(),
+  admissionToken: text("admission_token"),
 }, (t) => [
   primaryKey({ columns: [t.clientKey, t.windowStart] }),
   index("preview_guard_windows_start_idx").on(t.windowStart),

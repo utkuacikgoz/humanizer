@@ -25,9 +25,16 @@ class TestD1 {
   readonly sqlite = new DatabaseSync(":memory:");
   prepare(sql: string) { return new TestStatement(this.sqlite, sql); }
   async batch(statements: TestStatement[]) {
-    const results = [];
-    for (const statement of statements) results.push(await statement.run());
-    return results;
+    this.sqlite.exec("BEGIN IMMEDIATE");
+    try {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      this.sqlite.exec("COMMIT");
+      return results;
+    } catch (error) {
+      this.sqlite.exec("ROLLBACK");
+      throw error;
+    }
   }
 }
 
@@ -111,6 +118,26 @@ test("distributed fixed window is shared and the thirteenth request is limited",
     assert.equal(limited.status, 429);
     assert.ok((limited.retryAfterSeconds ?? 0) > 0);
   }
+});
+
+test("failed retries still consume shared fixed-window capacity", async () => {
+  const binding = await testBinding();
+  for (let index = 0; index < 12; index += 1) {
+    await assert.rejects(
+      new DistributedPreviewRequestGuard<string>(binding as unknown as D1Database, SECRET)
+        .run(input("request-retry", async () => { throw new Error(`provider failure ${index}`); })),
+      /provider failure/,
+    );
+  }
+  const limited = await new DistributedPreviewRequestGuard<string>(binding as unknown as D1Database, SECRET)
+    .run(input("request-retry", async () => "unexpected"));
+  assert.equal(limited.ok, false);
+  if (!limited.ok) assert.equal(limited.status, 429);
+
+  const triggerCount = binding.sqlite.prepare(
+    "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'preview_guard_%'",
+  ).get() as { count: number };
+  assert.equal(triggerCount.count, 0);
 });
 
 test("distributed guard fails closed when D1 is unavailable", async () => {

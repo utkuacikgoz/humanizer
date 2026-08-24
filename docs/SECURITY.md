@@ -130,13 +130,15 @@ Worker boundary; missing or malformed identity fails closed. The isolate-memory
 fallback is allowed only under explicit `local`, `development`, or `test`
 configuration.
 
-Admission checks and counter increments are implemented by SQLite triggers on
-the request-row insert/reactivation. D1 serializes writes, so the limit check,
-lease creation, and counter increment are one database transaction. A random
-lease fencing token prevents a timed-out Worker from overwriting a reclaimed
-request. Residual caveat: this depends on D1's single-primary serialized-write
-semantics and migration triggers; deployments must apply the migrations before
-traffic and must not route admission reads/writes through a read replica.
+Admission uses one transactional D1 batch. Its first statement claims a fixed
+window slot and stamps a random admission token; its second statement creates
+or reactivates the lease only when that exact token is present and the shared
+active-work count is below the ceiling. Rejected concurrent work conservatively
+consumes its rate slot. A separate random lease fencing token prevents a
+timed-out Worker from overwriting a reclaimed request. Residual caveat: this
+depends on D1's single-primary serialized-write and transactional-batch
+semantics; deployments must apply the migrations before traffic and must not
+route admission reads/writes through a read replica.
 
 ## Incident and key-response minimums
 
@@ -146,15 +148,15 @@ Before launch, assign an incident owner and document how to disable a provider/p
 
 Release is blocked by any unresolved critical/high issue involving cross-user access, full-result leakage, semantic-gate bypass, forged entitlements, quota overcharge, webhook spoofing/replay side effects, prompt-driven secret/data exfiltration, stored/reflected XSS, exposed secrets, unbounded economically material abuse, misleading deletion, or undisclosed/unapproved provider use. Medium risks require owner, mitigation, target date, and explicit Security/Product acceptance.
 
-The Phase 0 preview validates idempotency keys, replays encrypted successful
-responses for 10 minutes, and enforces 12 new executions per 60 seconds plus
-two active executions through shared D1 admission triggers. Production fails
+The preview validates idempotency keys, replays encrypted successful responses
+for 10 minutes, and enforces 12 attempts per 60 seconds plus two active
+executions through shared transactional D1 admission batches. Production fails
 closed if D1, the guard secret, or the trusted Cloudflare connecting address is
 unavailable. Request-path orchestration has a five-second deadline and
 propagates an abort signal; provider adapters must honor that signal to stop
-upstream work. Before connecting a paid provider, verify the D1 triggers under
-real cross-colo concurrency and degraded-store conditions and layer an edge/WAF
-control over IP-only identity.
+upstream work. Before connecting a paid provider, verify the guarded D1 batches
+under real cross-colo concurrency and degraded-store conditions and layer an
+edge/WAF control over IP-only identity.
 
 ---
 
@@ -268,8 +270,8 @@ $ curl -s -X POST /api/humanize -H 'x-idempotency-key: …' \
 ### SEC-03 — High, partially remediated — Preview admission is shared; paid-adjacent routes remain unguarded
 
 **Current state.** `/api/humanize` now uses `DistributedPreviewRequestGuard` in
-production. HMAC-keyed client/request/content identifiers, trigger-serialized
-fixed-window and active-lease checks, encrypted replay, fencing tokens, and
+production. HMAC-keyed client/request/content identifiers, transactionally
+batched fixed-window and active-lease checks, encrypted replay, fencing tokens, and
 fail-closed binding/identity handling remove the per-isolate bypass described
 below. Isolate memory remains an explicitly non-production fallback only.
 

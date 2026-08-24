@@ -22,6 +22,13 @@
       "when": 1787590377271,
       "tag": "0002_overjoyed_phil_sheldon",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1787594970797,
+      "tag": "0003_simple_mac_gargan",
+      "breakpoints": true
     }
   ]
 }
