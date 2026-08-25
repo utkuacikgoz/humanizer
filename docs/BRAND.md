@@ -109,3 +109,9 @@ These are load-bearing. Do not "simplify" them away:
 `tests/e2e/accessibility.e2e.test.mts` covers these. Playwright and Chromium are
 installed in the project, and the release gate requires zero skipped browser
 tests; a run reporting any skip is not accepted as green.
+
+### Planned signed-in surfaces
+
+`docs/SIGNED-IN.md` is the DES plan for the signed-in header, the `/account`
+page, where allowance is shown, and the sentence-control surface. It is a plan
+and not a record of implementation; nothing in it has been built.
