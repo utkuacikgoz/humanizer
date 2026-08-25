@@ -17,6 +17,7 @@ import * as schema from "./schema";
 import type { JobState, WritingModeValue } from "./schema";
 import type { AppDatabase, PreviewProjection } from "./repository";
 import { recordDeletionAudit } from "./deletion-audit";
+import { voidRevisionsForJob } from "./revision-repository";
 
 const { deletionJobs, humanizationJobs, jobPayloads, protectedItems } = schema;
 
@@ -194,6 +195,13 @@ export async function deleteHistoryEntryForUser(
     .update(protectedItems)
     .set({ valueRef: null, purgedAt: now })
     .where(and(eq(protectedItems.jobId, job.id), isNull(protectedItems.purgedAt)));
+
+  // M3-03 added a second place a job's text can live: every sentence
+  // operation appends a `result_revisions` row holding the full rewrite as it
+  // read after that change. Voiding it here rather than only in the purge
+  // worker keeps the promise this function already makes — that the text is
+  // gone at the moment of deletion, not when a worker next runs.
+  await voidRevisionsForJob(db, job.id);
 
   // The tombstone this write leaves is what M3-05's purge worker picks up to
   // propagate the deletion to every other store/processor. It records the
