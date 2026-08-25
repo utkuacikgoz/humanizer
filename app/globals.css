@@ -1362,6 +1362,15 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
 }
 .signin-input::placeholder { color: var(--ink-3); }
 .signin-input:focus { background: color-mix(in srgb, var(--green-bright) 3%, transparent); }
+/* The global :focus-visible ring is defined earlier in this file at equal
+   specificity, so `outline: 0` above wins even while focused and the field
+   showed no keyboard indicator at all (WCAG 2.4.7). Restored here, inset:
+   the input fills its card to the edge, so a positive offset would draw the
+   ring outside the card border instead of around the field. */
+.signin-input:focus-visible {
+  outline: 2px solid var(--green-bright);
+  outline-offset: -2px;
+}
 
 .signin-note {
   margin: 0;

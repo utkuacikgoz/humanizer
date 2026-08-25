@@ -94,6 +94,13 @@ export default function HistoryPage() {
   // Re-entrancy guards. Controls stay focusable and use aria-disabled, so the
   // only thing stopping a second submit is this ref, not a native `disabled`.
   const busy = useRef(false);
+  // Deleting an item unmounts the button that had focus. When it was the last
+  // item there is no sibling control to fall back to, so focus lands on
+  // <body> and a keyboard user is stranded with no idea what happened. The
+  // status line is the honest landing place: it is the only element that says
+  // what the deletion did.
+  const noticeRef = useRef<HTMLParagraphElement>(null);
+  const focusNotice = useRef(false);
   const copied = useRef(false);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [reloadToken, setReloadToken] = useState(0);
@@ -148,6 +155,12 @@ export default function HistoryPage() {
     }
   }
 
+  useEffect(() => {
+    if (!focusNotice.current || !notice) return;
+    focusNotice.current = false;
+    noticeRef.current?.focus();
+  }, [notice]);
+
   async function deleteItem(jobId: string) {
     if (busy.current) return;
     busy.current = true;
@@ -163,6 +176,7 @@ export default function HistoryPage() {
       setConfirmingId(null);
       if (openId === jobId) { setOpenId(null); setDetail(null); }
       setNotice("That rewrite was deleted. Its text has been removed and is queued for purge everywhere it was stored.");
+      focusNotice.current = true;
       setReloadToken((token) => token + 1);
     } catch {
       setNotice("That rewrite could not be deleted. Nothing was removed. Please try again.");
@@ -238,7 +252,7 @@ export default function HistoryPage() {
             </p>
           ) : null}
 
-          <p className="copy-status" role="status" aria-live="polite">{notice}</p>
+          <p className="copy-status" role="status" aria-live="polite" tabIndex={-1} ref={noticeRef}>{notice}</p>
 
           {list.kind === "ready" && list.items.length ? (
             <ul className="history-list">
