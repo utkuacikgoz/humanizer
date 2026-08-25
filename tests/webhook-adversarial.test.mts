@@ -13,7 +13,7 @@ import { ingestVerifiedStripeEvent } from "../src/lib/stripe-webhook-projection"
 import { createTestDatabase } from "./helpers/sqlite-db.mjs";
 import { stripeEvent, stripeStub, stripeSubscription } from "./helpers/stripe-fixtures.mjs";
 
-const PRICE_IDS = { starter: "price_starter_test" } as const;
+const PRICE_IDS = { starter: "price_starter_test", pro: "price_pro_test" } as const;
 
 async function setup(subscriptionOverrides: Parameters<typeof stripeSubscription>[0] = {}) {
   const db = await createTestDatabase();

@@ -22,6 +22,11 @@ jobs:
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
       STRIPE_PRICE_STARTER: ${{ secrets.STRIPE_PRICE_STARTER }}
+      # One secret per purchasable plan in src/config/stripe.ts
+      # (STRIPE_PRICE_ENV_KEYS). Adding a plan there without adding its
+      # secret here fails the deploy at the gate below rather than shipping
+      # a Worker that cannot price it.
+      STRIPE_PRICE_PRO: ${{ secrets.STRIPE_PRICE_PRO }}
       PREVIEW_GUARD_SECRET: ${{ secrets.PREVIEW_GUARD_SECRET }}
       # Magic-link sign-in. Without it nobody can sign in, so nobody can pay:
       # src/lib/magic-link.ts fails closed with a console.error rather than
@@ -92,7 +97,7 @@ jobs:
       # the running Worker needs must be in this one file, or the next deploy
       # silently wipes it.
       - name: Deploy via wrangler
-        if: ${{ env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != '' && env.CF_D1_ID != '' && env.STRIPE_SECRET_KEY != '' && env.STRIPE_WEBHOOK_SECRET != '' && env.STRIPE_PRICE_STARTER != '' && env.PREVIEW_GUARD_SECRET != '' && env.RESEND_API_KEY != '' }}
+        if: ${{ env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != '' && env.CF_D1_ID != '' && env.STRIPE_SECRET_KEY != '' && env.STRIPE_WEBHOOK_SECRET != '' && env.STRIPE_PRICE_STARTER != '' && env.STRIPE_PRICE_PRO != '' && env.PREVIEW_GUARD_SECRET != '' && env.RESEND_API_KEY != '' }}
         run: |
           umask 077
           secrets_file="$RUNNER_TEMP/ownword.secrets"
@@ -101,6 +106,7 @@ jobs:
             "STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY" \
             "STRIPE_WEBHOOK_SECRET=$STRIPE_WEBHOOK_SECRET" \
             "STRIPE_PRICE_STARTER=$STRIPE_PRICE_STARTER" \
+            "STRIPE_PRICE_PRO=$STRIPE_PRICE_PRO" \
             "PREVIEW_GUARD_SECRET=$PREVIEW_GUARD_SECRET" \
             "RESEND_API_KEY=$RESEND_API_KEY" > "$secrets_file"
           if [ -n "$AUTH_EMAIL_FROM" ]; then
@@ -112,7 +118,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ env.CF_ACCOUNT_ID }}
 
       - name: Not configured
-        if: ${{ env.CF_API_TOKEN == '' || env.CF_ACCOUNT_ID == '' || env.CF_D1_ID == '' || env.STRIPE_SECRET_KEY == '' || env.STRIPE_WEBHOOK_SECRET == '' || env.STRIPE_PRICE_STARTER == '' || env.PREVIEW_GUARD_SECRET == '' || env.RESEND_API_KEY == '' }}
+        if: ${{ env.CF_API_TOKEN == '' || env.CF_ACCOUNT_ID == '' || env.CF_D1_ID == '' || env.STRIPE_SECRET_KEY == '' || env.STRIPE_WEBHOOK_SECRET == '' || env.STRIPE_PRICE_STARTER == '' || env.STRIPE_PRICE_PRO == '' || env.PREVIEW_GUARD_SECRET == '' || env.RESEND_API_KEY == '' }}
         run: |
           echo "::error::Set the Cloudflare, Stripe, PREVIEW_GUARD_SECRET, and RESEND_API_KEY repository secrets before running this workflow."
           exit 1

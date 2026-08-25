@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { POST } from "../app/api/checkout/route";
+import { STRIPE_PRICE_ENV_KEYS } from "../src/config/stripe";
 
 // Presence of a session cookie is what gets past the cheap signed-out check;
 // the session itself is resolved against the database, which these
@@ -56,12 +57,28 @@ test("rejects a malformed capability with the same uniform not-found response pr
   assert.equal(response.headers.get("cache-control"), "no-store");
 });
 
-test("rejects an unpurchasable or unknown plan", async () => {
+test("rejects an unknown or non-catalog plan", async () => {
   const validCapability = "a".repeat(43);
-  const unknownPlan = await POST(request({ capability: validCapability, planId: "enterprise" }, AUTH_HEADERS));
-  assert.equal(unknownPlan.status, 400);
+  // The plan is a name the server resolves against its own catalog, never a
+  // price id or an amount the client supplies (D-003).
+  for (const planId of ["enterprise", "PRO", "starter ", "", "__proto__", "constructor"]) {
+    const response = await POST(request({ capability: validCapability, planId }, AUTH_HEADERS));
+    assert.equal(response.status, 400, `${JSON.stringify(planId)} must be refused at the plan gate`);
+  }
+  for (const planId of [null, 19, { id: "starter" }, ["starter"]]) {
+    const response = await POST(request({ capability: validCapability, planId }, AUTH_HEADERS));
+    assert.equal(response.status, 400, `${JSON.stringify(planId)} must be refused at the plan gate`);
+  }
+});
 
-  // "pro" exists in the catalog but is availability: "announced", not purchasable yet.
-  const announcedPlan = await POST(request({ capability: validCapability, planId: "pro" }, AUTH_HEADERS));
-  assert.equal(announcedPlan.status, 400);
+test("accepts every plan the catalog sells, Pro included", async () => {
+  // Pro used to be availability "announced" and was refused here. It is
+  // active now, so neither catalog plan may be turned away at the plan gate.
+  // Nothing further can succeed in this test — there is no database binding —
+  // but a 400 would mean the plan itself, not the environment, was rejected.
+  const validCapability = "a".repeat(43);
+  for (const planId of Object.keys(STRIPE_PRICE_ENV_KEYS)) {
+    const response = await POST(request({ capability: validCapability, planId }, AUTH_HEADERS));
+    assert.notEqual(response.status, 400, `${planId} must pass the plan gate`);
+  }
 });

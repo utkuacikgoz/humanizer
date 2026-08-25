@@ -20,7 +20,7 @@ import { stripeEvent, stripeStub, stripeSubscription } from "./helpers/stripe-fi
 import type { AppDatabase } from "../db/repository";
 
 const FULL_RESULT = "The full paid rewrite text — must never leave the server without a verified entitlement.";
-const PRICE_IDS = { starter: "price_starter_test" } as const;
+const PRICE_IDS = { starter: "price_starter_test", pro: "price_pro_test" } as const;
 
 const jobInput = () => ({
   mode: "natural" as const,
