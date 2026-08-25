@@ -570,23 +570,32 @@ export default function Home() {
                     monthly allowance, so the visitor picks by their own
                     volume, not by a badge we put on one of them. */}
                 <div className="unlock-plans">
-                  {purchasablePlans.map((plan) => (
-                    <button
-                      key={plan.id}
-                      type="button"
-                      className={plan.id === entryPlan.id ? undefined : "plan-alt"}
-                      onClick={() => void unlock(plan.id)}
-                      aria-disabled={!billingReadiness?.available || unlockStatus === "working"}
-                    >
-                      {unlockStatus === "working" && unlockPlanId === plan.id
-                        ? "Redirecting to checkout…"
-                        : billingReadiness?.available
-                          ? `Unlock with ${plan.name}, $${plan.monthlyPrice}/mo`
-                          : billingReadiness
-                            ? "Checkout temporarily unavailable"
-                            : "Checking checkout availability…"}
+                  {billingReadiness?.available ? (
+                    purchasablePlans.map((plan) => (
+                      <button
+                        key={plan.id}
+                        type="button"
+                        className={plan.id === entryPlan.id ? undefined : "plan-alt"}
+                        onClick={() => void unlock(plan.id)}
+                        aria-disabled={unlockStatus === "working"}
+                      >
+                        {unlockStatus === "working" && unlockPlanId === plan.id
+                          ? "Redirecting to checkout…"
+                          : `Unlock full rewrite with ${plan.name}, $${plan.monthlyPrice}/mo`}
+                      </button>
+                    ))
+                  ) : (
+                    /* One control, not one per plan, while checkout is shut. Two
+                       buttons carrying the same words would give a screen reader
+                       two identical names for the same dead end, and there is no
+                       plan to choose between when neither can be bought. The
+                       handler is the real one: unlock() returns immediately
+                       while readiness is unavailable, so the guard lives in one
+                       place rather than being duplicated as an empty callback. */
+                    <button type="button" onClick={() => void unlock(entryPlan.id)} aria-disabled="true">
+                      {billingReadiness ? "Checkout temporarily unavailable" : "Checking checkout availability…"}
                     </button>
-                  ))}
+                  )}
                 </div>
                 {/* ACT-10: the whole offer before the click includes the amount, that it
                     recurs, the included monthly allowance, and the cancellation

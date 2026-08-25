@@ -37,13 +37,13 @@ V1 contains one journey:
 - Server readiness check before offering checkout, account linkage through purchase, and return to the same server-authorized result.
 - Server-authoritative subscription, entitlement, and usage enforcement.
 - Accessible copy and repeat-use paths for an unlocked result.
-- Starter and Pro subscriptions; no permanent free tier.
+- Starter ($9.99 / 50,000 words) and Pro ($19 / 200,000 words) subscriptions, both purchasable; no permanent free tier. Pro delivers the same rewriting, modes, and checks as Starter and differs from it only by the monthly allowance.
 - Privacy and Terms routes using the configured Ownword/operator identity.
 
 ### Explicitly excluded or deferred
 
 - Voice DNA and voice-profile training (V1.1).
-- Multiple voice profiles, batch processing, and advanced controls.
+- Multiple voice profiles, batch processing, and advanced controls. These are Pro's `plannedFeatures` in `src/config/pricing.ts` and are shown on the pricing card as a roadmap line beginning `Not included.` They must never appear in a plan's `features`, in a purchase claim, or beside a checkmark: Pro is sold on its allowance alone until they ship.
 - Detector-bypass promises or optimization against detector scores.
 - A permanent free plan.
 - Dozens of modes or dashboard-heavy workflows.

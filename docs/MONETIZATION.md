@@ -9,12 +9,37 @@ There is no permanent free tier. The anonymous experience is a bounded product-q
 
 Canonical launch offers:
 
-| Plan | Price | Billing | Included words | Available V1 features |
-|---|---:|---|---:|---|
-| Starter | $9.99 | Monthly | 50,000 | Four modes, semantic protection, comparison. History, sentence regeneration, and protected-term controls are catalogued as planned, not V1 checkout claims. |
-| Pro | $19 | Monthly | 200,000 | Announced, not checkout-active. Larger limits plus later Voice DNA / batch — label `Coming later`, never as usable V1 features. |
+| Plan | Price | Billing | Included words | Checkout | What it delivers today |
+|---|---:|---|---:|---|---|
+| Starter | $9.99 | Monthly | 50,000 | Active | The complete rewrite unlocked, four modes, meaning protection, paid history. Sentence controls and protected-term controls are catalogued as planned, not V1 checkout claims. |
+| Pro | $19 | Monthly | 200,000 | Active | Exactly what Starter delivers, with a 200,000-word monthly allowance instead of 50,000. Nothing else. |
 
-Voice DNA, multiple voice profiles, larger documents, batch processing, and advanced controls are future Pro capabilities, not V1 deliverables. Unavailable capabilities must be omitted from purchase claims or explicitly labeled `Coming later`; never imply they are usable at checkout.
+**Pro is purchasable, and the allowance is the entire offer.** Pro used to be
+`availability: "announced"` with no Stripe price mapping, so `isPurchasablePlan()`
+refused it and nothing could buy it. It is `active` now. Its feature list used to
+read "Voice DNA (coming later)", "Multiple voice profiles (coming later)",
+"Larger and batch documents (coming later)" — none of which exist, and none of
+which are V1 deliverables. Selling a $19 plan on them would be the dark-pattern
+blocker "claiming unavailable Pro features are present", so the plan is now sold
+on the one thing that is real: four times the monthly words at roughly twice the
+price, for a writer whose volume needs it.
+
+Voice DNA, multiple voice profiles, larger documents, batch processing, and advanced controls remain future Pro capabilities, not V1 deliverables. They live in the catalog's `plannedFeatures`, which the pricing card renders as a separate roadmap line opening with `Not included.` — outside the ruled feature list and with no checkmark, so a planned capability cannot be misread as a bought one. Nothing in `features` may carry a `coming later` qualifier; a capability moves into `features` only once it ships. `tests/pro-plan.test.mts` asserts both rules.
+
+### Owner action required before Pro can be sold
+
+Create a **$19.00/month recurring price in USD** in the Stripe product catalog
+and add its price ID as the **`STRIPE_PRICE_PRO`** repository secret (and in
+`.dev.vars` for local work). Until it is set, `validateStripeConfig()` fails
+closed for the whole configuration — not just Pro — so `/api/billing/readiness`
+answers 503 and the landing page shows "Checkout temporarily unavailable"
+instead of offering a purchase it cannot complete. That is the intended
+behaviour, not a regression.
+
+The amount must match `src/config/pricing.ts` exactly. `assertPriceMatchesCatalog()`
+iterates every plan in `STRIPE_PRICE_ENV_KEYS`, so a Pro price at the wrong
+amount, currency, interval, or in an archived state closes checkout for
+everyone rather than charging a figure the page never showed.
 
 ## Centralized catalog
 
@@ -22,9 +47,10 @@ Maintain one versioned, typed server-owned catalog. It defines stable internal p
 
 Rules:
 
-- Never accept price, allowance, feature flags, customer ID, or subscription status from the browser.
+- Never accept price, allowance, feature flags, customer ID, or subscription status from the browser. `POST /api/checkout` takes a `planId` name only, and validates it with `isPurchasablePlan()` before anything reaches Stripe; the price ID is resolved from the server environment on the far side of that check.
 - Never infer a plan from a displayed dollar amount.
 - Map Stripe price ID to internal plan version server-side.
+- One `STRIPE_PRICE_*` secret per purchasable plan, and every one of them present in `.github/workflows/deploy.yml`'s env block, its `printf` secrets-file list, the deploy gate, and the "Not configured" check. `wrangler deploy --secrets-file` **replaces** the Worker's entire secret set, so a secret missing from that list is not "unset on a new environment" — it is deleted from the running one on the next deploy.
 - Validate that each deployment uses Stripe objects from the correct test/live mode.
 - Snapshot catalog version onto subscription/usage records so later price changes do not rewrite history.
 - Price or quota changes require an explicit migration/grandfathering decision.

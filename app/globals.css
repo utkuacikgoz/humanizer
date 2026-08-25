@@ -805,6 +805,10 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .unlock-card button {
   position: relative; width: 100%; padding: 14px 16px;
   border: 0; border-radius: var(--radius-sm);
+  /* The label names the plan as well as the action, so it wraps in this
+     column at most widths. Balanced, it wraps to two even lines instead of
+     one full line and one orphaned word. */
+  text-wrap: balance;
   background: linear-gradient(158deg, #b8491d, #93380f);
   color: #fff8f3;             /* 5.1:1 → 7.2:1 across the gradient */
   font-size: var(--t-base); font-weight: 650; letter-spacing: -.015em;
