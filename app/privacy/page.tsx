@@ -117,8 +117,10 @@ export default function PrivacyPolicyPage() {
           when it is done.
         </p>
         <p>
-          Retention and self-service deletion for paid history will be documented here, and will be
-          user-controlled, once that part of the product ships. It is not available yet.
+          Rewrites saved to your history are kept until you delete them. They do not expire on a timer, because
+          a history that quietly empties itself is worse than none at all. You control this yourself: open{" "}
+          <Link href="/history">your history</Link>, delete an item, and its source text, rewritten output, and
+          protected terms are erased at that moment rather than merely hidden from you.
         </p>
         <p>
           Regardless of the above, your source text, the rewritten output, and any protected terms are never
@@ -138,10 +140,13 @@ export default function PrivacyPolicyPage() {
       <section>
         <h2>Deletion requests</h2>
         <p>
-          Self-service deletion of your history and account data is planned but not yet available in the
-          product. Until it ships, email{" "}
+          You can delete any saved rewrite yourself from <Link href="/history">your history</Link>, one item at
+          a time, and the text is erased when you do.
+        </p>
+        <p>
+          Deleting your account and everything under it is not yet self-service. Until it is, email{" "}
           <a href={`mailto:${productConfig.supportEmail}`}>{productConfig.supportEmail}</a> from your account
-          email address to request deletion, and we will act on it manually.
+          email address and we will act on it manually and confirm when it is done.
         </p>
       </section>
 
