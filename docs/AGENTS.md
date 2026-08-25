@@ -46,7 +46,8 @@ closed. Current workspace evidence establishes:
   (M3-01) is implemented with owner-filtered queries, a soft-delete that voids the stored text, and a queued purge
   job. Only checkout-claimed jobs currently have an owner, so history holds unlocked rewrites and not a
   subscriber's day-to-day ones. The M3-05 purge worker now drains `deletion_jobs` and runs the anonymous retention
-  sweep on an hourly cron. Edit revisions, sentence restore/regeneration, protected-phrase controls, and account
+  sweep on an hourly cron. Sentence restore/regeneration (M3-03) is implemented server-side and covered by
+  targeted tests, with no interface attached to it yet. Edit revisions, protected-phrase controls, and account
   deletion remain open; account deletion is manual by email by PO decision (2026-08-25), not an unbuilt feature.
   Funnel analytics exist for the current journey, but the full M3 event and deletion acceptance criteria are not
   closed.
@@ -133,8 +134,8 @@ review/gate tasks and require production-like evidence; implementation must not 
 
 Implementation note (2026-08-25): M3-02 is partial because paid full-result display and accessible copy are
 implemented while persisted edit/revision behavior is open. M3-06 is partial for the current activation journey;
-history, deletion, and cancellation-related event acceptance remains open. M3-03, M3-04, and the self-service
-parts of M3-05 are open.
+history, deletion, and cancellation-related event acceptance remains open. M3-03 is implemented (note below);
+M3-04 and the self-service parts of M3-05 are open.
 
 M3-01 implementation note (2026-08-25): list, detail, and delete are implemented and every query filters by the
 server-derived user id. A successful entitled rewrite is now persisted as an owned job, so history is no longer
@@ -205,6 +206,46 @@ authenticated drain route was added -- the scheduled handler is the delivery pat
 directly by tests. M3-05 is not closed: account deletion and the completion evidence for the published window
 remain open, and closing the task is PO's decision.
 
+Implementation note (2026-08-25, M3-03, ENG/HE): sentence restore and regeneration are implemented and covered
+by `tests/sentence-operations.test.mts`. `src/lib/sentence-operations.ts` holds the access, debit, idempotency and
+bound decisions, `src/lib/humanization/sentence-regeneration.ts` the engine, `db/revision-repository.ts` the
+queries, and `app/api/history/[id]/sentence/route.ts` the thin handler. Authority is the same pair
+`src/lib/history-access.ts`'s detail path uses — `findHistoryEntryForUser` for ownership and a live payload, then
+`getUnlockedResult` for ownership plus an active entitlement — reused rather than re-implemented, so a stranger
+cannot reach another account's sentence for the same reason they cannot read that account's rewrite. A lapsed
+subscriber gets the same `locked` 404 the detail path gives.
+
+The debit policy is written out in `docs/MONETIZATION.md` under "Sentence operations": a verified new candidate
+commits exactly its own word count; a rejected, unchanged, restored, out-of-range or capped operation releases the
+whole reservation and charges zero. Reservation headroom is `2 × words(sentence) + 8`, taken before generation
+because that is what bounds concurrent overspend, with the difference released by `commitUsage` — a candidate
+longer than the reservation is charged at the reservation, which under-charges rather than over-charges.
+Idempotency is one operation key in two ledgers: `usage_entries.operation_key` (a repeated reserve is a replay, a
+repeated commit is refused by the unique index) and `sentence_operations.operation_key` (the retry returns the
+first attempt's recorded outcome instead of generating a second candidate). Caps are 3 per sentence and 20 per
+job, counted on attempts rather than successes, because counting successes leaves a free generation loop for the
+customer whose sentence the engine cannot improve.
+
+Two things were found rather than built. First, `splitSentences` in `src/lib/humanization/text.ts` is not usable
+as an addressing scheme: it splits "Dr." from the name it belongs to, and it silently **drops** text it cannot
+match — "The board approved $1." disappears entirely from "The board approved $1.2 million for the next phase.",
+because the stop inside the decimal is not followed by whitespace and the alternation then fails for the whole
+clause. An index over a segmentation that can lose text can select text the customer never pointed at, so M3-03
+uses its own total, abbreviation-aware `segmentSentences`. `splitSentences` itself was left alone deliberately:
+analysis targets, the readability score, and the benchmark thresholds calibrated against them all move if it
+changes. That is an HE change with its own benchmark evidence (M4-01), and it is still open. Second, a sentence
+operation stores the resulting document in `result_revisions`, which is a second place a job's text can live, so
+`deleteHistoryEntryForUser` now voids it inline — the purge worker already ran the identical statement, but M3-01
+promises the text is gone at the moment of deletion, not when a worker next runs.
+
+Not done: there is no user interface. `/history` and `/api/result` serve the updated text because an applied
+operation also updates `job_payloads.result_ref`, but nothing on any page lets a customer click a sentence — the
+paid-result surface work is M3-02's and DES/M3-07's. Protected-phrase controls (M3-04) are untouched; the engine
+accepts a `protectedValues` list and honours it, which is the seam M3-04 will fill. Concurrency across two
+different sentences of the same job is last-write-wins on the revision chain, bounded by `sequence` being assigned
+inside the INSERT; there is no per-job lock. M3-03 is not closed and no gate is self-granted here; closing it is
+PO's decision.
+
 ### M4 — Commercial release
 
 | ID | Owner | Task | Depends | Acceptance criteria |
@@ -216,6 +257,49 @@ remain open, and closing the task is PO's decision.
 | M4-05 | MQA | Execute production smoke and rollback drill | M4-04 | Preview, test purchase, webhook, unlock, copy, second use, cancel, and purge are verified; rollback/reconciliation owners can execute runbooks. |
 | M4-06 | MON | Audit revenue leakage and dark patterns | M4-05 | Locked data is not leaked, entitlements/quotas are correct, pricing is consistent, cancellation is clear, and no unavailable feature or artificial urgency is implied. |
 | M4-07 | PO | Authorize limited commercial launch | M4-01..M4-06 | All release gates are signed by PO, HE, MON, AQA, SEC, and LEGAL; monitoring/rollback owners are on record. |
+
+**M4-03 remains OPEN. It is not approved, and no agent can close it.** (2026-08-25, LEGAL)
+
+`app/terms/page.tsx` and `app/privacy/page.tsx` now carry a complete conventional draft rather than thin or
+generic language: governing law and jurisdiction, a refunds section, warranty disclaimer and a proportionate
+liability cap, acceptable use with the academic-integrity framing, subscription/billing/cancellation mechanics,
+and the privacy specifics (processors, retention, choices, cookies, security, children, complaints). Every
+factual claim was checked against `docs/MONETIZATION.md`, `docs/SECURITY.md`, D-017, D-018, and D-019 before it
+was written.
+
+This is drafting, not advice. It exists so that counsel edits a real draft instead of starting from nothing.
+The notice on `/terms` stating that these terms **have not been reviewed by counsel** is accurate and must stay
+until a lawyer has actually reviewed them. M4-03 closes when a human lawyer signs off, not when the pages read
+well.
+
+Owner decisions the draft depends on:
+
+1. **State of formation: Delaware — confirmed by the owner (2026-08-25, owner-reported).** The governing-law
+   and jurisdiction clause names Delaware, and both pages describe Bosphorus Elevate LLC as a Delaware limited
+   liability company. This is the one fact a wrong answer would make worse than useless, so if the certificate
+   of formation says another state, both pages must be corrected before launch.
+2. **Refund policy: OWNER MUST CONFIRM.** `docs/MONETIZATION.md` is the authority and it states no refund
+   policy — only that cancellation is straightforward and that failed attempts are never charged. The drafted
+   clause is therefore a conventional default, not a recorded decision: cancel anytime, access continues to the
+   end of the paid period, no automatic pro-rata refund, discretionary refunds by email, and a full refund of
+   the unused period if we terminate without cause. The owner must confirm this is the policy they will
+   actually honour, and it should then be recorded in `docs/MONETIZATION.md` and `DECISIONS.md` rather than
+   living only on the page.
+3. **Liability cap.** Set at the greater of twelve months' fees or $50. Deliberately modest for a $9.99/month
+   consumer subscription; an unconscionable cap is unenforceable anyway. Counsel may want to revisit.
+4. **Disclosures that are true today and become false on a change.** The pages state that no third-party AI
+   provider receives customer text (the deployed engine is the deterministic baseline), that Cloudflare, Stripe
+   and Resend are the only processors, and that no consent-based processing exists. Adding a model provider, a
+   processor, or a consent flow requires updating `/privacy` before the change ships, as D-P05 already requires.
+5. **No compliance status is asserted.** `/privacy` describes practices and explicitly says no regulator or
+   auditor has reviewed the service against the GDPR, UK GDPR, or CCPA. Do not upgrade that wording into a
+   compliance claim without counsel and an actual assessment.
+6. **Prohibited claims.** Both pages repeat that no AI-detector or plagiarism-detector outcome is guaranteed and
+   that the service is not a way to evade academic-integrity controls. This is a hard product guardrail; it
+   survives any future copy edit.
+
+`LEGAL_PAGES_LAST_UPDATED` in `src/lib/public-pages.ts` moved to 2026-08-25 so the published date matches the
+content. That constant is the only line touched outside the two pages and this file.
 
 ## Scope-change protocol
 

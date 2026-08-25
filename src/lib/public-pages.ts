@@ -44,7 +44,7 @@ export const SOCIAL_IMAGE = {
   alt: "Keep your meaning. Lose the machine tone.",
 } as const;
 
-export const LEGAL_PAGES_LAST_UPDATED = "2026-08-23";
+export const LEGAL_PAGES_LAST_UPDATED = "2026-08-25";
 
 /**
  * Only routes that (a) genuinely exist under `app/`, (b) return 200, and (c)
@@ -171,5 +171,29 @@ export function buildPublicPageMetadata(page: PublicPage, requestHost: string): 
       description: page.description,
       images: socialImage ? [socialImage.url] : undefined,
     },
+  };
+}
+
+/**
+ * SEO-002 / SEO-005. The metadata every *non*-indexable surface owes, and the
+ * counterpart to `buildPublicPageMetadata`. Private and error surfaces sit
+ * under the root layout, which supplies the homepage's public metadata as the
+ * site-wide default, so without an explicit override a signed-in history page
+ * or a genuine 404 ships the homepage's canonical, description, `og:url` and
+ * social card. SEO-020 measured exactly that.
+ *
+ * Every field is nulled rather than replaced: Next merges a `null` as "drop
+ * the inherited value", which is what a page with nothing to say to a crawler
+ * needs. `title` is the one thing a caller may supply, because a browser tab
+ * and a bookmark still need a name.
+ */
+export function buildPrivateSurfaceMetadata(title?: string): Metadata {
+  return {
+    ...(title ? { title } : {}),
+    description: null,
+    alternates: { canonical: null },
+    robots: { index: false, follow: false, nocache: true },
+    openGraph: null,
+    twitter: null,
   };
 }
