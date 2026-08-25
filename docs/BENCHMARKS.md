@@ -164,3 +164,226 @@ Every major engine change reports:
 ## Benchmark maintenance
 
 Add a regression fixture for each production semantic/protected failure using synthetic or permissioned text. Review category balance quarterly or after 25 additions. Audit provenance and expected facts. Keep benchmark text out of analytics and production model-training flows. Access to any licensed non-public corpus follows license and least-privilege requirements.
+
+---
+
+# Recorded runs
+
+## 2026-08-25 — engine hardening (branch `claude/engine-hardening`)
+
+Measured on this branch with `npm run benchmark`. Both numbers below are real
+runs, not estimates.
+
+### Release set (frozen, 100 passages)
+
+| | before | after |
+|---|---|---|
+| passed | 100/100 | 100/100 |
+| no-ops (engine returned the input) | not measured | 35/100 |
+| semantic failures | 0 | 0 |
+| protected-content failures | 0 | 0 |
+| average naturalness | 0.8482 | 0.8538 |
+
+Naturalness rose because `splitSentences` stopped dropping text: 23 of the 100
+passages contained a stop not followed by whitespace (a decimal, an F1 score,
+a version number, a DOI, an `et al.`), and the clause containing it vanished
+before analysis ran. Since rewrite targets are derived from those segments, a
+dropped sentence was never rewritten at all. **No threshold was changed**, and
+none needed to be.
+
+### Adversarial set (25 passages) — **17/25**
+
+| | |
+|---|---|
+| passed | 17/25 |
+| hard-safety failures | 0 |
+| retry exhaustion (customer receives an error) | 3 |
+| quality misses (AI-tell left in place) | 5 |
+
+17/25 is the honest score and it is the point of the exercise. The release set
+scored 100/100 before this work and could not have scored anything else; a
+suite nothing fails cannot detect a regression. Do not relax an expectation to
+raise this number.
+
+## What 100/100 on the release set does not mean
+
+Three measured reasons the release-set score is close to uninformative on its
+own:
+
+1. **28 of the 100 passages declare no expected protected facts.** The pass
+   test is "every declared fact survived", and `[].every(...)` is `true`, so
+   those 28 pass whatever the engine emits — including the input verbatim.
+2. **The engine is a no-op on 35 of the 100 passages**, and all 35 are
+   reported as passed. By category:
+
+   | category | passed | no-op |
+   |---|---|---|
+   | obvious ChatGPT prose | 10/10 | 0/10 |
+   | academic | 10/10 | 2/10 |
+   | professional | 10/10 | 2/10 |
+   | marketing | 10/10 | 2/10 |
+   | casual | 10/10 | 3/10 |
+   | technical | 10/10 | 3/10 |
+   | non-native English | 10/10 | 8/10 |
+   | citation-heavy | 10/10 | 5/10 |
+   | number-heavy | 10/10 | **10/10** |
+   | long-form | 10/10 | 0/10 |
+
+   The engine changes nothing at all in the entire number-heavy category, and
+   almost nothing in non-native English, while both report a perfect score.
+3. **Passages are a median of 20 words** (min 15, max 72) against this
+   document's own requirement that "most fixtures should represent 200–300
+   words". The structural checks — repetitive length, repetitive opening,
+   predictable paragraph shape — have almost nothing to work on at that size.
+
+`npm run benchmark` now prints the per-category no-op rate alongside the pass
+count, so the second point is visible on every run.
+
+## Thresholds are uncalibrated
+
+The six numbers in `DEFAULT_HUMANIZATION_CONFIG.thresholds` (naturalness 0.5,
+readability 0.15, grammar 0.8, repetition 0.55, meaningPreservation 0.72,
+toneAdherence 0.65) have **no decision-log entry and no calibration record**
+anywhere in the repository, though the section above requires both. Observed
+margins on the release set:
+
+| threshold | worst observed | threshold | margin |
+|---|---|---|---|
+| naturalness | 0.5300 | 0.50 | 0.0300 |
+| readability | 0.1676 | 0.15 | 0.0176 |
+| grammar | 1.0000 | 0.80 | 0.2000 |
+| repetition | 0.6400 | 0.55 | 0.0900 |
+| meaningPreservation | 0.8457 | 0.72 | 0.1257 |
+| toneAdherence | 0.9000 | 0.65 | 0.2500 |
+
+Grammar and tone have so much headroom that a large regression would pass
+unnoticed; readability sits 0.0176 above its floor, which is close enough that
+an unrelated change can trip it. Calibrating these against a baseline is
+outstanding work and remains a release risk, not a solved problem.
+
+## What the deterministic engine cannot do
+
+`DeterministicHumanizationProvider` is a substitution table. It replaces known
+phrases with known phrases. That bounds it in ways no amount of tuning
+changes, and the adversarial set now documents each one with a failing case:
+
+- **Grammar cannot be repaired.** "Yesterday I go to the bank", "many shop are
+  near my apartment", "The employee explain the problem" pass through
+  untouched (`adv-nonnative-01`, `adv-nonnative-02`). This is why non-native
+  English is 8/10 no-ops.
+- **Sentence rhythm cannot be varied.** Analysis reports repetitive-opening
+  and repetitive-length; no substitution can restructure a sentence, so the
+  gates reject every attempt and the customer receives an error rather than a
+  rewrite (`adv-rhythm-01`).
+- **Qualifiers and generic conclusions cannot be removed safely.** Dropping
+  "very" or replacing "the possibilities are endless" requires judgement about
+  emphasis and a specific claim to put in its place (`adv-qualifier-01`,
+  `adv-conclusion-01`).
+- **Tone is scored but never repaired.** A casual register requested in
+  academic mode fails `toneAdherence` on every attempt and exhausts retries
+  (`adv-tone-01`).
+- **Coverage is a word list.** The robotic-vocabulary marker matches
+  `delve/delves/delved into` but not `delving into`, so that passage is not
+  even reported as having an issue (`adv-vocab-01`). Every gap of this kind is
+  one more entry away, and the list is unbounded.
+- **`unnatural-transition` is a declared issue kind with no detector at all.**
+  Nothing can ever produce it.
+
+Three of these produce a hard error rather than a graceful "nothing to
+change": text the engine cannot improve, carrying four or more detected
+issues, fails the naturalness floor and exhausts its retries.
+
+Selecting a real model provider is a separate decision and an M4-01 release
+blocker. Nothing in this section is fixable by tuning the rules.
+
+## Segmentation
+
+`splitSentences` in `src/lib/humanization/text.ts` is now the engine's single
+segmenter. It is **total** — every character belongs to exactly one segment or
+to a whitespace-only gap between two — and that property is asserted over the
+whole benchmark corpus in `tests/sentence-segmentation.test.mts`, not against
+a handful of fixtures.
+
+M3-03 (branch `claude/m3-03-sentence-regeneration`, not yet merged) added a
+second segmenter, `segmentSentences` in `sentence-regeneration.ts`, because
+changing `splitSentences` moved analysis targets, readability and the
+calibrated thresholds. That evidence now exists — see the table above — so the
+two must be collapsed to one at merge. **`segmentSentences` should become a
+re-export of `splitSentences`.** Two segmenters with different rules means one
+of them is wrong wherever they disagree, and `segmentSentences` is the wrong
+one in at least one common case: its `endsSentence` returns false when nothing
+alphanumeric precedes the stop, so a sentence ending `12%.`, `(Li et al.
+2019).`, `[4].` or `"the whole thing".` swallows the sentence that follows it.
+`splitSentences` handles those and additionally closes a sentence at a
+quotation mark (`She said "Stop." Then she left.`).
+
+Known limits, shared with any rule-based segmenter and not hidden: a sentence
+genuinely ending in an abbreviation followed by a lower-case word is not
+split; a sentence ending "at 8 p.m." is not split, because each stop there
+follows a single letter and reads as an initial; non-English sentence
+conventions are not modelled.
+
+---
+
+# Integrating a real model provider
+
+The interfaces in `src/lib/humanization/types.ts` now carry what a model call
+needs. Adding a provider should be a configuration change — construct it and
+pass it to `createHumanizationPipeline({ humanizationProvider })` — not a
+refactor. **No provider has been selected, no SDK has been added, and no
+external API is called from this repository.** That choice is an M4-01 release
+blocker and belongs to the product owner.
+
+What is already in place:
+
+- **Prompt construction is the provider's own business.** `RewriteRequest`
+  carries structured inputs (text, mode, protected content, analysis, attempt
+  number, previous failures); the provider decides how to split them into
+  system and user turns. Nothing in the pipeline constrains that.
+- **Usage telemetry.** `ProviderUsage` on `RewriteResponse`,
+  `VerificationResult` and `EvaluationResult` carries input, output and
+  cached-input tokens, cost, and the model id. The pipeline totals them across
+  every stage and retry into `UsageMetrics`, which is what this document's
+  metrics section requires.
+- **Typed provider errors.** `ProviderError` carries a `kind` (`rate-limit`,
+  `timeout`, `server`, `invalid-request`, `refusal`, `unknown`), a `retryable`
+  flag with sensible defaults, and an optional `retryAfterMs`. A non-retryable
+  error stops the pipeline instead of buying the same rejection three times.
+- **Per-attempt deadlines.** `providerTimeoutMs` bounds a single call. The
+  pipeline awaits on the combined signal, so a provider that ignores the
+  signal it was handed still cannot outlive its deadline.
+- **Provenance.** Every result records `providers` — the three provider names
+  and the models any stage reported.
+
+What integrating one would still require, and none of it is done:
+
+1. **Secrets and configuration.** An API key in the Worker environment, a
+   model id, temperature and max-tokens settings, and a `.dev.vars.example`
+   entry. Follow the existing secret handling in `docs/ARCHITECTURE.md`.
+2. **Backoff.** `retryAfterMs` is carried but nothing sleeps on it. The
+   pipeline retries immediately; a real rate limit needs a delay between
+   attempts, and the retry budget interacts with the request deadline.
+3. **Cost and latency budgets.** `estimatedCostUsd` is 0 for every passage
+   today because the deterministic provider is free. The p95 latency and unit
+   economics gates in this document cannot be evaluated until a provider
+   reports real numbers, and the benchmark's 0.79 ms average latency will stop
+   being meaningful the moment a network call is involved.
+4. **Bumping `PIPELINE_VERSION`.** Changing the provider changes output for
+   previously-generated jobs; the version is persisted on `humanization_jobs`
+   so provenance stays reconstructible.
+5. **Recalibrating thresholds against the new baseline**, with the decision-log
+   entry the change protocol requires. The current six numbers were fitted to
+   nothing and a model provider will not produce the same score distribution.
+6. **Re-running the adversarial set.** The 8 failures above are capability
+   failures of a substitution engine. A model provider should pass most of
+   them; the ones it does not are the honest picture of what was bought.
+7. **Prompt-injection coverage.** The corpus has none, though this document
+   requires adversarial injection examples. Customer text reaching a model is
+   an instruction-injection surface that does not exist today.
+
+Streaming is deliberately not part of the seam. The pipeline verifies a
+complete candidate before returning it, and this document requires
+invalid-output exposure to be exactly zero, so streaming unverified text to a
+customer is excluded by the architecture rather than missing from the
+interface. A provider may stream internally as long as it resolves a complete
+candidate.
