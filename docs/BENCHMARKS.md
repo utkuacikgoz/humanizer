@@ -304,18 +304,24 @@ to a whitespace-only gap between two — and that property is asserted over the
 whole benchmark corpus in `tests/sentence-segmentation.test.mts`, not against
 a handful of fixtures.
 
-M3-03 (branch `claude/m3-03-sentence-regeneration`, not yet merged) added a
-second segmenter, `segmentSentences` in `sentence-regeneration.ts`, because
-changing `splitSentences` moved analysis targets, readability and the
-calibrated thresholds. That evidence now exists — see the table above — so the
-two must be collapsed to one at merge. **`segmentSentences` should become a
-re-export of `splitSentences`.** Two segmenters with different rules means one
-of them is wrong wherever they disagree, and `segmentSentences` is the wrong
-one in at least one common case: its `endsSentence` returns false when nothing
-alphanumeric precedes the stop, so a sentence ending `12%.`, `(Li et al.
-2019).`, `[4].` or `"the whole thing".` swallows the sentence that follows it.
-`splitSentences` handles those and additionally closes a sentence at a
-quotation mark (`She said "Stop." Then she left.`).
+M3-03 had added a second segmenter, `segmentSentences` in
+`sentence-regeneration.ts`, because changing `splitSentences` moved analysis
+targets, readability and the calibrated thresholds, and that needed benchmark
+evidence rather than a side effect of shipping sentence editing. That evidence
+is the table above, so the two are now **one**: `segmentSentences` is an alias
+of `splitSentences`, and `tests/sentence-segmentation.test.mts` asserts they
+are the same function so a second one cannot quietly reappear.
+
+Collapsing them fixed a live defect, not just a duplication. The two
+segmenters disagreed on **17 of the 125 benchmark passages**, and the
+`sentence-regeneration` copy was wrong in every one: its `endsSentence`
+treated a stop with nothing alphanumeric in front of it as never ending a
+sentence, so a sentence closing `15%.`, `(Li et al., 2024).`, `[14-16].` or
+"`` `account_id`. ``" swallowed the sentence after it. Two sentences returned
+as one means `sentenceAt(text, 4)` addresses a span twice its intended size,
+so "regenerate sentence 4" rewrote two sentences and M3-03's own
+one-sentence-in, one-sentence-out invariant failed silently — the quiet
+corruption of a paying customer's document that module exists to prevent.
 
 Known limits, shared with any rule-based segmenter and not hidden: a sentence
 genuinely ending in an abbreviation followed by a lower-case word is not

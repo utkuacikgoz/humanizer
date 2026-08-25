@@ -123,3 +123,38 @@ test("analysis targets a sentence a naive segmenter dropped entirely", () => {
     "the clause containing the citation must be reachable as a rewrite target",
   );
 });
+
+test("the engine has exactly one segmenter", async () => {
+  // sentence-regeneration.ts used to carry its own abbreviation-aware
+  // segmenter. The two disagreed on 17 of the 125 benchmark passages, and the
+  // local copy was wrong in every one: a sentence closing "15%.",
+  // "(Li et al., 2024).", "[14-16]." or "`account_id`." swallowed the
+  // sentence after it, so sentenceAt(text, n) addressed a span twice its
+  // intended size and "regenerate sentence n" rewrote two sentences.
+  const { segmentSentences } = await import("../src/lib/humanization/sentence-regeneration");
+  assert.equal(segmentSentences, splitSentences, "a second segmenter has reappeared; wherever two disagree, one is wrong");
+});
+
+test("the segmenters no longer disagree on any benchmark passage", async () => {
+  const { segmentSentences } = await import("../src/lib/humanization/sentence-regeneration");
+  const { HUMANIZATION_ADVERSARIAL_PASSAGES } = await import("../benchmarks/humanization-adversarial");
+  for (const passage of [...HUMANIZATION_BENCHMARK_PASSAGES, ...HUMANIZATION_ADVERSARIAL_PASSAGES]) {
+    assert.deepEqual(
+      segmentSentences(passage.text).map((sentence) => sentence.text),
+      splitSentences(passage.text).map((sentence) => sentence.text),
+      `${passage.id} segments differently through the two entry points`,
+    );
+  }
+});
+
+test("a sentence closing on a bracket, percent or backtick still ends there", () => {
+  // The exact shapes the removed segmenter merged.
+  for (const [text, expected] of [
+    ["We reduced it by 15%. This change will not affect the two current projects.", 2],
+    ["Shade lowers temperatures (Akbari, 2023). However, benefits vary with density.", 2],
+    ["Attendance improved [12], but scores did not [14-16]. The follow-up was one term.", 2],
+    ["Run `npm run migrate`. The command must finish before traffic shifts.", 2],
+  ] as const) {
+    assert.equal(splitSentences(text).length, expected, `wrong sentence count for ${JSON.stringify(text)}`);
+  }
+});
