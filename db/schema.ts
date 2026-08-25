@@ -363,23 +363,90 @@ export const analyticsOutbox = sqliteTable("analytics_outbox", {
   ),
 ]);
 
-/** Tracks propagation of a deletion request across every store/processor. */
+/**
+ * Tracks propagation of a deletion request across every store/processor.
+ *
+ * The queue does not hold the erasure itself: db/history-repository.ts and
+ * db/account-deletion-repository.ts void the text in the same request that
+ * accepts the deletion. A row here is the propagation tombstone the M3-05
+ * purge worker drains, and it carries no customer writing of any kind — only
+ * the subject, the scope, the authority, and retry bookkeeping.
+ */
 export const deletionJobs = sqliteTable("deletion_jobs", {
   id: id("id"),
   subjectType: text("subject_type").notNull(),
   subjectId: text("subject_id").notNull(),
   scope: text("scope").notNull(),
+  /** The server-derived user id whose authority the deletion was made under. */
+  requestedByUserId: text("requested_by_user_id"),
   requestedAt: createdAt("requested_at"),
   completedAt: integer("completed_at", { mode: "timestamp_ms" }),
   // JSON string keyed by store/processor name -> propagation status.
   processorStatus: text("processor_status").notNull().default("{}"),
   status: text("status").notNull().default("pending"),
+  /** Bounded retry budget; a job that exhausts it is parked as `failed`. */
+  attempts: integer("attempts").notNull().default(0),
+  /**
+   * Claim lease. A worker that dies mid-job leaves `in_progress` behind; the
+   * lease is what lets a later drain reclaim it instead of the row wedging
+   * the queue forever.
+   */
+  leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp_ms" }),
+  /**
+   * Short, self-generated failure code (e.g. `processor:r2`). Never a driver
+   * or provider error object: a D1 error can carry the bound statement
+   * parameters, which for this application means the customer's writing.
+   */
+  failureCode: text("failure_code"),
 }, (t) => [
   index("deletion_jobs_subject_idx").on(t.subjectId),
+  index("deletion_jobs_status_idx").on(t.status, t.requestedAt),
   check("deletion_jobs_subject_type_check", sql`${t.subjectType} in ('user', 'job')`),
   check("deletion_jobs_scope_check", sql`${t.scope} in ('history_item', 'full_account')`),
   check(
     "deletion_jobs_status_check",
     sql`${t.status} in ('pending', 'in_progress', 'completed', 'failed')`,
   ),
+]);
+
+export const DELETION_AUDIT_EVENTS = [
+  "requested",
+  "claimed",
+  "propagated",
+  "completed",
+  "retry_scheduled",
+  "parked",
+] as const;
+export type DeletionAuditEvent = (typeof DELETION_AUDIT_EVENTS)[number];
+
+/**
+ * The deletion audit trail (M3-05): what was deleted, when, and under whose
+ * authority.
+ *
+ * Every column here is deliberately incapable of holding customer writing.
+ * `detail` is a JSON string written only by db/deletion-audit.ts, which
+ * accepts counts, booleans and self-generated codes and nothing else, because
+ * an audit record that quotes even a fragment of a deleted draft — or a hash
+ * of one, which confirms a guess at a short phrase — would defeat the
+ * deletion it is evidence of.
+ */
+export const deletionAuditEvents = sqliteTable("deletion_audit_events", {
+  id: id("id"),
+  deletionJobId: text("deletion_job_id"),
+  subjectType: text("subject_type").notNull(),
+  subjectId: text("subject_id").notNull(),
+  scope: text("scope").notNull(),
+  /** Whose authority: the server-derived user id, never a client-supplied one. */
+  actorUserId: text("actor_user_id"),
+  event: text("event").notNull().$type<DeletionAuditEvent>(),
+  /** Store/processor this event is about, when it is about one. */
+  processor: text("processor"),
+  detail: text("detail").notNull().default("{}"),
+  occurredAt: createdAt("occurred_at"),
+}, (t) => [
+  index("deletion_audit_events_subject_idx").on(t.subjectId),
+  index("deletion_audit_events_job_idx").on(t.deletionJobId),
+  check("deletion_audit_events_subject_type_check", sql`${t.subjectType} in ('user', 'job')`),
+  check("deletion_audit_events_scope_check", sql`${t.scope} in ('history_item', 'full_account')`),
+  check("deletion_audit_events_event_check", sql`${t.event} in (${sqlEnumList(DELETION_AUDIT_EVENTS)})`),
 ]);
