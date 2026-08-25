@@ -186,7 +186,7 @@ Status: partial. Copy, direct paid result rendering, post-checkout result eviden
 
 Status: open. Release blockers include:
 
-- no customer can sign in on `ownword.pro`: every sign-in link targets `/signin-with-chatgpt`, a route this repository does not contain and the OpenAI hosting platform used to provide, so checkout, unlock, history, and billing are all unreachable there. Email magic-link authentication is the accepted replacement and is not built yet;
+- email magic-link sign-in is implemented (`/signin`) and replaces the dead `/signin-with-chatgpt` path, but it has never run against a real mailer or a real database: production requires a verified Resend sending domain, the `RESEND_API_KEY` secret, and applied D1 migrations, and the deploy workflow now fails loudly without the key. No end-to-end sign-in has been performed on the production host;
 - production provider selection and frozen benchmark;
 - production D1/guard/Stripe/webhook/live-price configuration and smoke/reconciliation;
 - Legal review and approval of Terms, Privacy, retention, provider, refund, and jurisdiction language;
