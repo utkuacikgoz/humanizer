@@ -123,3 +123,61 @@ test("renders the configured price, not a stale hardcoded one", async () => {
   assert.match(html, /9\.99/);
   assert.doesNotMatch(html, /\$9\b(?!\.)/);
 });
+
+// SEO-003 / handoff H-3. `www.ownword.pro` is a bound custom domain. It used
+// to serve the whole application on a second hostname — fail-closed, so
+// nothing duplicate was indexed, but a link earned on a www URL consolidated
+// nothing.
+test("redirects the www host to the apex in one hop, keeping method and query", async () => {
+  const home = await render("/", "www.ownword.pro");
+  assert.equal(home.status, 308, "301 lets a client rewrite POST to GET; 308 does not");
+  assert.equal(home.headers.get("location"), "https://ownword.pro/");
+
+  const query = await render("/privacy?utm_source=newsletter&a=b", "www.ownword.pro");
+  assert.equal(query.headers.get("location"), "https://ownword.pro/privacy?utm_source=newsletter&a=b");
+
+  // Case-insensitive: a Host header is not required to be lowercase.
+  assert.equal((await render("/terms", "WWW.OwnWord.PRO")).headers.get("location"), "https://ownword.pro/terms");
+
+  // One hop: the apex must answer, not redirect again.
+  assert.equal((await render("/", "ownword.pro")).status, 200);
+
+  // Neighbouring hostnames are not www, and must not be swept up.
+  for (const host of ["ownword.pro", "localhost", "staging.ownword.pro", "wwwownword.pro", "www.ownword.pro.example.com"]) {
+    assert.notEqual((await render("/", host)).status, 308, `${host} must not be redirected`);
+  }
+});
+
+test("never redirects the apex to itself on a spoofed forwarded host", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const response = await worker.fetch(
+    new Request("https://ownword.pro/", { headers: { host: "ownword.pro", "x-forwarded-host": "www.ownword.pro" } }),
+    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  assert.equal(response.status, 200, "an inbound header claiming www must not start a redirect loop on the apex");
+});
+
+// SEO-002 / handoff H-2. The route now reads the shared host rule instead of
+// keeping a private copy; these assert the output did not move with it.
+test("robots.txt allows the canonical host and fails closed everywhere else", async () => {
+  const canonical = await (await render("/robots.txt", "ownword.pro")).text();
+  assert.match(canonical, /^User-agent: \*$/m);
+  assert.match(canonical, /^Allow: \/$/m);
+  assert.match(canonical, /^Sitemap: https:\/\/ownword\.pro\/sitemap\.xml$/m);
+  for (const path of ["/api/", "/account/", "/admin/", "/billing/", "/checkout/", "/history/", "/result/", "/signin"]) {
+    assert.match(canonical, new RegExp(`^Disallow: ${path.replace(/\//g, "\\/")}$`, "m"), `${path} must stay disallowed`);
+  }
+  // /history is deliberately crawlable so its noindex can be read; only the
+  // subtree below it is disallowed.
+  assert.doesNotMatch(canonical, /^Disallow: \/history$/m);
+
+  for (const host of ["localhost", "staging.ownword.pro", "ownword.pro.example.com"]) {
+    const offHost = await (await render("/robots.txt", host)).text();
+    assert.match(offHost, /^Disallow: \/$/m, `${host} must fail closed`);
+    assert.doesNotMatch(offHost, /Allow: \//);
+    assert.doesNotMatch(offHost, /Sitemap:/);
+  }
+});
