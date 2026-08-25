@@ -4,45 +4,23 @@ import { headers } from "next/headers";
 import { productConfig } from "@/src/config/product";
 import { pricingConfig } from "@/src/config/pricing";
 import { MIN_PAYWALLABLE_INPUT_WORDS } from "@/src/lib/preview-projection";
+import {
+  LEGAL_PAGES_LAST_UPDATED,
+  buildPublicPageMetadata,
+  publicPage,
+  readRequestHost,
+} from "@/src/lib/public-pages";
 
-// Mirrors app/robots.txt/route.ts and app/sitemap.xml/route.ts: canonical/OG/
-// index output is gated on the request Host matching productConfig.domain
-// exactly, so a staging/preview/localhost Host never gets indexed or a
-// canonical it can't actually serve. Duplicated locally rather than shared
-// because SEO owns these route files independently of app/layout.tsx.
-function configuredSiteUrl() {
-  const configuredDomain = productConfig.domain.trim();
-  if (!configuredDomain) return null;
-  try {
-    const url = new URL(/^https?:\/\//i.test(configuredDomain) ? configuredDomain : `https://${configuredDomain}`);
-    return new URL("/privacy", url);
-  } catch {
-    return null;
-  }
-}
-
+// SEO-005. Title, description, canonical, robots, OG and Twitter come from
+// the shared registry in src/lib/public-pages.ts, which host-gates every
+// indexable field the same way app/robots.txt/route.ts and
+// app/sitemap.xml/route.ts do: a staging, preview or localhost Host never
+// gets indexed or a canonical it cannot serve.
 export async function generateMetadata(): Promise<Metadata> {
-  const configuredUrl = configuredSiteUrl();
-  const requestHeaders = await headers();
-  const requestHost = (requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "")
-    .split(",")[0]
-    .trim()
-    .toLowerCase();
-  const canonicalUrl = configuredUrl && requestHost === configuredUrl.host.toLowerCase() ? configuredUrl : null;
-  const title = `Privacy Policy | ${productConfig.productName}`;
-  const description = `How ${productConfig.productName}, operated by ${productConfig.legalCompanyName}, handles the text you paste and your account data.`;
-
-  return {
-    title,
-    description,
-    alternates: canonicalUrl ? { canonical: canonicalUrl } : undefined,
-    robots: canonicalUrl ? { index: true, follow: true, nocache: false } : { index: false, follow: false, nocache: true },
-    openGraph: { title, description, type: "article", url: canonicalUrl ?? undefined, siteName: productConfig.productName },
-    twitter: { card: "summary", title, description },
-  };
+  return buildPublicPageMetadata(publicPage("/privacy"), readRequestHost(await headers()));
 }
 
-const LAST_UPDATED = "2026-08-23";
+const LAST_UPDATED = LEGAL_PAGES_LAST_UPDATED;
 
 export default function PrivacyPolicyPage() {
   return (
