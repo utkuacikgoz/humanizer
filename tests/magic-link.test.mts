@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm";
 import * as auth from "../db/auth-repository";
 import * as schema from "../db/schema";
 import {
+  buildSessionStateResponse,
   buildSignInRequestResponse,
   buildSignOutResponse,
   buildVerifyResponse,
@@ -43,7 +44,8 @@ type Harness = {
   statements: string[];
   request(email: string, options?: { returnTo?: string; origin?: string; host?: string; headers?: Record<string, string> }): Promise<Response>;
   verify(link: string, options?: { cookie?: string }): Promise<Response>;
-  signOut(cookie?: string): Promise<Response>;
+  signOut(cookie?: string, options?: { origin?: string }): Promise<Response>;
+  sessionState(cookie?: string): Promise<Response>;
   linkFrom(message: EmailMessage): string;
   setNow(fn: () => Date): void;
   setSender(sender: EmailSender | null): void;
@@ -90,10 +92,22 @@ async function harness(): Promise<Harness> {
         loadDeps,
       );
     },
-    signOut(cookie) {
+    signOut(cookie, options = {}) {
       return buildSignOutResponse(
         new Request("http://localhost/api/auth/signout", {
           method: "POST",
+          headers: {
+            host: "localhost",
+            ...(cookie ? { cookie } : {}),
+            ...(options.origin ? { origin: options.origin } : {}),
+          },
+        }),
+        loadDeps,
+      );
+    },
+    sessionState(cookie) {
+      return buildSessionStateResponse(
+        new Request("http://localhost/api/auth/session", {
           headers: { host: "localhost", ...(cookie ? { cookie } : {}) },
         }),
         loadDeps,
@@ -356,6 +370,37 @@ test("signing out destroys the session server-side, not just the cookie", async 
   assert.match(response.headers.get("set-cookie") ?? "", /Max-Age=0/);
   assert.equal(await identityFor(h.db, session), null);
   assert.equal((await h.db.select().from(schema.authSessions)).length, 0);
+});
+
+test("the session-state endpoint answers only for the caller's own cookie", async () => {
+  const h = await harness();
+  assert.deepEqual(await (await h.sessionState()).json(), { signedIn: false });
+
+  const session = cookieValue(await h.verify(await issuedLink(h, "person@example.com")));
+  assert.ok(session);
+  assert.deepEqual(
+    await (await h.sessionState(`${DEV_SESSION_COOKIE}=${session}`)).json(),
+    { signedIn: true, email: "person@example.com" },
+  );
+
+  // A value that names no session is signed out, not an error and not a hint.
+  assert.deepEqual(
+    await (await h.sessionState(`${DEV_SESSION_COOKIE}=${"q".repeat(43)}`)).json(),
+    { signedIn: false },
+  );
+
+  await h.signOut(`${DEV_SESSION_COOKIE}=${session}`);
+  assert.deepEqual(await (await h.sessionState(`${DEV_SESSION_COOKIE}=${session}`)).json(), { signedIn: false });
+});
+
+test("a third-party page cannot sign someone out", async () => {
+  const h = await harness();
+  const session = cookieValue(await h.verify(await issuedLink(h, "person@example.com")));
+  assert.ok(session);
+
+  const response = await h.signOut(`${DEV_SESSION_COOKIE}=${session}`, { origin: "https://evil.test" });
+  assert.equal(response.status, 403);
+  assert.ok(await identityFor(h.db, session), "the session must survive a forged sign-out");
 });
 
 // ---------------------------------------------------------------------

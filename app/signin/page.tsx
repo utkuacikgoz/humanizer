@@ -15,6 +15,8 @@ import Link from "next/link";
 import { productConfig } from "@/src/config/product";
 
 type Status = "idle" | "working" | "sent" | "error";
+/** Unknown until /api/auth/session answers; the cookie is HttpOnly, so the page has to ask. */
+type SessionState = { kind: "unknown" } | { kind: "signed-out" } | { kind: "signed-in"; email: string };
 
 // The query string is read through useSyncExternalStore rather than an effect,
 // the same way app/checkout/success/page.tsx reads its job id: the server
@@ -43,12 +45,31 @@ export default function SignInPage() {
   const linkErrored = useSyncExternalStore(subscribeToLocation, readLinkError, noServerValue) === "link";
   const [dismissedLinkError, setDismissedLinkError] = useState(false);
   const linkFailed = linkErrored && !dismissedLinkError;
+  const [session, setSession] = useState<SessionState>({ kind: "unknown" });
   // Re-entrancy guard. The submit control stays focusable and uses
   // aria-disabled, so this ref is the only thing stopping a second submit; a
   // button that disables itself on click strands keyboard users mid-flow.
   const busy = useRef(false);
 
   useEffect(() => { document.documentElement.classList.add("motion-ready"); }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function readSession() {
+      try {
+        const response = await fetch("/api/auth/session", { cache: "no-store" });
+        const body = (await response.json().catch(() => ({}))) as { signedIn?: boolean; email?: string };
+        if (cancelled) return;
+        // A failed lookup leaves the state unknown rather than claiming
+        // signed-out, which would offer to mail a link to someone who is
+        // already signed in.
+        if (!response.ok) return;
+        setSession(body.signedIn && body.email ? { kind: "signed-in", email: body.email } : { kind: "signed-out" });
+      } catch { /* leave the state unknown */ }
+    }
+    void readSession();
+    return () => { cancelled = true; };
+  }, []);
 
   async function requestLink(event: React.FormEvent) {
     event.preventDefault();
@@ -105,6 +126,13 @@ export default function SignInPage() {
             </div>
           </div>
 
+          {session.kind === "signed-in" ? (
+            <p className="status-line" role="status" style={{ borderTop: "none" }}>
+              You are signed in as {session.email}.{" "}
+              <Link href={returnTo}>Continue</Link>, or sign out below.
+            </p>
+          ) : null}
+
           {linkFailed ? (
             <p className="error" role="alert" style={{ borderTop: "none" }}>
               That sign-in link has expired or has already been used. Each link works once and lasts
@@ -156,6 +184,15 @@ export default function SignInPage() {
 
           {status === "error" ? (
             <p className="error" role="alert">{message}</p>
+          ) : null}
+
+          {session.kind === "signed-in" ? (
+            // A real form POST, not a link: signing out changes state, and a
+            // GET sign-out would be triggered by any prefetcher or third-party
+            // page. The route also refuses a cross-site Origin.
+            <form className="signin-signout" action="/api/auth/signout" method="post">
+              <button className="history-cancel" type="submit">Sign out</button>
+            </form>
           ) : null}
 
           <p className="signin-legal">

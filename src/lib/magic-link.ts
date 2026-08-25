@@ -348,6 +348,41 @@ export async function buildVerifyResponse(
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/auth/session
+// ---------------------------------------------------------------------------
+
+/**
+ * What the sign-in page needs to know about the visitor, and nothing more.
+ *
+ * The session cookie is HttpOnly, so a page cannot tell whether it is signed
+ * in without asking. Answering only for the caller's own cookie reveals
+ * nothing to anyone else, and the shape is deliberately tiny: signed-in or
+ * not, and the address the link was sent to, which the customer typed.
+ */
+export async function buildSessionStateResponse(
+  request: Request,
+  loadDeps: () => Promise<MagicLinkDeps>,
+): Promise<Response> {
+  const presented = readSessionCookie(request);
+  if (!presented || !TOKEN_SHAPE.test(presented)) return json({ signedIn: false }, 200);
+
+  try {
+    const deps = await loadDeps();
+    const now = (deps.now ?? (() => new Date()))();
+    const identity = await deps.auth.findSessionIdentity(deps.db, {
+      sessionDigest: await digestToken(presented),
+      now,
+    });
+    if (!identity) return json({ signedIn: false }, 200);
+    return json({ signedIn: true, email: identity.email }, 200);
+  } catch {
+    // Never claim someone is signed out on a lookup failure: the page would
+    // offer to mail a link to someone who already holds a live session.
+    return json({ error: "Sign-in state is unavailable right now." }, 503);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/auth/signout
 // ---------------------------------------------------------------------------
 
