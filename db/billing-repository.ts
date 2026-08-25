@@ -22,10 +22,14 @@ export async function findUserIdByExternalSubject(db: AppDatabase, externalSubje
 }
 
 /**
- * Upserts a user by their trusted external identity subject. A neither
- * client-supplied nor guessable email/user ID is ever accepted as proof
- * of ownership — only the platform-verified subject from
- * app/chatgpt-auth.ts, resolved server-side before this is called.
+ * Upserts a user by their trusted external identity subject.
+ *
+ * A client-supplied email or user id is never accepted as proof of ownership.
+ * The only caller that creates a row is the magic-link redemption path
+ * (src/lib/magic-link.ts), which passes `email:<normalized address>` for an
+ * address the customer proved control of by opening a link sent to it. The
+ * `email:` prefix is what keeps an address identity from ever colliding with
+ * the ChatGPT subjects this column also holds.
  */
 export async function getOrCreateUserByExternalSubject(
   db: AppDatabase,

@@ -43,23 +43,18 @@ const { d1, r2 } = hostingConfig;
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
-// SEC-01 (docs/SECURITY.md, 2026-08-24): this app has no middleware and
-// resolves identity purely from `oai-authenticated-user-*` request headers,
-// which are trustworthy ONLY because the hosting boundary injects them and
-// strips any client-supplied copy. A `*.workers.dev` origin bypasses that
-// boundary entirely, so on such an origin the app has no authentication at
-// all — anyone could forge those headers and read another customer's paid
-// result or open their billing portal.
+// SEC-01 (docs/SECURITY.md, 2026-08-24). The header-trust model this
+// originally contained is gone: identity is a session cookie backed by a
+// database row (src/lib/identity.ts), not a request header any caller could
+// have written.
 //
-// Disabling the workers.dev origin removes that unauthenticated path. This
-// is containment, not a fix: the header-trust model itself still needs to be
-// replaced with something that verifies provenance (see SEC-01's
-// remediation). Do not re-enable workers_dev while that remains true.
-// With workers_dev disabled the Worker has no origin at all until a route
-// binds one, so a production deploy without this is live and unreachable.
-// The apex and www are bound as custom domains, which also makes the Host
-// gate in src/lib/chatgpt-identity.ts meaningful: identity is honored only
-// on these hostnames.
+// The origin still matters, for two reasons. A `*.workers.dev` origin is a
+// second name for the same Worker, and a session cookie should have exactly
+// one origin it is meaningful on; and with workers_dev disabled the Worker
+// has no origin at all until a route binds one, so a production deploy
+// without this is live and unreachable. The apex and www are bound as custom
+// domains, which is also what makes the Host gate in src/lib/identity.ts
+// meaningful: a session is honored only on these hostnames.
 //
 // Prerequisite: ownword.pro must exist as a zone in the same Cloudflare
 // account the deploy authenticates to. If it does not, `wrangler deploy`
