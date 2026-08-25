@@ -176,7 +176,7 @@ test("ACT-09: every portal failure is an honest, actionable state rather than a 
   const signedOut = describePortalFailure(401, "Sign in to manage billing.", "/#manage-billing");
   assert.match(signedOut.message, /sign in/i);
   assert.equal(signedOut.action.kind, "sign-in");
-  assert.ok(signedOut.action.kind === "sign-in" && signedOut.action.href.startsWith("/signin-with-chatgpt?return_to="));
+  assert.ok(signedOut.action.kind === "sign-in" && signedOut.action.href.startsWith("/signin?return_to="));
 
   const noAccount = describePortalFailure(404, "No billing account found.");
   assert.ok(noAccount.message.trim().length > 0);

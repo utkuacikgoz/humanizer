@@ -148,7 +148,7 @@ export default function CheckoutSuccessPage() {
 
         {visibleStatus === "signed-out" ? (
           <p className="error" role="alert" style={{ borderTop: "none" }}>
-            <a href="/signin-with-chatgpt?return_to=%2Fcheckout%2Fsuccess">Sign in</a> to view your unlocked result.
+            <Link href="/signin?return_to=%2Fcheckout%2Fsuccess">Sign in</Link> to view your unlocked result.
           </p>
         ) : null}
 
@@ -188,6 +188,10 @@ export default function CheckoutSuccessPage() {
               <div className="paid-actions">
                 <button type="button" className="copy-result" onClick={copyResult}>Copy full rewrite</button>
                 <Link className="next-action" href="/">Rewrite another draft</Link>
+                {/* M3-01: this rewrite is now claimed by the account, so it is
+                    in history. Say where it went rather than leaving the
+                    customer to guess whether it was kept. */}
+                <Link className="next-action" href="/history">Your saved rewrites</Link>
                 <p className="copy-status" role="status" aria-live="polite">
                   {copyStatus === "copied" ? "Copied to your clipboard." : copyStatus === "failed" ? "Copy was blocked. Select the text and copy it manually." : ""}
                 </p>

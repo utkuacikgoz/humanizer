@@ -7,7 +7,7 @@
 //
 // This module must stay free of `cloudflare:workers`, `next/headers`, and
 // `next/navigation` imports.
-import { resolveChatGPTUserFromHeaders } from "@/src/lib/chatgpt-identity";
+import { once, resolveSessionUser, type SessionPort } from "@/src/lib/identity";
 import type { AppDatabase } from "../../db/repository";
 import type { UnlockedResult } from "../../db/billing-repository";
 
@@ -16,17 +16,23 @@ import type { UnlockedResult } from "../../db/billing-repository";
 // hygiene, never the access control.
 const JOB_ID = /^[0-9a-f-]{8,64}$/i;
 
+/** Shared with src/lib/history-access.ts so both paths refuse the same shapes. */
+export function isJobIdShape(value: string): boolean {
+  return JOB_ID.test(value);
+}
+
 const NO_STORE = { "cache-control": "no-store" } as const;
 
 /** The subset of db/billing-repository.ts this route depends on. */
 export interface ResultAccessPort {
-  findUserIdByExternalSubject(db: AppDatabase, externalSubject: string): Promise<string | null>;
   getUnlockedResult(db: AppDatabase, input: { userId: string; jobId: string }): Promise<UnlockedResult | null>;
 }
 
 export interface ResultAccessDeps {
   db: AppDatabase;
   billing: ResultAccessPort;
+  /** Identity is a session row now, so resolving it needs the database too. */
+  auth: SessionPort;
 }
 
 function notFound(pending = false) {
@@ -47,10 +53,12 @@ function notFound(pending = false) {
  * authority; that is enforced by this function simply never reading those
  * parameters, and asserted in tests/result-access.test.mts.
  *
- * `loadDeps` is invoked lazily and only after the cheap identity/shape
- * checks pass, so an unauthenticated or malformed request never needs a
- * database binding at all — which is also what lets the route's 401/404
- * behavior be asserted in an environment with no D1.
+ * `loadDeps` is invoked lazily and memoized, so a caller with no session
+ * cookie and a request with a malformed job id never need a database binding
+ * at all — which is also what lets the route's 401/404 behavior be asserted
+ * in an environment with no D1. Identity itself is now a database lookup
+ * (src/lib/identity.ts), so a caller who DOES present a cookie loads deps
+ * once and shares them with the entitlement check below.
  */
 export async function buildResultResponse(
   request: Request,
@@ -59,15 +67,25 @@ export async function buildResultResponse(
   const jobId = new URL(request.url).searchParams.get("job")?.trim() ?? "";
   if (!JOB_ID.test(jobId)) return notFound();
 
-  const user = resolveChatGPTUserFromHeaders(request);
-  if (!user) {
-    return Response.json({ error: "Sign in to view this result." }, { status: 401, headers: NO_STORE });
+  const deps = once(loadDeps);
+  let userId: string;
+  try {
+    const user = await resolveSessionUser(request, deps);
+    if (!user) {
+      return Response.json({ error: "Sign in to view this result." }, { status: 401, headers: NO_STORE });
+    }
+    // The session already names the local user row; nothing here maps an
+    // identifier the client supplied onto an account.
+    userId = user.userId;
+  } catch {
+    // Identity could not be resolved (no binding, a database failure). Fail
+    // closed as not-found rather than as "signed out", which would send a
+    // signed-in customer round a sign-in loop that cannot help them.
+    return notFound();
   }
 
   try {
-    const { db, billing } = await loadDeps();
-    const userId = await billing.findUserIdByExternalSubject(db, user.userId);
-    if (!userId) return notFound(true);
+    const { db, billing } = await deps();
 
     const unlocked = await billing.getUnlockedResult(db, { userId, jobId });
     if (!unlocked) {

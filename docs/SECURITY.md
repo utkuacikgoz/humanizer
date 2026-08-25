@@ -176,13 +176,13 @@ Where an empirical result depends on the local dev runtime rather than real Clou
 
 ## Verdict: NO-GO for charging real customers today
 
-Five blockers, below. One of them (SEC-01) is a proven, end-to-end authentication bypass that hands one person another person's paid writing. One (SEC-04) charges a returning subscriber a second time on the *normal* journey, not an edge case. The rest are controls this document already declares release-critical.
+Five blockers, below. SEC-01 was a proven, end-to-end authentication bypass that handed one person another person's paid writing; it is **resolved** as of 2026-08-25 by deleting header identity outright and replacing it with magic-link sessions. One (SEC-04) charges a returning subscriber a second time on the *normal* journey, not an edge case. The rest are controls this document already declares release-critical.
 
 This is not a verdict about carelessness. The entitlement path, the claim transaction, the webhook inbox, the preview projection, the enumeration-oracle discipline, and secret hygiene are built to the standard this document asks for, and most of them were verified sound under adversarial probing (see "What is genuinely sound" — it is long, and it is meant to be). The blockers sit almost entirely at the seam between this application and the platform it is about to be deployed onto, plus the privacy commitments that were deliberately deferred.
 
 ### Blockers
 
-1. **SEC-01 (Critical)** — Two forged request headers are a complete authentication bypass. *Proven end-to-end against the running server*: forged headers returned a victim's full unlocked rewrite with HTTP 200. The application has no defence of its own; it relies entirely on an unproven assumption about the hosting boundary, and the repo's own deploy path publishes a second origin.
+1. **SEC-01 (Critical, RESOLVED 2026-08-25)** — Two forged request headers were a complete authentication bypass. *Proven end-to-end against the running server*: forged headers returned a victim's full unlocked rewrite with HTTP 200. The application has no defence of its own; it relies entirely on an unproven assumption about the hosting boundary, and the repo's own deploy path publishes a second origin.
 2. **SEC-02 (High)** — The paywall is extractable for free, at scale, by shaping input. For short inputs the server returns the **entire** rewrite with `hiddenWordCount: 0`.
 3. **SEC-04 (High)** — `/api/checkout` never checks whether the caller is already subscribed. The default returning-customer journey walks an existing subscriber straight into a second $9.99/mo subscription.
 4. **SEC-06 (High)** — Customer writing is stored in D1 as indefinite plaintext with no purge, no expiry sweeper, and no deletion path. D-P01 and D-P04 are still OPEN, so this would ship as an accident rather than a decision.
@@ -205,7 +205,40 @@ Per `docs/AGENTS.md`, closing any QA gate or milestone is a PO decision; nothing
 
 ## Findings, ranked by severity
 
-### SEC-01 — Critical — Forged platform identity headers are a full authentication bypass (proven)
+### SEC-01 — Critical — RESOLVED 2026-08-25 — Forged platform identity headers were a full authentication bypass (proven)
+
+> **Resolution.** `src/lib/chatgpt-identity.ts` and `app/chatgpt-auth.ts` are **deleted**, not deprecated.
+> `resolveChatGPTUserFromHeaders()` no longer exists, and no code path anywhere reads
+> `oai-authenticated-user-*`. There is no header left to forge, so this is a fix at the root rather
+> than the containment the host gate provided.
+>
+> Identity now comes from an email magic-link session: a 256-bit CSPRNG token mailed to the address,
+> redeemed exactly once through a guarded write decided on D1's rows-affected, exchanged for a
+> `__Host-ownword_session` cookie (HttpOnly, Secure, SameSite=Lax, Path=/, no Domain). Only SHA-256
+> digests of the token and the session id are stored, so a database read yields nothing presentable
+> as a credential. Where a session cannot be carried safely (plain http off a dev host) the cookie
+> builder returns null and sign-in is refused, rather than downgrading.
+>
+> The remediation items above are superseded, not completed as written: item 1 (`workers_dev: false`
+> plus a bound route) shipped and remains in force; items 2 and 3 described how to make the header
+> scheme survivable and no longer apply to a scheme that is gone.
+>
+> **What this trades.** A cookie is presented automatically by the browser, which a header scheme
+> was not, so CSRF became reachable for the first time. That is answered by `SameSite=Lax` plus an
+> Origin check on every state-changing route (checkout, billing portal, link request, sign-out); a
+> mismatched Origin is 403, a missing one is allowed for non-browser callers. The remaining
+> credential-theft surface is ordinary session theft (XSS, device access), which `HttpOnly` and the
+> host gate reduce but do not eliminate.
+>
+> **Not yet evidenced.** No adversarial pass has been run against the new scheme, and no deployed
+> test asserts these properties on the production host. Verified against real SQLite, the built
+> Worker without bindings, and 31 regression tests in `tests/magic-link.test.mts` covering
+> single-use, expiry, tampering, enumeration-indistinguishability, rate limits, cookie flags, the
+> host gate, and open-redirect refusal. The original finding is preserved below unchanged, as the
+> record of what was fixed.
+
+**Original finding (2026-08-24), retained for the record:**
+
 
 **Where.** `src/lib/chatgpt-identity.ts:27` (`resolveChatGPTUserFromHeaders`) resolves identity from exactly two request headers, `oai-authenticated-user-id` and `oai-authenticated-user-email`. There is no signature, no shared secret, no origin check, and no allowlist. There is no `middleware.ts` anywhere in the repository (verified: none at root, `app/`, or `src/`), and `/signin-with-chatgpt` returns 404 locally because it is entirely the platform's route. Every authenticated surface — `app/api/result/route.ts`, `app/api/checkout/route.ts`, `app/api/billing/portal/route.ts`, `app/chatgpt-auth.ts` — funnels through that one function.
 

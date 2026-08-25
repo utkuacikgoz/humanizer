@@ -50,7 +50,7 @@ V1 contains one journey:
 - Mass-generated SEO pages.
 - Team workspaces, collaboration, public sharing, mobile apps, browser extensions, and a public API.
 
-Paid history, edit/revision storage, sentence restore/regeneration, protected-phrase controls, and self-service deletion are required paid-workflow work but remain open; they must not be advertised as available until implemented.
+Paid history list/detail/delete is implemented (M3-01): a signed-in owner can see their unlocked rewrites at `/history`, open one under the same entitlement check that governs `/api/result`, and delete one. Edit/revision storage, sentence restore/regeneration, protected-phrase controls, the purge worker that drains queued deletions, and account deletion remain open and must not be advertised as available until implemented.
 
 ## Current product behavior
 
@@ -85,7 +85,33 @@ The append-only ledger from D-015 is now wired into entitled `/api/humanize` req
 
 An entitled successful request returns the **complete result** directly, not an anonymous preview, together with the qualitative checks, measured improvement count, protected items, and a usage summary (`consumed`, `allowance`, `remaining`, `periodEnd`, and `paidUseCount`). The landing workspace renders this full paid result and supports copy.
 
-This closes the previous gap where the ledger existed but no request path used it. It does not implement paid history, editing, sentence controls, protected phrases, or deletion.
+This closes the previous gap where the ledger existed but no request path used it. It does not implement editing, sentence controls, protected phrases, or account deletion.
+
+A successful entitled rewrite is now also recorded as an owned job, so a subscriber's day-to-day rewrites reach `/history`. The write is best-effort and deliberately outside the paid guarantee: if it fails the customer still receives the complete rewrite and the ledger is left exactly as committed, because a missing history row is not worth a failed request. It is idempotent on the owner plus the request's idempotency key, so a retry writes no second row. Owned jobs never receive an anonymous capability; the schema's invariant is exactly one access principal per job.
+
+Retention for owned payloads: kept until the owner deletes the item or the account, never aged out on a timer. A regression test asserts an owned payload survives the same purge run that removes an expired anonymous one. This is documented for customers in Privacy and still requires Legal review under M4-03.
+
+### Paid history
+
+`/history` is a private, `noindex` surface listing the rewrites the signed-in account owns.
+
+- Every list, detail, and delete query is filtered by the user id resolved server-side from the hosting boundary's identity headers. The only client-supplied value any of these paths accepts is a single job id, re-checked against `owner_user_id` in the same query.
+- The list returns metadata only: mode, date, word counts, state, and the same preview-projection fields an anonymous visitor already sees before paying. The full rewrite is never in a list response.
+- Opening one returns the complete rewrite through the existing ownership plus active-entitlement decision, not a second copy of it. A job owned by nobody, owned by someone else, or already deleted returns the same not-found shape as one that never existed.
+- No history path reads an anonymous preview capability, so a capability grants its one job through `/api/preview` as before and enumerates nothing.
+- Deleting an item voids the stored source, result, and projection, nulls any protected-item reference, stamps the purge tombstone, and queues a `history_item` deletion job. It is idempotent, and it is not gated on an active entitlement, so a lapsed customer can still erase their own writing.
+
+A successful entitled rewrite is also recorded as an owned job, so a subscriber's day-to-day rewrites reach history and not only the ones claimed through checkout. That write is best-effort and outside the paid guarantee: if it fails the customer still receives the complete rewrite and the ledger is left as committed. It is idempotent on the owner plus the request's idempotency key, so a retry writes no second row.
+
+### Purge worker
+
+The queued deletion job is the enqueue half of the purge workflow, and an hourly scheduled Worker drains it. A drain claims a bounded batch with a compare-and-set write decided on rows-affected, so two overlapping runs can never process the same row twice; a claim carries a lease, so a worker that dies mid-job leaves the row reclaimable rather than wedging the queue; a completed job is never re-processed; and a job that keeps failing is retried five times and then parked without blocking the rest of the batch.
+
+The same pass runs the anonymous retention sweep. That sweep already ran opportunistically whenever someone submitted a rewrite, which is not the same as a guarantee: a week with no traffic swept nothing while Privacy promised 30 days. The schedule closes that gap.
+
+Deletion is auditable without retaining text. `deletion_audit_events` records what was deleted, when, and under whose authority, and its detail column physically cannot hold prose, a hash, or anything derived from a driver error object, because a D1 error can carry the bound parameters of the failing statement and those parameters are the customer's writing.
+
+Account deletion remains manual by email, by product decision. Privacy states this plainly and must keep doing so until a self-service path exists.
 
 ## Experience requirements
 
@@ -154,13 +180,13 @@ Status: code-complete or substantially complete through M2-10, including D-015 l
 
 ### M3 â€” Paid result workflow
 
-Status: partial. Copy, direct paid result rendering, post-checkout result evidence, bottom-funnel analytics, and second-paid-use semantics are implemented. Paid history, edit/revision workflow, sentence restore/regeneration, protected phrases, self-service history/account deletion, purge completion evidence, and full responsive/manual QA remain open.
+Status: partial. Copy, direct paid result rendering, post-checkout result evidence, bottom-funnel analytics, second-paid-use semantics, and M3-01's authorized history list/detail/delete are implemented. The purge worker that drains queued deletion jobs and runs the scheduled anonymous retention sweep is implemented. Still open: the edit/revision workflow, sentence restore/regeneration, protected phrases, self-service account deletion (manual by email by PO decision), the completion evidence for the published deletion window, history/deletion analytics events, and full responsive/manual QA.
 
 ### M4 â€” Commercial release
 
 Status: open. Release blockers include:
 
-- `ownword.pro` currently serves a Hostinger parked-domain page rather than this application;
+- email magic-link sign-in is implemented (`/signin`) and replaces the dead `/signin-with-chatgpt` path, but it has never run against a real mailer or a real database: production requires a verified Resend sending domain, the `RESEND_API_KEY` secret, and applied D1 migrations, and the deploy workflow now fails loudly without the key. No end-to-end sign-in has been performed on the production host;
 - production provider selection and frozen benchmark;
 - production D1/guard/Stripe/webhook/live-price configuration and smoke/reconciliation;
 - Legal review and approval of Terms, Privacy, retention, provider, refund, and jurisdiction language;

@@ -30,8 +30,9 @@ The remaining quality caveat is outside the activation backlog: the deployed det
 | See the AHA | Comparison, change marks, protected facts, qualitative checks, coherent preview, and mobile stacking are implemented. | Production rewrite quality is not established by the deterministic provider. |
 | Decide to buy | The offer discloses recurring price, monthly allowance, sign-in requirement, and cancellation route. A server readiness probe disables checkout if D1, Stripe configuration, or price integrity is unavailable. | Live Stripe credentials and prices must pass the readiness probe in the deployed environment. |
 | Checkout and return | Checkout is server-owned; the private success route is `noindex`; webhook-confirmed entitlement unlocks the preserved result with bounded polling. | Production payment smoke, reconciliation, and release sign-off remain open. |
-| Paid humanization | An entitled `/api/humanize` request reserves allowance through the append-only ledger, releases on failure/no-op, commits successful words, and returns the complete rewrite plus usage. | Paid history, editing, sentence restore/regeneration, and protected-phrase controls remain open. |
-| Paid result | The success page shows full marked comparison and protected evidence, supports accessible copy, links to another rewrite and Billing Portal, and fires completion events once. The landing workspace also renders direct paid results with quota remaining. | Paid history and deletion/account workflows remain open. |
+| Paid humanization | An entitled `/api/humanize` request reserves allowance through the append-only ledger, releases on failure/no-op, commits successful words, returns the complete rewrite plus usage, and records it as an owned job so it appears in the account's history. | Editing, sentence restore/regeneration, and protected-phrase controls remain open. |
+| Paid result | The success page shows full marked comparison and protected evidence, supports accessible copy, links to another rewrite, to `/history`, and to the Billing Portal, and fires completion events once. The landing workspace also renders direct paid results with quota remaining. | Account deletion remains open. |
+| Paid history | `/history` lists the rewrites the signed-in account owns, metadata only; opening one applies the same ownership plus active-entitlement check as `/api/result`; deleting one voids the stored text, stamps the purge tombstone, and queues a `history_item` deletion job. Every query filters by the server-derived user id and anonymous capabilities enumerate nothing. | No history or deletion analytics events fire. Account deletion is manual by email by PO decision, and `/privacy` says so. |
 | Second use | Anonymous repeat previews use `repeat_preview`; `second_humanization` fires only on the second successful entitled rewrite, derived from the ledger. | A production analytics destination and retention reporting remain outside this activation record. |
 
 ## Activation status matrix
@@ -69,7 +70,8 @@ The ACT-01 through ACT-16 program is complete. The product is not commercially r
 - configure and verify production D1, distributed preview guard secret, Stripe credentials, webhook secret, and live price IDs;
 - select and benchmark the production humanization provider;
 - obtain Legal approval for Terms, Privacy, retention, processor, refund, and jurisdiction language;
-- implement paid history, local editing/revisions, sentence restore/regeneration, protected phrases, and self-service deletion;
+- persist an entitled request's rewrite so it reaches paid history, and settle the retention rule for owned payloads that this requires;
+- implement local editing/revisions, sentence restore/regeneration, and protected phrases (the purge worker that drains queued deletion jobs and runs the anonymous retention sweep on an hourly cron is implemented; account deletion stays manual by email by PO decision);
 - complete production-like security, billing, accessibility, manual QA, smoke, reconciliation, and rollback gates.
 
 ## Rejected activation tactics

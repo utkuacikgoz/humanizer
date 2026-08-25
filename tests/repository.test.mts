@@ -172,6 +172,36 @@ test("leaves anonymous drafts inside the retention window untouched", async () =
   assert.notEqual(payload.sourceRef, "");
 });
 
+// M3-02 retention decision: owned payloads are kept until the owner deletes
+// the item or the account. They do not age out on a timer. This asserts the
+// two halves together, so a future change that "simplifies" the purge query
+// by dropping its owner predicate fails here rather than quietly deleting a
+// subscriber's paid history.
+test("purges an expired anonymous payload in the same run that leaves an owned one intact", async () => {
+  const db = await createTestDatabase();
+  const anonymous = await persistHumanizationJob(db, { ...baseInput, idempotencyKey: crypto.randomUUID() });
+  const owned = await persistHumanizationJob(db, { ...baseInput, idempotencyKey: crypto.randomUUID() });
+
+  const stale = new Date(Date.now() - ANONYMOUS_RETENTION_MS - 60_000);
+  await db.update(jobPayloads).set({ createdAt: stale });
+
+  const ownerId = crypto.randomUUID();
+  await db.insert(users).values({ id: ownerId, externalSubject: "retained-owner", contactEmail: "owner@example.com" });
+  await db.update(humanizationJobs).set({ ownerUserId: ownerId }).where(eq(humanizationJobs.id, owned.jobId));
+
+  assert.equal(await purgeExpiredAnonymousPayloads(db), 1, "only the anonymous payload is in scope");
+
+  const [anonymousPayload] = await db.select().from(jobPayloads).where(eq(jobPayloads.jobId, anonymous.jobId)).limit(1);
+  assert.equal(anonymousPayload.sourceRef, "");
+  assert.equal(anonymousPayload.resultRef, null);
+  assert.ok(anonymousPayload.purgedAt);
+
+  const [ownedPayload] = await db.select().from(jobPayloads).where(eq(jobPayloads.jobId, owned.jobId)).limit(1);
+  assert.equal(ownedPayload.purgedAt, null, "an owned payload is kept until its owner deletes it");
+  assert.equal(ownedPayload.sourceRef, baseInput.original);
+  assert.equal(ownedPayload.resultRef, baseInput.result);
+});
+
 test("never purges a job someone has paid for", async () => {
   const db = await createTestDatabase();
   const persisted = await persistHumanizationJob(db, { ...baseInput, idempotencyKey: crypto.randomUUID() });

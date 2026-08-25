@@ -4,45 +4,23 @@ import { headers } from "next/headers";
 import { productConfig } from "@/src/config/product";
 import { pricingConfig } from "@/src/config/pricing";
 import { MIN_PAYWALLABLE_INPUT_WORDS } from "@/src/lib/preview-projection";
+import {
+  LEGAL_PAGES_LAST_UPDATED,
+  buildPublicPageMetadata,
+  publicPage,
+  readRequestHost,
+} from "@/src/lib/public-pages";
 
-// Mirrors app/robots.txt/route.ts and app/sitemap.xml/route.ts: canonical/OG/
-// index output is gated on the request Host matching productConfig.domain
-// exactly, so a staging/preview/localhost Host never gets indexed or a
-// canonical it can't actually serve. Duplicated locally rather than shared
-// because SEO owns these route files independently of app/layout.tsx.
-function configuredSiteUrl() {
-  const configuredDomain = productConfig.domain.trim();
-  if (!configuredDomain) return null;
-  try {
-    const url = new URL(/^https?:\/\//i.test(configuredDomain) ? configuredDomain : `https://${configuredDomain}`);
-    return new URL("/privacy", url);
-  } catch {
-    return null;
-  }
-}
-
+// SEO-005. Title, description, canonical, robots, OG and Twitter come from
+// the shared registry in src/lib/public-pages.ts, which host-gates every
+// indexable field the same way app/robots.txt/route.ts and
+// app/sitemap.xml/route.ts do: a staging, preview or localhost Host never
+// gets indexed or a canonical it cannot serve.
 export async function generateMetadata(): Promise<Metadata> {
-  const configuredUrl = configuredSiteUrl();
-  const requestHeaders = await headers();
-  const requestHost = (requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "")
-    .split(",")[0]
-    .trim()
-    .toLowerCase();
-  const canonicalUrl = configuredUrl && requestHost === configuredUrl.host.toLowerCase() ? configuredUrl : null;
-  const title = `Privacy Policy | ${productConfig.productName}`;
-  const description = `How ${productConfig.productName}, operated by ${productConfig.legalCompanyName}, handles the text you paste and your account data.`;
-
-  return {
-    title,
-    description,
-    alternates: canonicalUrl ? { canonical: canonicalUrl } : undefined,
-    robots: canonicalUrl ? { index: true, follow: true, nocache: false } : { index: false, follow: false, nocache: true },
-    openGraph: { title, description, type: "article", url: canonicalUrl ?? undefined, siteName: productConfig.productName },
-    twitter: { card: "summary", title, description },
-  };
+  return buildPublicPageMetadata(publicPage("/privacy"), readRequestHost(await headers()));
 }
 
-const LAST_UPDATED = "2026-08-23";
+const LAST_UPDATED = LEGAL_PAGES_LAST_UPDATED;
 
 export default function PrivacyPolicyPage() {
   return (
@@ -117,8 +95,10 @@ export default function PrivacyPolicyPage() {
           when it is done.
         </p>
         <p>
-          Retention and self-service deletion for paid history will be documented here, and will be
-          user-controlled, once that part of the product ships. It is not available yet.
+          Rewrites saved to your history are kept until you delete them. They do not expire on a timer, because
+          a history that quietly empties itself is worse than none at all. You control this yourself: open{" "}
+          <Link href="/history">your history</Link>, delete an item, and its source text, rewritten output, and
+          protected terms are erased at that moment rather than merely hidden from you.
         </p>
         <p>
           Regardless of the above, your source text, the rewritten output, and any protected terms are never
@@ -138,10 +118,13 @@ export default function PrivacyPolicyPage() {
       <section>
         <h2>Deletion requests</h2>
         <p>
-          Self-service deletion of your history and account data is planned but not yet available in the
-          product. Until it ships, email{" "}
+          You can delete any saved rewrite yourself from <Link href="/history">your history</Link>, one item at
+          a time, and the text is erased when you do.
+        </p>
+        <p>
+          Deleting your account and everything under it is not yet self-service. Until it is, email{" "}
           <a href={`mailto:${productConfig.supportEmail}`}>{productConfig.supportEmail}</a> from your account
-          email address to request deletion, and we will act on it manually.
+          email address and we will act on it manually and confirm when it is done.
         </p>
       </section>
 
