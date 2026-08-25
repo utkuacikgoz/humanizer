@@ -2,26 +2,28 @@
 // authenticated caller's own mapped Stripe customer — never a
 // client-supplied customer ID (docs/MONETIZATION.md).
 //
-// No app-level CSRF token: see app/api/checkout/route.ts's identical
-// note — this route has the same header-only identity boundary.
-import { resolveChatGPTUserFromHeaders } from "@/src/lib/chatgpt-identity";
+// CSRF: see app/api/checkout/route.ts's note — SameSite=Lax plus the
+// same-origin check, now that identity is a cookie.
+import { isCrossSiteRequest, once, readSessionCookie, resolveSessionUser } from "@/src/lib/identity";
 
 export async function POST(request: Request) {
-  const user = resolveChatGPTUserFromHeaders(request);
-  if (!user) {
-    return Response.json({ error: "Sign in to manage billing." }, { status: 401, headers: { "cache-control": "no-store" } });
+  if (isCrossSiteRequest(request)) {
+    return Response.json({ error: "This request did not come from Ownword." }, { status: 403, headers: { "cache-control": "no-store" } });
   }
+  if (!readSessionCookie(request)) return signedOut();
 
   try {
-    const [{ getDb }, { getStripeClient, StripeNotConfiguredError, StripeConfigInvalidError }, billing] = await Promise.all([
+    const [{ getDb }, { getStripeClient, StripeNotConfiguredError, StripeConfigInvalidError }, billing, auth] = await Promise.all([
       import("../../../../db/index"),
       import("../../../../db/stripe-client"),
       import("../../../../db/billing-repository"),
+      import("../../../../db/auth-repository"),
     ]);
     const db = getDb();
 
-    const userId = await billing.findUserIdByExternalSubject(db, user.userId);
-    const customerId = userId ? await billing.getStripeCustomerId(db, userId) : null;
+    const user = await resolveSessionUser(request, once(async () => ({ db, auth })));
+    if (!user) return signedOut();
+    const customerId = await billing.getStripeCustomerId(db, user.userId);
     if (!customerId) {
       return Response.json({ error: "No billing account found." }, { status: 404, headers: { "cache-control": "no-store" } });
     }
@@ -42,4 +44,8 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "Billing portal could not be opened. Please try again." }, { status: 502, headers: { "cache-control": "no-store" } });
   }
+}
+
+function signedOut() {
+  return Response.json({ error: "Sign in to manage billing." }, { status: 401, headers: { "cache-control": "no-store" } });
 }

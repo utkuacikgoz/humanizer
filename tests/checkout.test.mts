@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { POST } from "../app/api/checkout/route";
 
+// Presence of a session cookie is what gets past the cheap signed-out check;
+// the session itself is resolved against the database, which these
+// route-level tests deliberately do not provide — every assertion below is
+// about a refusal that happens before or without one.
 const AUTH_HEADERS = {
-  "oai-authenticated-user-id": "user_123",
-  "oai-authenticated-user-email": "person@example.com",
+  cookie: "ownword_session=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 };
 
 function request(body: unknown, headers: Record<string, string> = {}) {
@@ -15,6 +18,17 @@ function request(body: unknown, headers: Record<string, string> = {}) {
   });
 }
 
+test("refuses a request that a third-party page made", async () => {
+  // Identity is a cookie now, so cross-site request forgery is a real risk
+  // this route did not previously have to answer for.
+  const response = await POST(new Request("http://localhost/api/checkout", {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: "https://evil.test", ...AUTH_HEADERS },
+    body: JSON.stringify({ capability: "a".repeat(43), planId: "starter" }),
+  }));
+  assert.equal(response.status, 403);
+});
+
 test("rejects a non-JSON content type", async () => {
   const response = await POST(new Request("http://localhost/api/checkout", { method: "POST", headers: { "content-type": "text/plain" }, body: "x" }));
   assert.equal(response.status, 415);
@@ -24,7 +38,7 @@ test("requires authentication before anything else", async () => {
   const response = await POST(request({ capability: "a".repeat(43), planId: "starter" }));
   assert.equal(response.status, 401);
   const body = (await response.json()) as { signInPath?: string };
-  assert.match(body.signInPath ?? "", /^\/signin-with-chatgpt\?return_to=/);
+  assert.match(body.signInPath ?? "", /^\/signin\?return_to=/);
 });
 
 test("rejects malformed JSON for an authenticated request", async () => {

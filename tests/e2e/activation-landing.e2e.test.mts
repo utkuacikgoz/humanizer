@@ -81,7 +81,7 @@ test("a verified purchase CTA explains sign-in before the click", { skip: blocke
     body: JSON.stringify({
       available: true,
       signInRequired: true,
-      message: "You will sign in with ChatGPT before checkout.",
+      message: "You will sign in with your email before checkout.",
     }),
   }));
   await gotoHydrated(page, "/");
@@ -93,6 +93,6 @@ test("a verified purchase CTA explains sign-in before the click", { skip: blocke
 
   const unlock = unlockButton(page);
   assert.equal(await unlock.isEnabled(), true);
-  assert.match(await unlock.locator("xpath=..").innerText(), /sign in with ChatGPT before checkout/i);
+  assert.match(await unlock.locator("xpath=..").innerText(), /sign in with your email before checkout/i);
   assert.deepEqual(session.pageErrors, []);
 });

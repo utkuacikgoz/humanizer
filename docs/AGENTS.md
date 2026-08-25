@@ -42,9 +42,14 @@ closed. Current workspace evidence establishes:
 - The M2 usage ledger is concurrency-safe and is now enforced for entitled `/api/humanize` requests. Successful
   paid requests return the full result plus allowance/consumption state; failures and no-op attempts release their
   reservations. Billing readiness, Checkout, webhook projection, private checkout return, and unlock paths exist.
-- M3 is partial: full paid-result display and accessible copy exist. Authorized history/edit revisions, sentence
-  restore/regeneration, protected-phrase controls, and self-service history/account deletion remain open. Funnel
-  analytics exist for the current journey, but the full M3 event and deletion acceptance criteria are not closed.
+- M3 is partial: full paid-result display and accessible copy exist, and authorized history list/detail/delete
+  (M3-01) is implemented with owner-filtered queries, a soft-delete that voids the stored text, and a queued purge
+  job. Only checkout-claimed jobs currently have an owner, so history holds unlocked rewrites and not a
+  subscriber's day-to-day ones. The M3-05 purge worker now drains `deletion_jobs` and runs the anonymous retention
+  sweep on an hourly cron. Edit revisions, sentence restore/regeneration, protected-phrase controls, and account
+  deletion remain open; account deletion is manual by email by PO decision (2026-08-25), not an unbuilt feature.
+  Funnel analytics exist for the current journey, but the full M3 event and deletion acceptance criteria are not
+  closed.
 - M4 remains open. Hosting/ENG owns attaching `ownword.pro` (currently a Hostinger parked page) and production
   bindings; MON owns live Stripe/catalog verification and reconciliation evidence; HE owns the frozen production-
   provider benchmark; LEGAL owns counsel approval; AQA/MQA/SEC own production-like release, smoke, rollback, and
@@ -128,8 +133,77 @@ review/gate tasks and require production-like evidence; implementation must not 
 
 Implementation note (2026-08-25): M3-02 is partial because paid full-result display and accessible copy are
 implemented while persisted edit/revision behavior is open. M3-06 is partial for the current activation journey;
-history, deletion, and cancellation-related event acceptance remains open. M3-01, M3-03, M3-04, and the self-service
+history, deletion, and cancellation-related event acceptance remains open. M3-03, M3-04, and the self-service
 parts of M3-05 are open.
+
+M3-01 implementation note (2026-08-25): list, detail, and delete are implemented and every query filters by the
+server-derived user id. A successful entitled rewrite is now persisted as an owned job, so history is no longer
+limited to checkout-claimed work. Deleting an item voids the stored source, result, projection, and protected-item
+references inline and stamps the purge tombstone, so the text is erased at the moment of deletion rather than when
+a worker runs; the queued `deletion_jobs` row is for propagation and is drained by M3-05's purge worker. Delete is not
+gated on an active entitlement, so a lapsed customer can still erase their own writing. Not closed: no gate is
+self-granted here, and M3-01 remains PO's to close.
+
+Retention decision pending Legal review (M4-03): owned payloads are kept until the owner deletes the item or the
+account, with no timed expiry. This is now stated to customers in `app/privacy/page.tsx` under "What we store, and
+for how long" and "Deletion requests". Legal has not reviewed that wording. Account deletion is still manual by
+email and the privacy page says so plainly rather than implying self-service.
+
+Implementation note (2026-08-25, M3-01, ENG): authorized history list/detail/delete is implemented and covered by
+`tests/history-access.test.mts`. `src/lib/history-access.ts` holds the decisions, `db/history-repository.ts` the
+queries, `app/api/history/route.ts` and `app/api/history/[id]/route.ts` the thin handlers, and `/history` the
+signed-in surface. Every query is filtered by the user id resolved server-side from the boundary identity headers;
+the only client-supplied value accepted anywhere is one job id, re-checked against `owner_user_id` in the same
+query. No history path reads a preview capability, so an anonymous capability answers 401 and enumerates nothing.
+Delete voids `job_payloads.sourceRef`/`resultRef`/`previewProjection`, nulls `protected_items.valueRef`, stamps
+`purged_at` on both, and enqueues one `deletion_jobs` row (`subject_type: job`, `scope: history_item`,
+`status: pending`); it is idempotent on D1's `meta.changes` and is not gated on entitlement, so a lapsed customer
+can still erase their own writing.
+
+This does not close M3-01's gate, and three things remain open behind it:
+
+1. **Only checkout-claimed jobs ever have an owner.** `owner_user_id` is set exclusively by `claimJobForUser` during
+   the checkout linkage, and the entitled `/api/humanize` path returns the full rewrite without persisting a job at
+   all. A subscriber's day-to-day rewrites therefore never enter history. Persisting them needs an owned-job write
+   path and, before that, a retention rule for owned payloads — `purgeExpiredAnonymousPayloads` deliberately
+   excludes owned jobs, so nothing currently ages them out. That is a PO/LEGAL decision, not an ENG one, and it was
+   left open rather than decided here.
+2. **Nothing drains `deletion_jobs`.** (Closed by M3-05's purge worker, below.) The row is the enqueue half of the
+   purge workflow; the worker that propagates it to other stores/processors is M3-05.
+3. **No history or deletion analytics.** M3-06's history/deletion event acceptance is untouched.
+
+Implementation note (2026-08-25, M3-05 partial, ENG): the purge worker is implemented in
+`src/lib/purge-worker.ts` and covered by `tests/purge-worker.test.mts`. `drainDeletionJobs` claims a bounded batch
+of `deletion_jobs` with a compare-and-set UPDATE that names the exact `attempts` value it read and is decided on
+D1's `meta.changes`, so two concurrent drains can never both take a row and a re-read is never used to guess a
+winner. Claims carry a five-minute lease, so a worker that dies mid-job leaves the row reclaimable instead of
+wedging the queue; a completed job is never a candidate, so re-running a drain is a no-op. Each job runs in its own
+try/catch, retries are bounded at five attempts, and a job that exhausts them is parked as `failed` without
+blocking the rest of the batch. `runScheduledPurge` also runs `purgeExpiredAnonymousPayloads`; that sweep already
+ran opportunistically on the persist path, which only helps while someone is writing, so on a quiet week nothing
+enforced the 30 days `/privacy` publishes.
+
+Auditability without retaining text: `deletion_audit_events` records subject, scope, authority (the server-derived
+user id the deletion was requested under), time, and per-processor outcome. Its `detail` column is written only
+through `sanitizeAuditDetail`, which accepts numbers, booleans and short lowercase codes and rejects prose, long
+hex runs (a hash of a short draft is a confirmation oracle) and anything derived from a caught error object -- a D1
+error can carry the bound parameters of the failing statement, which in this application is the customer's writing.
+No `deletion_jobs` column and no audit column can hold text, and a test asserts it after five failed attempts whose
+error messages deliberately contain the source and result.
+
+Propagation is a registry (`DeletionProcessor`) rather than a hardcoded list, and it currently ships empty: there
+is no R2 bucket in `.openai/hosting.json`, no third-party AI provider receives text, Stripe holds billing records
+only, and nothing writes the analytics outbox. D1 is the only store holding customer writing, so the built-in
+propagation is the whole job today.
+
+Not done, deliberately: **self-service account deletion was cut by the PO (2026-08-25)** in favour of the existing
+manual-by-email route, so there is no account-deletion route, UI, or subscription-cancellation policy, and
+`app/privacy/page.tsx` is unchanged and still correct. The worker does handle a `full_account` scope row, because
+`deletion_jobs.scope` allows one and a queue with a scope the worker silently ignores would be worse than no queue;
+an operator handling a manual request can enqueue that row and have the text actually purged. No internal
+authenticated drain route was added -- the scheduled handler is the delivery path and `drainDeletionJobs` is driven
+directly by tests. M3-05 is not closed: account deletion and the completion evidence for the published window
+remain open, and closing the task is PO's decision.
 
 ### M4 — Commercial release
 

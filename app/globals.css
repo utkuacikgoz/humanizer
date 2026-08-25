@@ -872,6 +872,11 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .paid-result-actions > p:first-child { margin: 0; color: var(--ink-2); font-size: var(--t-sm); }
 .paid-result-actions .copy-result { min-width: 180px; }
 .paid-result-actions .copy-status { grid-column: 1 / -1; }
+/* Sits under the copy control, full width, quieter than the quota line
+   above it: reassurance the rewrite is kept, not another action. */
+.paid-result-history {
+  grid-column: 1 / -1; margin: 0; color: var(--ink-3); font-size: var(--t-xs);
+}
 
 .protected-note em { max-width: 46ch; color: var(--ink-3); font-style: normal; font-size: var(--t-xs); line-height: 1.5; }
 
@@ -1239,3 +1244,141 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   text-underline-offset: 2px;
   cursor: pointer;
 }
+
+/* ------------------------------------------------------------
+   HISTORY (M3-01)
+   No new visual vocabulary: this reuses the workspace surface,
+   the panel rules, and the existing control shapes. The list is
+   a stack of bordered rows in the same rhythm as .how-grid, so
+   an opened rewrite drops its .checks/.comparison straight in
+   and looks native.
+   ------------------------------------------------------------ */
+.history-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.history-item {
+  display: grid;
+  gap: var(--s3);
+  padding: var(--s5) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s2) var(--s4);
+}
+
+.history-meta strong { font-size: var(--t-md); font-weight: 650; letter-spacing: -.02em; }
+.history-meta small { color: var(--ink-3); font-size: var(--t-xs); }
+
+/* The approved preview projection only — the withheld remainder of an
+   unopened rewrite is never sent to this page in the first place. */
+.history-preview {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--ink-2);
+  font-family: var(--font-read);
+  font-size: var(--t-base);
+  line-height: 1.6;
+}
+
+.history-actions { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); align-items: center; }
+
+.history-delete, .history-cancel {
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  padding: var(--s2) var(--s4);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+/* Destructive, so it is named plainly and coloured with the accent ink
+   rather than dressed as the primary action. */
+.history-delete {
+  border: 1px solid var(--clay);
+  background: var(--clay-soft);
+  color: var(--clay);
+}
+
+.history-delete:hover { background: var(--clay); color: var(--paper); }
+
+.history-cancel {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.history-cancel:hover { border-color: var(--line-strong); color: var(--ink); }
+
+.history-warning {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+}
+
+.history-detail { display: grid; gap: var(--s4); }
+.history-detail .comparison { border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
+
+/* Sign in. The same workspace shell the rewriter and history use, with the
+   textarea swapped for one field: same paper, same rule weights, same
+   editor-footer holding the one action. Nothing new is introduced here. */
+.signin-copy {
+  margin: 0;
+  padding: var(--s5) var(--s5) 0;
+  max-width: 58ch;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+}
+
+.signin-label {
+  display: block;
+  padding: var(--s4) var(--s5) 0;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.signin-input {
+  display: block; width: 100%;
+  padding: var(--s3) var(--s5) var(--s5);
+  border: 0; outline: 0;
+  background: transparent; color: var(--ink);
+  font-family: var(--font-read); font-size: var(--t-lg); line-height: 1.62;
+  transition: background var(--dur-base) var(--ease-out);
+}
+.signin-input::placeholder { color: var(--ink-3); }
+.signin-input:focus { background: color-mix(in srgb, var(--green-bright) 3%, transparent); }
+
+.signin-note {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+}
+
+.signin-legal {
+  margin: 0;
+  padding: var(--s4) var(--s5) var(--s5);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  line-height: 1.55;
+}
+.signin-legal a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
+.signin-legal a:hover { color: var(--ink); }
+
+.signin-signout { padding: 0 var(--s5); }

@@ -10,7 +10,7 @@
 //
 // No `next/*` or `cloudflare:workers` imports, so this is testable under
 // plain Node and importable from a client component.
-import { chatGPTSignInPath } from "@/src/lib/chatgpt-identity";
+import { signInPath } from "@/src/lib/identity";
 import { productConfig } from "@/src/config/product";
 
 export type PortalFailureAction =
@@ -40,7 +40,7 @@ export function describePortalFailure(status: number, error?: string, returnTo =
     case 401:
       return {
         message: "Sign in to manage or cancel your subscription.",
-        action: { kind: "sign-in", href: chatGPTSignInPath(returnTo), label: "Sign in" },
+        action: { kind: "sign-in", href: signInPath(returnTo), label: "Sign in" },
       };
     case 404:
       return {

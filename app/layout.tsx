@@ -1,61 +1,41 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
-import { productConfig } from "@/src/config/product";
+import { buildPublicPageMetadata, publicPage, readRequestHost } from "@/src/lib/public-pages";
+import { serializeJsonLd, siteStructuredData } from "@/src/lib/site-structured-data";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
-function configuredSiteUrl() {
-  const configuredDomain = productConfig.domain.trim();
-  if (!configuredDomain) return null;
-
-  try {
-    const url = new URL(/^https?:\/\//i.test(configuredDomain) ? configuredDomain : `https://${configuredDomain}`);
-    return new URL("/", url);
-  } catch {
-    return null;
-  }
-}
-
+// SEO-005. Title, description, canonical, robots, OG and Twitter all come
+// from the one public-page registry in src/lib/public-pages.ts. The homepage
+// entry doubles as the site-wide default: private routes (/checkout/success,
+// /history) override `robots` and drop the canonical in their own layouts.
 export async function generateMetadata(): Promise<Metadata> {
-  const configuredBase = configuredSiteUrl();
-  const requestHeaders = await headers();
-  const requestHost = (requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "")
-    .split(",")[0]
-    .trim()
-    .toLowerCase();
-  const canonicalBase = configuredBase && requestHost === configuredBase.host.toLowerCase() ? configuredBase : null;
-  const title = `${productConfig.productName} | Natural AI Rewrites That Preserve Meaning`;
-  const description = `${productConfig.productName} turns generic AI assisted drafts into natural writing while protecting your meaning, facts, terminology, citations, and intended tone.`;
-  const socialImage = canonicalBase
-    ? { url: new URL("/og.png", canonicalBase), width: 1731, height: 909, alt: "Keep your meaning. Lose the machine tone." }
-    : undefined;
+  const requestHost = readRequestHost(await headers());
 
   return {
-    metadataBase: canonicalBase ?? undefined,
-    title,
-    description,
-    alternates: canonicalBase ? { canonical: canonicalBase } : undefined,
-    robots: canonicalBase
-      ? { index: true, follow: true, nocache: false }
-      : { index: false, follow: false, nocache: true },
-    openGraph: {
-      title,
-      description,
-      type: "website",
-      url: canonicalBase ?? undefined,
-      siteName: productConfig.productName,
-      images: socialImage ? [socialImage] : undefined,
-    },
-    twitter: { card: "summary_large_image", title, description, images: socialImage ? [socialImage.url] : undefined },
+    ...buildPublicPageMetadata(publicPage("/"), requestHost),
     // One SVG serves the tab, the bookmark, and the home-screen tile. It is
     // built to survive 16px: a solid tile, one counter-form, no hairlines.
     icons: { icon: "/icon.svg", shortcut: "/icon.svg", apple: "/icon.svg" },
   };
 }
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body className={`${geistSans.variable} ${geistMono.variable}`}>{children}</body></html>;
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // SEO-006. Site-level Organization/WebSite entity, emitted only on the
+  // canonical host. Off it, every page is noindex and claims nothing.
+  const structuredData = siteStructuredData(readRequestHost(await headers()));
+
+  return (
+    <html lang="en">
+      <body className={`${geistSans.variable} ${geistMono.variable}`}>
+        {structuredData ? (
+          <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(structuredData) }} />
+        ) : null}
+        {children}
+      </body>
+    </html>
+  );
 }

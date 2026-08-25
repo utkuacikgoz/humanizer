@@ -10,10 +10,11 @@ import { buildResultResponse } from "@/src/lib/result-access";
 
 export async function GET(request: Request) {
   return buildResultResponse(request, async () => {
-    const [{ getDb }, billing] = await Promise.all([
+    const [{ getDb }, billing, auth] = await Promise.all([
       import("../../../db/index"),
       import("../../../db/billing-repository"),
+      import("../../../db/auth-repository"),
     ]);
-    return { db: getDb(), billing };
+    return { db: getDb(), billing, auth };
   });
 }

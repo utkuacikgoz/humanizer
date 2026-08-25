@@ -173,7 +173,54 @@ Reason: Checkout recovery authority and stored-data lifecycle are separate contr
 prevents an expired link from being misrepresented as immediate deletion.
 
 Consequence: D-P01's earlier anonymous 24-hour deletion proposal is superseded. Authenticated paid-history
-retention, self-service deletion, guaranteed purge scheduling, backup retention, and counsel approval remain open.
+retention, self-service deletion, backup retention, and counsel approval remain open. Purge scheduling is settled
+by D-018.
+
+### D-018 — Purge runs on a schedule, not only on the write path
+
+Status: Accepted implementation record (2026-08-25, ENG, M3-05). Final Legal approval remains part of M4-03.
+
+Decision: an hourly Cloudflare cron trigger, declared in the generated `dist/server/wrangler.json` from
+`vite.config.ts`, drains the `deletion_jobs` queue and runs the anonymous retention sweep. Deletion of a history
+item still erases the text inside the request that accepts it; the schedule exists for propagation and retention,
+not to perform the erasure. The deletion audit trail (`deletion_audit_events`) records subject, scope, authority
+and time, and is structurally incapable of holding customer writing, a hash of it, or a driver error object.
+
+Reason: the retention sweep previously ran only when someone submitted a rewrite. A period with no traffic enforced
+nothing, while `/privacy` promises unclaimed anonymous text is deleted within 30 days. A promise that depends on
+unrelated customer activity is not a control.
+
+Consequence: self-service account deletion remains out of scope by PO decision (2026-08-25) and stays manual by
+email, as `/privacy` states. Completion evidence for the published window, backup/point-in-time-restore expiry, and
+propagation to any future non-D1 store remain open; the worker takes a processor registry so adding one is a
+registration rather than a rewrite of the deletion path.
+
+## D-019 — Email magic-link sessions replace Sign in with ChatGPT (2026-08-25)
+
+Decision: Ownword owns its own authentication. A single-use, 256-bit token is mailed to the address and
+redeemed exactly once for a `__Host-ownword_session` cookie backed by D1. `src/lib/chatgpt-identity.ts` and
+`app/chatgpt-auth.ts` are deleted; no code reads `oai-authenticated-user-*` any more.
+
+Reason: two independent failures, both fatal. First, every sign-in link targeted `/signin-with-chatgpt`, a
+route this repository never contained because the OpenAI hosting platform supplied it. On `ownword.pro` that
+path 404s, so no customer could sign in and therefore none could pay, unlock, view history, or manage billing.
+Second, the header scheme it fronted was unauthenticated: nothing on a plain Worker strips
+`oai-authenticated-user-*`, so any caller could assert any identity (SEC-01, proven end to end). Deleting the
+resolver removes the forgeable input rather than containing it.
+
+Alternatives considered and rejected: Google OAuth (fast, but locks out anyone without a Google account and
+asks a writing tool's users to attach one); passwords (needs an email sender anyway for resets, and takes on
+credential storage risk); a third-party auth vendor (cost and a dependency this product does not need at
+$9.99).
+
+Consequence: Ownword now owns deliverability. Production requires a verified Resend sending domain and the
+`RESEND_API_KEY` secret, and the deploy workflow fails loudly without it rather than shipping a dead front
+door. A cookie is sent automatically where a header was not, so CSRF became reachable and is answered by
+`SameSite=Lax` plus an Origin check on every state-changing route. Any legacy `users` row keyed to a ChatGPT
+subject is unreachable under the new `email:<address>` subject scheme and must be mapped if any exist; if
+nobody could sign in on that host, there are none. No sign-in has yet completed against a real mailer on the
+production host, and no adversarial pass has been run against the new scheme.
+
 
 ## Rejected
 
