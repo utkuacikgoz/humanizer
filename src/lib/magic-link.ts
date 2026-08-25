@@ -96,6 +96,25 @@ function json(body: unknown, status: number) {
   return Response.json(body, { status, headers: NO_STORE });
 }
 
+/**
+ * Loads the runtime dependencies, or null.
+ *
+ * `getDb()` throws when the D1 binding is missing, and letting that escape a
+ * route handler produces a bare 500 with no body — a visitor sees a broken
+ * page and an operator sees nothing they can act on. Every entry point below
+ * turns null into a specific, honest state instead. The caught error is never
+ * logged: a D1 error object can carry the bound parameters of the failing
+ * statement.
+ */
+async function tryLoadDeps(loadDeps: () => Promise<MagicLinkDeps>, context: string): Promise<MagicLinkDeps | null> {
+  try {
+    return await loadDeps();
+  } catch {
+    console.error(`[auth] ${context}: the database binding is unavailable, so sign-in cannot proceed`);
+    return null;
+  }
+}
+
 function redirect(location: string, cookies: string[] = []) {
   const headers = new Headers({ ...NO_STORE, location });
   for (const cookie of cookies) headers.append("set-cookie", cookie);
@@ -174,7 +193,8 @@ export async function buildSignInRequestResponse(
     return json({ error: "Sign-in is temporarily unavailable. Please try again shortly." }, 503);
   }
 
-  const deps = await loadDeps();
+  const deps = await tryLoadDeps(loadDeps, "request-link");
+  if (!deps) return json({ error: "Sign-in is temporarily unavailable. Please try again shortly." }, 503);
   const now = (deps.now ?? (() => new Date()))();
   const windowStart = Math.floor(now.getTime() / MAGIC_LINK_LIMITS.windowMs) * MAGIC_LINK_LIMITS.windowMs;
 
@@ -301,7 +321,11 @@ export async function buildVerifyResponse(
   // the same answer as a well-formed one that turns out to be spent.
   if (!TOKEN_SHAPE.test(token)) return failedVerification(safeReturnTo);
 
-  const deps = await loadDeps();
+  const deps = await tryLoadDeps(loadDeps, "verify");
+  // A database outage is not an expired link, and telling the customer it is
+  // would send them round a loop that cannot work. Distinct state, distinct
+  // message.
+  if (!deps) return redirect(`${SIGN_IN_PATH}?error=unavailable&return_to=${encodeURIComponent(safeReturnTo)}`);
   const now = (deps.now ?? (() => new Date()))();
 
   const consumed = await deps.auth.consumeMagicLinkToken(deps.db, {
@@ -367,7 +391,8 @@ export async function buildSessionStateResponse(
   if (!presented || !TOKEN_SHAPE.test(presented)) return json({ signedIn: false }, 200);
 
   try {
-    const deps = await loadDeps();
+    const deps = await tryLoadDeps(loadDeps, "session-state");
+    if (!deps) return json({ error: "Sign-in state is unavailable right now." }, 503);
     const now = (deps.now ?? (() => new Date()))();
     const identity = await deps.auth.findSessionIdentity(deps.db, {
       sessionDigest: await digestToken(presented),
@@ -395,7 +420,8 @@ export async function buildSignOutResponse(
   const presented = readSessionCookie(request);
   if (presented && TOKEN_SHAPE.test(presented)) {
     try {
-      const deps = await loadDeps();
+      const deps = await tryLoadDeps(loadDeps, "signout");
+      if (!deps) return json({ error: "Sign-out could not be completed. Please try again." }, 503);
       // The row goes, not just the cookie: clearing a cookie the customer's
       // browser holds does nothing about a copy of it somewhere else.
       await deps.auth.deleteSession(deps.db, await digestToken(presented));
