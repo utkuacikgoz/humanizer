@@ -74,11 +74,13 @@ const worker = {
   /**
    * M3-05 purge schedule (cron in vite.config.ts, hourly).
    *
-   * Deletion itself is not deferred to this handler — /api/history/{id} and
-   * /api/account void the customer's text inside the request that accepts the
-   * deletion. This drains the propagation queue those writes leave behind and
-   * ages out unclaimed anonymous payloads, so the windows /privacy publishes
-   * hold even on a day with no traffic at all.
+   * A history deletion is not deferred to this handler — /api/history/{id}
+   * voids the customer's text inside the request that accepts the deletion.
+   * This drains the propagation queue those writes leave behind, and ages out
+   * unclaimed anonymous payloads. The second half is the one nothing else
+   * guarantees: the opportunistic sweep on the persist path only runs when
+   * someone is writing, so on a quiet week nothing enforced the 30 days
+   * /privacy promises.
    *
    * Everything is swallowed here on purpose: a scheduled run has no customer
    * waiting, an unhandled rejection would be retried by the platform against a

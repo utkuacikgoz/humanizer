@@ -1,8 +1,8 @@
 // M3-05 purge worker: the half of the deletion workflow that runs after the
 // customer has already been told "deleted".
 //
-// What this is NOT: it is not where the erasure happens. db/history-repository
-// and db/account-deletion-repository void the source, result, projection and
+// What this is NOT: it is not where a history deletion's erasure happens.
+// db/history-repository voids the source, result, projection and
 // protected-item references inside the request that accepts the deletion, so
 // the text is gone before the response is written. This worker drains the
 // `deletion_jobs` queue those writes leave behind and propagates the deletion
@@ -27,7 +27,7 @@ import type { AppDatabase } from "../../db/repository";
 import { purgeExpiredAnonymousPayloads } from "../../db/repository";
 import { recordDeletionAudit } from "../../db/deletion-audit";
 
-const { deletionJobs, humanizationJobs, jobPayloads, protectedItems, resultRevisions, users } = schema;
+const { deletionJobs, humanizationJobs, jobPayloads, protectedItems, resultRevisions } = schema;
 
 /** How many queued deletions one drain may claim. Bounded so a scheduled run cannot become an unbounded D1 scan. */
 export const DELETION_DRAIN_BATCH = 20;
@@ -44,15 +44,6 @@ export const DELETION_LEASE_MS = 5 * 60 * 1000;
  * never reported to the customer as success.
  */
 export const MAX_DELETION_ATTEMPTS = 5;
-
-/**
- * The window published to customers in app/privacy/page.tsx. Erasure of the
- * text itself is immediate; this is the outer bound for propagation to
- * everywhere else, including the provider's short-term point-in-time restore
- * window. The hourly schedule in vite.config.ts means the queue normally
- * drains in minutes; the published number is the promise, not the target.
- */
-export const DELETION_PROPAGATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface DeletionSubject {
   subjectType: "user" | "job";
@@ -130,19 +121,22 @@ async function propagateJobDeletion(db: AppDatabase, jobId: string, now: Date): 
 }
 
 /**
- * Propagates an account deletion across the owner's jobs, a bounded page at a
- * time. Returns `false` when the page filled, meaning more work remains and
- * the queue row must stay pending rather than being marked complete.
+ * Propagates a whole-account deletion across the owner's jobs, a bounded page
+ * at a time. Returns `complete: false` when the page filled, meaning more work
+ * remains and the queue row stays pending for the next pass rather than being
+ * marked done.
+ *
+ * Account deletion itself is manual by email today (/privacy says so). This
+ * exists because `deletion_jobs.scope` allows `full_account`, and a queue with
+ * a scope the worker silently ignores would be worse than no queue: an
+ * operator handling one of those requests can enqueue the row and have the
+ * text actually purged, rather than have it marked done having done nothing.
  */
 async function propagateAccountDeletion(
   db: AppDatabase,
   userId: string,
   now: Date,
 ): Promise<{ complete: boolean; payloadsVoided: number }> {
-  // Belt and braces: the request path already tombstoned the account. If a
-  // crash landed between the erasure and the tombstone, this re-applies it.
-  await db.update(users).set({ deletedAt: now, contactEmail: null }).where(and(eq(users.id, userId), isNull(users.deletedAt)));
-
   const pending = await db
     .select({ id: humanizationJobs.id })
     .from(humanizationJobs)

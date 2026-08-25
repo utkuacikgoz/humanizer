@@ -366,11 +366,11 @@ export const analyticsOutbox = sqliteTable("analytics_outbox", {
 /**
  * Tracks propagation of a deletion request across every store/processor.
  *
- * The queue does not hold the erasure itself: db/history-repository.ts and
- * db/account-deletion-repository.ts void the text in the same request that
- * accepts the deletion. A row here is the propagation tombstone the M3-05
- * purge worker drains, and it carries no customer writing of any kind — only
- * the subject, the scope, the authority, and retry bookkeeping.
+ * The queue does not hold the erasure itself: db/history-repository.ts voids
+ * the text in the same request that accepts the deletion. A row here is the
+ * propagation tombstone the M3-05 purge worker drains, and it carries no
+ * customer writing of any kind — only the subject, the scope, the authority,
+ * and retry bookkeeping.
  */
 export const deletionJobs = sqliteTable("deletion_jobs", {
   id: id("id"),

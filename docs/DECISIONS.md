@@ -173,7 +173,27 @@ Reason: Checkout recovery authority and stored-data lifecycle are separate contr
 prevents an expired link from being misrepresented as immediate deletion.
 
 Consequence: D-P01's earlier anonymous 24-hour deletion proposal is superseded. Authenticated paid-history
-retention, self-service deletion, guaranteed purge scheduling, backup retention, and counsel approval remain open.
+retention, self-service deletion, backup retention, and counsel approval remain open. Purge scheduling is settled
+by D-018.
+
+### D-018 — Purge runs on a schedule, not only on the write path
+
+Status: Accepted implementation record (2026-08-25, ENG, M3-05). Final Legal approval remains part of M4-03.
+
+Decision: an hourly Cloudflare cron trigger, declared in the generated `dist/server/wrangler.json` from
+`vite.config.ts`, drains the `deletion_jobs` queue and runs the anonymous retention sweep. Deletion of a history
+item still erases the text inside the request that accepts it; the schedule exists for propagation and retention,
+not to perform the erasure. The deletion audit trail (`deletion_audit_events`) records subject, scope, authority
+and time, and is structurally incapable of holding customer writing, a hash of it, or a driver error object.
+
+Reason: the retention sweep previously ran only when someone submitted a rewrite. A period with no traffic enforced
+nothing, while `/privacy` promises unclaimed anonymous text is deleted within 30 days. A promise that depends on
+unrelated customer activity is not a control.
+
+Consequence: self-service account deletion remains out of scope by PO decision (2026-08-25) and stays manual by
+email, as `/privacy` states. Completion evidence for the published window, backup/point-in-time-restore expiry, and
+propagation to any future non-D1 store remain open; the worker takes a processor registry so adding one is a
+registration rather than a rewrite of the deletion path.
 
 ## Rejected
 

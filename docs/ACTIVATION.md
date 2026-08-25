@@ -32,7 +32,7 @@ The remaining quality caveat is outside the activation backlog: the deployed det
 | Checkout and return | Checkout is server-owned; the private success route is `noindex`; webhook-confirmed entitlement unlocks the preserved result with bounded polling. | Production payment smoke, reconciliation, and release sign-off remain open. |
 | Paid humanization | An entitled `/api/humanize` request reserves allowance through the append-only ledger, releases on failure/no-op, commits successful words, returns the complete rewrite plus usage, and records it as an owned job so it appears in the account's history. | Editing, sentence restore/regeneration, and protected-phrase controls remain open. |
 | Paid result | The success page shows full marked comparison and protected evidence, supports accessible copy, links to another rewrite, to `/history`, and to the Billing Portal, and fires completion events once. The landing workspace also renders direct paid results with quota remaining. | Account deletion remains open. |
-| Paid history | `/history` lists the rewrites the signed-in account owns, metadata only; opening one applies the same ownership plus active-entitlement check as `/api/result`; deleting one voids the stored text, stamps the purge tombstone, and queues a `history_item` deletion job. Every query filters by the server-derived user id and anonymous capabilities enumerate nothing. | Nothing drains `deletion_jobs` yet, so a queued purge does not propagate beyond the row the delete already voided. No history or deletion analytics events fire, and account deletion is still manual. |
+| Paid history | `/history` lists the rewrites the signed-in account owns, metadata only; opening one applies the same ownership plus active-entitlement check as `/api/result`; deleting one voids the stored text, stamps the purge tombstone, and queues a `history_item` deletion job. Every query filters by the server-derived user id and anonymous capabilities enumerate nothing. | No history or deletion analytics events fire. Account deletion is manual by email by PO decision, and `/privacy` says so. |
 | Second use | Anonymous repeat previews use `repeat_preview`; `second_humanization` fires only on the second successful entitled rewrite, derived from the ledger. | A production analytics destination and retention reporting remain outside this activation record. |
 
 ## Activation status matrix
@@ -71,7 +71,7 @@ The ACT-01 through ACT-16 program is complete. The product is not commercially r
 - select and benchmark the production humanization provider;
 - obtain Legal approval for Terms, Privacy, retention, processor, refund, and jurisdiction language;
 - persist an entitled request's rewrite so it reaches paid history, and settle the retention rule for owned payloads that this requires;
-- implement local editing/revisions, sentence restore/regeneration, protected phrases, the purge worker that drains queued deletion jobs, and account deletion;
+- implement local editing/revisions, sentence restore/regeneration, and protected phrases (the purge worker that drains queued deletion jobs and runs the anonymous retention sweep on an hourly cron is implemented; account deletion stays manual by email by PO decision);
 - complete production-like security, billing, accessibility, manual QA, smoke, reconciliation, and rollback gates.
 
 ## Rejected activation tactics

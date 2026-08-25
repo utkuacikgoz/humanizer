@@ -101,7 +101,17 @@ Retention for owned payloads: kept until the owner deletes the item or the accou
 - No history path reads an anonymous preview capability, so a capability grants its one job through `/api/preview` as before and enumerates nothing.
 - Deleting an item voids the stored source, result, and projection, nulls any protected-item reference, stamps the purge tombstone, and queues a `history_item` deletion job. It is idempotent, and it is not gated on an active entitlement, so a lapsed customer can still erase their own writing.
 
-Two limits are worth stating plainly. History currently holds only rewrites claimed through checkout, because that is the only path that assigns an owner. And the queued deletion job is the enqueue half of the purge workflow; the worker that propagates it to every store and processor within the published window is still open.
+One limit is worth stating plainly: history currently holds only rewrites claimed through checkout, because that is the only path that assigns an owner.
+
+### Purge worker
+
+The queued deletion job is the enqueue half of the purge workflow, and an hourly scheduled Worker drains it. A drain claims a bounded batch with a compare-and-set write decided on rows-affected, so two overlapping runs can never process the same row twice; a claim carries a lease, so a worker that dies mid-job leaves the row reclaimable rather than wedging the queue; a completed job is never re-processed; and a job that keeps failing is retried five times and then parked without blocking the rest of the batch.
+
+The same pass runs the anonymous retention sweep. That sweep already ran opportunistically whenever someone submitted a rewrite, which is not the same as a guarantee: a week with no traffic swept nothing while Privacy promised 30 days. The schedule closes that gap.
+
+Deletion is auditable without retaining text. `deletion_audit_events` records what was deleted, when, and under whose authority, and its detail column physically cannot hold prose, a hash, or anything derived from a driver error object, because a D1 error can carry the bound parameters of the failing statement and those parameters are the customer's writing.
+
+Account deletion remains manual by email, by product decision. Privacy states this plainly and must keep doing so until a self-service path exists.
 
 ## Experience requirements
 
@@ -170,7 +180,7 @@ Status: code-complete or substantially complete through M2-10, including D-015 l
 
 ### M3 â€” Paid result workflow
 
-Status: partial. Copy, direct paid result rendering, post-checkout result evidence, bottom-funnel analytics, second-paid-use semantics, and M3-01's authorized history list/detail/delete are implemented. Still open: persisting an entitled request's rewrite so it reaches history at all, the edit/revision workflow, sentence restore/regeneration, protected phrases, account deletion, the purge worker that drains queued deletion jobs and the completion evidence it produces, history/deletion analytics events, and full responsive/manual QA.
+Status: partial. Copy, direct paid result rendering, post-checkout result evidence, bottom-funnel analytics, second-paid-use semantics, and M3-01's authorized history list/detail/delete are implemented. The purge worker that drains queued deletion jobs and runs the scheduled anonymous retention sweep is implemented. Still open: persisting an entitled request's rewrite so it reaches history at all, the edit/revision workflow, sentence restore/regeneration, protected phrases, self-service account deletion (manual by email by PO decision), the completion evidence for the published deletion window, history/deletion analytics events, and full responsive/manual QA.
 
 ### M4 â€” Commercial release
 

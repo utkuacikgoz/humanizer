@@ -253,6 +253,51 @@ test("audit detail accepts counts and codes and drops anything that could carry 
   assert.equal(sanitizeAuditDetail({ error: "D1_ERROR: near \"secret\"" }), "{}");
 });
 
+test("a manually enqueued full-account deletion voids every job that owner still holds", async () => {
+  // Account deletion is manual by email today; this is the path an operator
+  // takes to have the purge actually happen rather than doing it by hand.
+  const db = await createTestDatabase();
+  const owner = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: "bulk-owner", email: null });
+  const other = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: "bystander", email: null });
+
+  const ownedJobIds: string[] = [];
+  for (let index = 0; index < 2; index += 1) {
+    const job = await persistHumanizationJob(db, jobInput(SOURCE_TEXT, `${RESULT_TEXT} #${index}`));
+    await billing.claimJobForUser(db, { capabilityDigest: await digestOf(job.capabilityToken), userId: owner.userId });
+    ownedJobIds.push(job.jobId);
+  }
+  const bystanderJob = await persistHumanizationJob(db, jobInput("Someone else's draft.", "Someone else's rewrite."));
+  await billing.claimJobForUser(db, { capabilityDigest: await digestOf(bystanderJob.capabilityToken), userId: other.userId });
+
+  await db.insert(schema.deletionJobs).values({
+    id: crypto.randomUUID(),
+    subjectType: "user",
+    subjectId: owner.userId,
+    scope: "full_account",
+    requestedByUserId: owner.userId,
+    requestedAt: new Date(),
+    status: "pending",
+    processorStatus: "{}",
+    attempts: 0,
+  });
+
+  const summary = await drainDeletionJobs(db);
+  assert.equal(summary.completed, 1);
+
+  for (const jobId of ownedJobIds) {
+    const [payload] = await db.select().from(schema.jobPayloads).where(eq(schema.jobPayloads.jobId, jobId)).limit(1);
+    assert.equal(payload.sourceRef, "");
+    assert.equal(payload.resultRef, null);
+    assert.notEqual(payload.purgedAt, null);
+  }
+  assert.equal((await history.listHistoryForUser(db, owner.userId)).length, 0);
+
+  // Scoped to the subject: nobody else's work is touched.
+  assert.equal((await history.listHistoryForUser(db, other.userId)).length, 1);
+  const [bystanderPayload] = await db.select().from(schema.jobPayloads).where(eq(schema.jobPayloads.jobId, bystanderJob.jobId)).limit(1);
+  assert.equal(bystanderPayload.purgedAt, null);
+});
+
 test("the scheduled pass also ages out unclaimed anonymous payloads", async () => {
   const db = await createTestDatabase();
   await seedDeletedJob(db, "scheduled");
