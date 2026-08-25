@@ -4,6 +4,7 @@ export * from "./deterministic-provider";
 export * from "./evaluation";
 export * from "./pipeline";
 export * from "./protected-content";
+export * from "./provider-error";
 export * from "./sentence-regeneration";
 export * from "./text";
 export * from "./types";

@@ -71,10 +71,30 @@ export interface RewriteRequest {
   signal?: AbortSignal;
 }
 
+/**
+ * What one provider call actually cost.
+ *
+ * The deterministic provider reports nothing here. A model provider reports
+ * the split, which docs/BENCHMARKS.md requires ("Input/output/total tokens by
+ * stage and retry") and which a single `estimatedTokens` number cannot carry:
+ * input and output are priced differently, and a cached input token is priced
+ * differently again.
+ */
+export interface ProviderUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  /** Input tokens served from a provider-side cache, when the provider reports them. */
+  cachedInputTokens?: number;
+  costUsd?: number;
+  /** The model that served the call, for provenance on a stored job. */
+  model?: string;
+}
+
 export interface RewriteResponse {
   text: string;
   estimatedTokens?: number;
   estimatedCostUsd?: number;
+  usage?: ProviderUsage;
 }
 
 export interface HumanizationProvider {
@@ -108,6 +128,8 @@ export interface VerificationResult {
   semanticScore: number;
   protectedContentScore: number;
   issues: VerificationIssue[];
+  /** Set when verification is itself a model call, so its cost is not invisible. */
+  usage?: ProviderUsage;
 }
 
 export interface VerificationProvider {
@@ -138,6 +160,8 @@ export interface EvaluationResult {
   passed: boolean;
   scores: QualityScores;
   failedThresholds: Array<keyof QualityScores>;
+  /** Set when evaluation is itself a model call (LLM-as-judge triage). */
+  usage?: ProviderUsage;
 }
 
 export interface EvaluationProvider {
@@ -151,6 +175,14 @@ export interface HumanizationConfig {
   maxRetries: number;
   maxInputCharacters: number;
   thresholds: EvaluationThresholds;
+  /**
+   * Deadline for a SINGLE provider call, in milliseconds. A caller's own
+   * signal bounds the whole pipeline; this bounds one attempt, so a provider
+   * that hangs cannot consume the entire request budget on attempt one.
+   * Undefined means no per-attempt deadline, which is the deterministic
+   * provider's situation and the historical behaviour.
+   */
+  providerTimeoutMs?: number;
 }
 
 export interface HumanizeInput {
@@ -168,6 +200,21 @@ export interface UsageMetrics {
   latencyMs: number;
   estimatedTokens: number;
   estimatedCostUsd: number;
+  /** Provider-reported totals across every stage and retry. Zero until a provider reports them. */
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  /** Provider-reported cost, as distinct from the estimate above. */
+  providerCostUsd: number;
+}
+
+/** Which providers produced a result, recorded so a stored job stays attributable. */
+export interface ProviderAttribution {
+  humanization: string;
+  verification: string;
+  evaluation: string;
+  /** Models reported by any stage, de-duplicated. */
+  models: string[];
 }
 
 export interface HumanizationResult {
@@ -180,4 +227,5 @@ export interface HumanizationResult {
   evaluation: EvaluationResult;
   metrics: UsageMetrics;
   improvements: number;
+  providers: ProviderAttribution;
 }

@@ -21,7 +21,7 @@ import { DeterministicHumanizationProvider } from "./deterministic-provider";
 import { DeterministicEvaluationProvider } from "./evaluation";
 import { extractProtectedContent } from "./protected-content";
 import { DEFAULT_HUMANIZATION_CONFIG } from "./pipeline";
-import { countWords, normalizeForComparison } from "./text";
+import { countWords, normalizeForComparison, splitSentences, type TextSegment } from "./text";
 import type {
   EvaluationProvider,
   EvaluationThresholds,
@@ -96,124 +96,35 @@ export interface SentenceRegenerationRequest {
 }
 
 /**
- * Abbreviations that are always followed by more of the same sentence: a
- * title takes a name, "Fig." takes a number. The stop after one of these
- * never ends a sentence, whatever follows it, which is what keeps "Dr. Elena
- * Marsh" — one protected person to the extractor — in one piece.
- */
-const TITLE_ABBREVIATIONS = new Set(["dr", "prof", "mr", "mrs", "ms", "sr", "jr", "st", "mt", "fig", "no", "vol", "ed", "pp"]);
-
-/**
- * Abbreviations that can end a sentence as easily as continue one: "...for
- * Acme Corp. The board approved..." against "...Marsh et al. found...". The
- * case of the next word decides, which is the only signal available without a
- * language model and is right for ordinary prose. Deliberately small and
- * English-only; every entry is a form this product's own copy, benchmark
- * fixtures, or protected-content extractor already produces.
- */
-const TRAILING_ABBREVIATIONS = new Set([
-  "inc", "corp", "co", "ltd", "llc", "plc", "dept", "est",
-  "vs", "etc", "al", "eg", "ie", "cf", "approx",
-]);
-
-export interface Sentence {
-  text: string;
-  start: number;
-  end: number;
-}
-
-/**
- * Splits a document into the sentences a sentence operation addresses.
+ * The engine has ONE segmenter, and this is it.
  *
- * This is NOT `splitSentences` from ./text, and the difference is deliberate.
- * That function feeds analysis and evaluation, where an approximate split
- * costs an approximate score. Here an index selects text that will be
- * replaced in a paying customer's document, so the split has to satisfy two
- * properties that one does not:
- *
- *   1. **Total.** Every character of the document belongs to exactly one
- *      sentence. `splitSentences`'s single regular expression silently drops
- *      any run it cannot match — "The board approved $1." vanishes from
- *      "The board approved $1.2 million for the next phase." because the stop
- *      inside the decimal is not followed by whitespace and the alternation
- *      then fails for the whole clause. An index over a segmentation that can
- *      lose text can select the wrong text.
- *   2. **Abbreviation-aware.** "Dr. Elena Marsh reported ..." is one sentence,
- *      not a sentence reading "Dr." followed by another. The extractor treats
- *      "Dr. Elena Marsh" as one protected person, so a split through it would
- *      hand the rewriter half a protected value.
- *
- * Fixing `splitSentences` itself was rejected as out of scope: analysis
- * targets, the readability score, and the benchmark thresholds calibrated
- * against them all move if it changes, which is a Humanization Engine change
- * with its own benchmark evidence, not a side effect of shipping sentence
+ * This module used to carry its own `segmentSentences`, written because
+ * `splitSentences` was not total: a stop not followed by whitespace made its
+ * single regular expression drop the clause containing it, and an index over
+ * a segmentation that can lose text can select the wrong text. Changing
+ * `splitSentences` was left out of scope then, because analysis targets, the
+ * readability score and the benchmark thresholds all move with it and that
+ * needed benchmark evidence rather than a side effect of shipping sentence
  * editing.
+ *
+ * That evidence now exists (docs/BENCHMARKS.md, "Recorded runs"), and
+ * `splitSentences` is total and abbreviation-aware. Keeping a second
+ * segmenter would be a defect in itself: wherever two segmenters disagree,
+ * one of them is wrong. They disagreed on 17 of the 125 benchmark passages,
+ * and the local copy was wrong in every one — its `endsSentence` treated a
+ * stop with nothing alphanumeric in front of it as never ending a sentence,
+ * so a sentence closing `15%.`, `(Li et al., 2024).`, `[14-16].` or
+ * "`account_id`." swallowed the sentence after it.
+ *
+ * That is not a cosmetic difference here. Two sentences returned as one means
+ * `sentenceAt(text, 4)` addresses a span twice its intended size, so
+ * "regenerate sentence 4" rewrites two sentences and the one-sentence-in,
+ * one-sentence-out invariant below fails silently — exactly the quiet
+ * corruption of a paying customer's document this module exists to prevent.
  */
-export function segmentSentences(text: string): Sentence[] {
-  const segments: Sentence[] = [];
-  let start = 0;
+export type Sentence = TextSegment;
 
-  const push = (from: number, to: number) => {
-    const slice = text.slice(from, to);
-    const lead = slice.length - slice.trimStart().length;
-    const value = slice.trim();
-    if (!value) return;
-    segments.push({ text: value, start: from + lead, end: from + lead + value.length });
-  };
-
-  let index = 0;
-  while (index < text.length) {
-    const character = text[index];
-    if (character === "\n") {
-      push(start, index);
-      start = index + 1;
-      index += 1;
-      continue;
-    }
-    if (character !== "." && character !== "!" && character !== "?") {
-      index += 1;
-      continue;
-    }
-
-    // Consume a run of terminators ("?!", "...") so it ends one sentence.
-    let last = index;
-    while (last + 1 < text.length && ".!?".includes(text[last + 1])) last += 1;
-
-    const followedByBreak = last + 1 >= text.length || /\s/.test(text[last + 1]);
-    if (!followedByBreak || (character === "." && index === last && !endsSentence(text, index, start))) {
-      index = last + 1;
-      continue;
-    }
-
-    push(start, last + 1);
-    start = last + 1;
-    index = last + 1;
-  }
-  push(start, text.length);
-
-  return segments;
-}
-
-/** False when the stop at `dot` belongs to an abbreviation, an initial, or a list marker. */
-function endsSentence(text: string, dot: number, segmentStart: number): boolean {
-  const word = text.slice(segmentStart, dot).match(/[\p{L}\p{N}]+$/u)?.[0];
-  if (!word) return false;
-  // A single-letter word is an initial ("J. Doe"), not the end of a sentence.
-  if (/^\p{L}$/u.test(word)) return false;
-  if (/^\d+$/.test(word)) {
-    // A bare number that is the whole segment so far is a list marker ("1. First").
-    return text.slice(segmentStart, dot).trim() !== word;
-  }
-
-  const lower = word.toLowerCase();
-  if (TITLE_ABBREVIATIONS.has(lower)) return false;
-  if (TRAILING_ABBREVIATIONS.has(lower)) {
-    const next = text.slice(dot + 1).match(/\S/)?.[0];
-    // A lower-case next word continues the sentence; anything else starts one.
-    return next === undefined || next.toLowerCase() !== next;
-  }
-  return true;
-}
+export const segmentSentences: (text: string) => Sentence[] = splitSentences;
 
 /** Locates one sentence of a document, or null when the index names none. */
 export function sentenceAt(text: string, index: number): Sentence | null {
