@@ -261,15 +261,89 @@ export const resultRevisions = sqliteTable("result_revisions", {
   jobId: text("job_id").notNull().references(() => humanizationJobs.id),
   parentRevisionId: text("parent_revision_id"),
   revisionType: text("revision_type").notNull(),
+  /**
+   * Position of this revision in the job's chain, starting at 1 for the
+   * `original` row. The unique index on (job_id, sequence) is what makes
+   * "which text is current" a single deterministic query (MAX(sequence))
+   * instead of a timestamp comparison two writes in the same millisecond can
+   * tie. M3-03 appends with `sequence = MAX(sequence) + 1` computed inside
+   * the INSERT, so SQLite/D1's serialization of writers assigns the numbers,
+   * not a read-then-write in application code.
+   */
+  sequence: integer("sequence").notNull().default(1),
+  /**
+   * Which sentence of the previous revision this one replaced, indexed over
+   * splitSentences() of that text. NULL for the `original` row, which
+   * replaced nothing. A sentence operation replaces exactly one sentence with
+   * exactly one sentence (src/lib/humanization/sentence-regeneration.ts
+   * rejects a candidate that splits or merges), so an index stays meaningful
+   * for the whole chain.
+   */
+  sentenceIndex: integer("sentence_index"),
   resultRef: text("result_ref").notNull(),
   successfulWordCount: integer("successful_word_count").notNull().default(0),
   createdAt: createdAt(),
 }, (t) => [
   index("result_revisions_job_id_idx").on(t.jobId),
+  uniqueIndex("result_revisions_job_sequence_idx").on(t.jobId, t.sequence),
   check(
     "result_revisions_type_check",
     sql`${t.revisionType} in ('original', 'sentence_regeneration', 'manual_edit', 'restore')`,
   ),
+]);
+
+export const SENTENCE_OPERATION_KINDS = ["regenerate", "restore"] as const;
+export type SentenceOperationKind = (typeof SENTENCE_OPERATION_KINDS)[number];
+
+/**
+ * `pending` is a claimed attempt still running; the other three are terminal.
+ * `unchanged` and `rejected` both charge zero — they are kept apart because
+ * they are different things to tell a customer ("this sentence is already as
+ * plain as the engine can make it" vs "we could not verify a new version").
+ */
+export const SENTENCE_OPERATION_OUTCOMES = ["pending", "applied", "unchanged", "rejected"] as const;
+export type SentenceOperationOutcome = (typeof SENTENCE_OPERATION_OUTCOMES)[number];
+
+/**
+ * M3-03. One row per attempted sentence operation, which is three things at
+ * once and deliberately not three tables:
+ *
+ *   * the idempotency record — `operation_key` is unique, so a retry of the
+ *     same operation finds the first attempt's outcome instead of generating
+ *     (and charging for) a second candidate;
+ *   * the attempt meter — every regeneration attempt lands here whatever its
+ *     outcome, so the per-sentence and per-job caps bound generation rather
+ *     than only bounding successes, which a failing loop would slip past;
+ *   * the debit record — `charged_words` states what this operation actually
+ *     cost the customer, which for a `rejected`, `unchanged` or `restore`
+ *     operation is zero.
+ *
+ * It holds no customer writing: an index, an outcome code and two counts.
+ * The text a successful operation produced lives in the `result_revisions`
+ * row this points at, and is voided with the rest of the job's payloads when
+ * the owner deletes it.
+ */
+export const sentenceOperations = sqliteTable("sentence_operations", {
+  id: id("id"),
+  jobId: text("job_id").notNull().references(() => humanizationJobs.id),
+  /** Server-derived owner, re-checked against the job before the row is written. */
+  ownerUserId: text("owner_user_id").notNull().references(() => users.id),
+  /** Shared verbatim with usage_entries.operation_key, so both ledgers replay together. */
+  operationKey: text("operation_key").notNull(),
+  sentenceIndex: integer("sentence_index").notNull(),
+  kind: text("kind").notNull().$type<SentenceOperationKind>(),
+  outcome: text("outcome").notNull().default("pending").$type<SentenceOperationOutcome>(),
+  chargedWords: integer("charged_words").notNull().default(0),
+  revisionId: text("revision_id").references(() => resultRevisions.id),
+  createdAt: createdAt(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (t) => [
+  uniqueIndex("sentence_operations_key_idx").on(t.operationKey),
+  index("sentence_operations_job_sentence_idx").on(t.jobId, t.sentenceIndex),
+  check("sentence_operations_kind_check", sql`${t.kind} in (${sqlEnumList(SENTENCE_OPERATION_KINDS)})`),
+  check("sentence_operations_outcome_check", sql`${t.outcome} in (${sqlEnumList(SENTENCE_OPERATION_OUTCOMES)})`),
+  check("sentence_operations_sentence_index_check", sql`${t.sentenceIndex} >= 0`),
+  check("sentence_operations_charged_words_check", sql`${t.chargedWords} >= 0`),
 ]);
 
 /** Local projection of a Stripe subscription; raw Stripe status is adapted at the boundary. */
