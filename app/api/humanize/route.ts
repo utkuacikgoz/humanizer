@@ -7,8 +7,10 @@ import {
 } from "@/src/lib/preview-request-guard";
 import { isMateriallyUnchanged, MIN_PAYWALLABLE_INPUT_WORDS, projectPreview } from "@/src/lib/preview-projection";
 import { resolveChatGPTUserFromHeaders } from "@/src/lib/chatgpt-identity";
-import { commitPaidUsage, releasePaidUsage, reservePaidUsage } from "@/src/lib/paid-usage";
+import { releasePaidUsage, reservePaidUsage } from "@/src/lib/paid-usage";
 import type { PaidUsageReservation } from "@/src/lib/paid-usage";
+import { completeEntitledRewrite } from "@/src/lib/entitled-rewrite";
+import type { EntitledRewritePayload } from "@/src/lib/entitled-rewrite";
 import type { AppDatabase, PreviewProjection } from "../../../db/repository";
 
 const allowedModes = new Set<WritingMode>(["natural", "professional", "academic", "casual"]);
@@ -29,17 +31,6 @@ type UnchangedPayload = {
   unchanged: true;
 };
 
-type PaidRewritePayload = {
-  original: string;
-  result: string;
-  paid: true;
-  issuesImproved: number;
-  naturalness: "Strong" | "Good";
-  meaningPreservation: "High" | "Review needed";
-  protectedItems: string[];
-  usage: { consumed: number; allowance: number; remaining: number; periodEnd: string; paidUseCount: number };
-};
-
 type HumanizePayload =
   | (PreviewProjection & {
       original: string;
@@ -49,7 +40,7 @@ type HumanizePayload =
       capabilityExpiresAt?: string;
     })
   | UnchangedPayload
-  | PaidRewritePayload;
+  | EntitledRewritePayload;
 
 class QuotaExceededError extends Error {
   constructor(readonly usage: { consumed: number; allowance: number; remaining: number; periodEnd: string }) {
@@ -265,6 +256,12 @@ export async function POST(request: Request) {
       ? authenticatedUser ? `${trustedIp}\0${authenticatedUser.userId}` : trustedIp
       : "local-test-runtime";
     const contentFingerprint = await fingerprint(text, mode as WritingMode);
+    // The same hashed client signal both persistence paths store: an HMAC
+    // under the shared guard secret where one exists, a digest otherwise.
+    // Never a raw IP or user id.
+    const clientFingerprint = () => runtimeGuard.secret
+      ? previewGuardClientKey(runtimeGuard.secret, clientId)
+      : sha256Hex(clientId);
     const guarded = await runtimeGuard.guard.run({
       clientId,
       idempotencyKey,
@@ -320,14 +317,31 @@ export async function POST(request: Request) {
           };
 
           if (paidDb && paidReservation) {
-            const usage = await commitPaidUsage(paidDb, paidReservation, result.metrics.successfulWords);
-            return {
+            // M3-02: the entitled branch commits usage, records the rewrite
+            // in the owner's history, and returns the complete text. The
+            // history write is best-effort inside completeEntitledRewrite —
+            // it cannot fail this request and it never releases or re-charges
+            // the reservation.
+            return await completeEntitledRewrite(paidDb, paidReservation, {
+              mode: mode as WritingMode,
+              clientFingerprint: await clientFingerprint(),
+              idempotencyKey,
+              contentFingerprint,
+              pipelineVersion: PIPELINE_VERSION,
               original: result.original,
               result: result.text,
-              paid: true,
-              ...evidence,
-              usage,
-            } satisfies PaidRewritePayload;
+              inputWordCount: text.trim().split(/\s+/).length,
+              successfulWordCount: result.metrics.successfulWords,
+              protectedContent: result.protectedContent,
+              evidence,
+            }, {
+              // Content-free by construction: a reason code, never the error
+              // object, which can carry bound statement parameters (the
+              // customer's text) in its cause chain.
+              onPersistenceSkipped: (reason) => {
+                if (reason === "write-failed") console.warn("history persistence failed for an entitled rewrite");
+              },
+            });
           }
 
           // SEC-02: a rewrite too short to withhold a meaningful remainder
@@ -354,9 +368,7 @@ export async function POST(request: Request) {
           };
           const persisted = await tryPersist({
             mode: mode as WritingMode,
-            clientFingerprint: runtimeGuard.secret
-              ? await previewGuardClientKey(runtimeGuard.secret, clientId)
-              : await sha256Hex(clientId),
+            clientFingerprint: await clientFingerprint(),
             idempotencyKey,
             contentFingerprint,
             original: result.original,
