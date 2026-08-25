@@ -9,7 +9,7 @@ import type { AppDatabase } from "../../db/repository";
  * database so tests exercise the actual CHECK/UNIQUE constraints shipped
  * to D1, not a hand-rolled approximation of the schema.
  */
-export async function createTestDatabase(): Promise<AppDatabase> {
+export async function createTestDatabase(options: { onStatement?: (sql: string) => void } = {}): Promise<AppDatabase> {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("PRAGMA foreign_keys = ON;");
 
@@ -24,6 +24,10 @@ export async function createTestDatabase(): Promise<AppDatabase> {
   }
 
   return drizzle(async (sql, params, method) => {
+    // Lets a test assert on what a code path actually asked the database —
+    // e.g. that requesting a sign-in link never queries the users table, which
+    // is what makes registered and unregistered addresses indistinguishable.
+    options.onStatement?.(sql);
     const stmt = sqlite.prepare(sql);
     if (method === "run") {
       const info = stmt.run(...params);
