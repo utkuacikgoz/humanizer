@@ -16,6 +16,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import * as schema from "./schema";
 import type { JobState, WritingModeValue } from "./schema";
 import type { AppDatabase, PreviewProjection } from "./repository";
+import { recordDeletionAudit } from "./deletion-audit";
 
 const { deletionJobs, humanizationJobs, jobPayloads, protectedItems } = schema;
 
@@ -196,16 +197,30 @@ export async function deleteHistoryEntryForUser(
 
   // The tombstone this write leaves is what M3-05's purge worker picks up to
   // propagate the deletion to every other store/processor. It records the
-  // subject and the scope, never any of the text that was removed.
+  // subject, the scope and the authority it was made under, never any of the
+  // text that was removed.
+  const deletionJobId = crypto.randomUUID();
   await db.insert(deletionJobs).values({
-    id: crypto.randomUUID(),
+    id: deletionJobId,
     subjectType: "job",
     subjectId: job.id,
     scope: "history_item",
+    requestedByUserId: input.userId,
     requestedAt: now,
     status: "pending",
     processorStatus: "{}",
+    attempts: 0,
   });
+
+  await recordDeletionAudit(db, {
+    deletionJobId,
+    subjectType: "job",
+    subjectId: job.id,
+    scope: "history_item",
+    actorUserId: input.userId,
+    event: "requested",
+    detail: { payloadsVoided: 1 },
+  }, now);
 
   return "deleted";
 }

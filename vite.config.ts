@@ -85,6 +85,12 @@ function workerBindingConfig(environment: "local" | "production") {
     // local; every build artifact fails closed unless D1 and its guard secret
     // are present, even if someone accidentally built with the placeholder ID.
     vars: { ENVIRONMENT: environment },
+    // M3-05. There is no hand-written wrangler.toml — this generated config is
+    // the only place a trigger can live. Hourly, at an off-zero minute: the
+    // deletion queue is small, every claim is bounded, and the erasure itself
+    // already happened in the request, so this only has to keep propagation
+    // and the anonymous retention sweep inside the windows /privacy publishes.
+    triggers: { crons: ["17 * * * *"] },
     d1_databases: d1
       ? [
           {

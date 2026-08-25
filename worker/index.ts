@@ -1,6 +1,9 @@
 /** Cloudflare Worker entry point for the Ownword application. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { drizzle } from "drizzle-orm/d1";
+import * as schema from "../db/schema";
+import { runScheduledPurge } from "../src/lib/purge-worker";
 
 interface Env {
   ASSETS: Fetcher;
@@ -17,6 +20,12 @@ interface Env {
 interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
   passThroughOnException(): void;
+}
+
+interface ScheduledController {
+  scheduledTime: number;
+  cron: string;
+  noRetry(): void;
 }
 
 // Image security config. SVG sources with .svg extension auto-skip the
@@ -60,6 +69,28 @@ const worker = {
       statusText: response.statusText,
       headers,
     });
+  },
+
+  /**
+   * M3-05 purge schedule (cron in vite.config.ts, hourly).
+   *
+   * Deletion itself is not deferred to this handler — /api/history/{id} and
+   * /api/account void the customer's text inside the request that accepts the
+   * deletion. This drains the propagation queue those writes leave behind and
+   * ages out unclaimed anonymous payloads, so the windows /privacy publishes
+   * hold even on a day with no traffic at all.
+   *
+   * Everything is swallowed here on purpose: a scheduled run has no customer
+   * waiting, an unhandled rejection would be retried by the platform against a
+   * queue that is already idempotent, and a caught D1 error object must never
+   * be logged — it can carry the bound parameters of the failing statement,
+   * which for this application is the customer's writing. What happened is
+   * recorded in `deletion_audit_events`, in a form that cannot hold text.
+   */
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (!env.DB) return;
+    const db = drizzle(env.DB, { schema });
+    ctx.waitUntil(runScheduledPurge(db).then(() => undefined, () => undefined));
   },
 };
 
