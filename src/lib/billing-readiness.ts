@@ -21,7 +21,7 @@ export async function resolveBillingReadiness(probe: () => Promise<void>): Promi
     return {
       available: true,
       signInRequired: true,
-      message: "You will sign in with ChatGPT before checkout.",
+      message: "You will sign in with your email before checkout.",
     };
   } catch (error) {
     // The customer-facing message stays deliberately generic — which check

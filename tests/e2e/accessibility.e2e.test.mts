@@ -52,7 +52,7 @@ test("every interactive control is keyboard reachable with a visible focus indic
   await page.route("**/api/billing/readiness", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify({ available: true, signInRequired: true, message: "You will sign in with ChatGPT before checkout." }),
+    body: JSON.stringify({ available: true, signInRequired: true, message: "You will sign in with your email before checkout." }),
   }));
   await gotoHydrated(page, "/");
 
@@ -87,7 +87,7 @@ test("the whole journey is operable from the keyboard alone", { skip: blocker ??
   await page.route("**/api/billing/readiness", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify({ available: true, signInRequired: true, message: "You will sign in with ChatGPT before checkout." }),
+    body: JSON.stringify({ available: true, signInRequired: true, message: "You will sign in with your email before checkout." }),
   }));
   await gotoHydrated(page, "/");
 

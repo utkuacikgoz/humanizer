@@ -339,7 +339,7 @@ export default function Home() {
         <nav aria-label="Primary navigation">
           <a href="#how-it-works">How it works</a>
           <a href="#pricing">Pricing</a>
-          <a className="sign-in" href="/signin-with-chatgpt?return_to=%2F">Sign in</a>
+          <Link className="sign-in" href="/signin?return_to=%2F">Sign in</Link>
         </nav>
       </header>
 
