@@ -20,6 +20,14 @@ export async function generateMetadata(): Promise<Metadata> {
     // One SVG serves the tab, the bookmark, and the home-screen tile. It is
     // built to survive 16px: a solid tile, one counter-form, no hairlines.
     icons: { icon: "/icon.svg", shortcut: "/icon.svg", apple: "/icon.svg" },
+    // SEO-009. Bing Webmaster Tools proves ownership by finding this token in
+    // the homepage head. It is a public token by design, not a credential: it
+    // is served to every visitor and grants nothing beyond letting Bing match
+    // the site to the account that claimed it. Ungated on purpose, unlike the
+    // canonical and JSON-LD above, because Bing may fetch through a host this
+    // application does not treat as canonical and a missing tag reads as a
+    // failed verification. Remove only if the Bing property is abandoned.
+    verification: { other: { "msvalidate.01": "35512891FA02F1073134A440502FDF47" } },
   };
 }
 
