@@ -444,8 +444,8 @@ more than a *Done* nobody can support; do not upgrade a row without evidence nam
 | SEO-014 | P1 | Launch AI Writing Pattern Diagnostic | Humanization + Engineering | Privacy review | Open | Tool analyzes stated patterns, does not infer authorship probability, stores no text by default, has an accessible explanation and useful empty/error states |
 | SEO-015 | P1 | Publish field guide | SEO + Copy | SEO-014 | Open | Contains >=12 original annotated examples, counterexamples, source/method notes, stable anchors, and links to the live diagnostic |
 | SEO-016 | P1 | Publish benchmark methodology/results | Humanization + SEO | Benchmark V1 | Open | Page documents corpus, metrics, versions/dates, aggregate results, failures, limitations, provenance, changelog, and downloadable data where licensed |
-| SEO-017 | P1 | Publish Academic mode page | SEO + Legal + Copy | SEO-011, real examples | Open | Distinct academic workflow/example, citation protection proof, visible integrity notice, and zero evasion claims |
-| SEO-018 | P1 | Publish Professional mode page | SEO + Copy | Real examples | Open | Distinct business workflow/example, factual/terminology proof, and product start CTA; not duplicated from core page |
+| SEO-017 | P1 | Publish Academic mode page | SEO + Legal + Copy | SEO-011, real examples | Open (evidence-blocked) | Distinct academic workflow/example, citation protection proof, visible integrity notice, and zero evasion claims. Blocked on evidence, not on writing: see the note under SEO-018. |
+| SEO-018 | P1 | Publish Professional mode page | SEO + Copy | Real examples | Open (evidence-blocked) | Distinct business workflow/example, factual/terminology proof, and product start CTA; not duplicated from core page. **Deliberately not built in the 2026-08-25 pass.** The deployed engine is a deterministic demo baseline: `src/lib/humanization/deterministic-provider.ts` distinguishes Professional from the other modes by exactly three regular-expression substitutions layered on a shared table. A page claiming a distinct professional workflow, or mode-specific quality, would state something the product cannot do today, which Section 1 forbids outright. Build it when the mode genuinely differs and a real annotated before/after exists. |
 | SEO-019 | P1 | Publish meaning-preservation checklist | Humanization + SEO | SEO-012 | Open | Web and accessible downloadable versions cover all protected claim classes, cite methodology, and contain no customer text |
 | SEO-020 | P1 | Run crawl/render QA | QA + SEO | SEO-002..008 | Partial | A render pass over every existing route (`/`, `/privacy`, `/terms`, `/history`, `/checkout/success`, `/robots.txt`, `/sitemap.xml`, an unknown path) is recorded in Section 11.2. Three defects were found and fixed (`nonocache` robots directive, private pages inheriting the homepage canonical, sitemap/registry drift). Three findings remain open in ENG-locked files: the dead `/signin-with-chatgpt` links, the 404 page's inherited canonical, and the un-redirected `www` host. No orphan indexable page, no broken internal link between public pages, and no invalid JSON-LD were found. |
 | SEO-021 | P1 | Create weekly SEO scorecard | SEO + Analytics | SEO-009, SEO-010 | Open | Report includes business, funnel, demand, quality, technical, link, and risk KPIs with 7/28-day comparisons and written decisions |
@@ -556,6 +556,15 @@ rather than done, on purpose. Pick them up once auth lands.
 - **H-4 — Add `app/not-found.tsx`.** A real 404 page with one H1, a link back to `/`, no canonical
   (`alternates: { canonical: null }`), and `robots: { index: false, follow: false }`. This is also a copy
   surface, so COPY should own the words.
+- **H-6 — No new content page was published in this pass, on purpose.** The two safest candidates were
+  assessed and both fail today's evidence bar. `/how-it-works` would substantially restate the homepage's
+  existing `#how-it-works` section, and Section 3's decision rule requires at least 60% of a new page to
+  differ from the nearest existing one; Section 4 gates that split on experiment evidence that does not
+  exist yet. The Professional mode page (SEO-018) would have to describe mode behavior the deterministic
+  baseline does not have. A `/pricing` page was ruled out for the same near-duplicate reason. The first new
+  page worth building is one carrying evidence the product can actually back — the pattern diagnostic
+  (SEO-014) or the benchmark results (SEO-016) — not another description of the same claims.
+
 - **H-5 — Re-check the funnel copy once purchases can complete.** Section 9's preview-to-checkout and
   checkout-to-paid KPIs are unmeasurable while sign-in is broken. When auth lands, confirm the events fire
   end to end before any acquisition target is set against them.
