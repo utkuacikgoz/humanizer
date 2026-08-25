@@ -9,10 +9,10 @@
 // The acceptance criterion for M3-01 is an authorization property, so it is
 // worth stating exactly how it is met here:
 //
-//   * The user id is always derived server-side, from the hosting boundary's
-//     identity headers via resolveChatGPTUserFromHeaders, then mapped to a
-//     local row. It is never read from the URL, the body, or a header the
-//     client controls.
+//   * The user id is always derived server-side, from a session row looked up
+//     by the digest of the session cookie (src/lib/identity.ts). It is never
+//     read from the URL, the body, or anything else the client controls; a
+//     cookie value that names no live session resolves to no identity at all.
 //   * The only client-supplied value any of these paths accepts is a single
 //     job id on detail/delete, and it is re-checked against `owner_user_id`
 //     in the same query that selects the row.
@@ -22,7 +22,7 @@
 //     before a database binding is even loaded.
 //   * A job owned by nobody, owned by someone else, or already deleted
 //     produces the identical 404 shape as a job that never existed.
-import { resolveChatGPTUserFromHeaders } from "@/src/lib/chatgpt-identity";
+import { once, resolveSessionUser, type SessionPort } from "@/src/lib/identity";
 import { isJobIdShape } from "@/src/lib/result-access";
 import type { AppDatabase } from "../../db/repository";
 import type { Entitlement, UnlockedResult } from "../../db/billing-repository";
@@ -33,7 +33,6 @@ const JSON_HEADERS = { ...NO_STORE, "x-content-type-options": "nosniff" } as con
 
 /** The subset of db/billing-repository.ts these routes depend on. */
 export interface HistoryBillingPort {
-  findUserIdByExternalSubject(db: AppDatabase, externalSubject: string): Promise<string | null>;
   getActiveEntitlement(db: AppDatabase, userId: string): Promise<Entitlement | null>;
   getUnlockedResult(db: AppDatabase, input: { userId: string; jobId: string }): Promise<UnlockedResult | null>;
 }
@@ -49,6 +48,29 @@ export interface HistoryAccessDeps {
   db: AppDatabase;
   billing: HistoryBillingPort;
   history: HistoryPort;
+  /** Identity is a session row now, so resolving it needs the database too. */
+  auth: SessionPort;
+}
+
+/**
+ * Resolves the caller, or the response to send instead.
+ *
+ * Three outcomes, kept distinct on purpose: a caller with no usable session
+ * is asked to sign in; a caller whose identity could not be resolved because
+ * the database is unreachable gets the honest service error rather than being
+ * told they are signed out; anyone else is a user id.
+ */
+async function resolveCaller(
+  request: Request,
+  deps: () => Promise<HistoryAccessDeps>,
+): Promise<{ userId: string } | { response: Response }> {
+  try {
+    const user = await resolveSessionUser(request, deps);
+    if (!user) return { response: signInRequired() };
+    return { userId: user.userId };
+  } catch {
+    return { response: unavailable() };
+  }
 }
 
 export interface HistoryListBody {
@@ -90,16 +112,13 @@ export async function buildHistoryListResponse(
   request: Request,
   loadDeps: () => Promise<HistoryAccessDeps>,
 ): Promise<Response> {
-  const user = resolveChatGPTUserFromHeaders(request);
-  if (!user) return signInRequired();
+  const deps = once(loadDeps);
+  const caller = await resolveCaller(request, deps);
+  if ("response" in caller) return caller.response;
+  const { userId } = caller;
 
   try {
-    const { db, billing, history } = await loadDeps();
-    const userId = await billing.findUserIdByExternalSubject(db, user.userId);
-    // A signed-in visitor with no local account has no history rather than an
-    // error: there is nothing to hide and nothing to reveal.
-    if (!userId) return Response.json({ entitled: false, items: [] } satisfies HistoryListBody, { headers: JSON_HEADERS });
-
+    const { db, billing, history } = await deps();
     const [entitlement, items] = await Promise.all([
       billing.getActiveEntitlement(db, userId),
       history.listHistoryForUser(db, userId),
@@ -130,14 +149,13 @@ export async function buildHistoryDetailResponse(
 ): Promise<Response> {
   if (!isJobIdShape(jobId)) return notFound();
 
-  const user = resolveChatGPTUserFromHeaders(request);
-  if (!user) return signInRequired();
+  const deps = once(loadDeps);
+  const caller = await resolveCaller(request, deps);
+  if ("response" in caller) return caller.response;
+  const { userId } = caller;
 
   try {
-    const { db, billing, history } = await loadDeps();
-    const userId = await billing.findUserIdByExternalSubject(db, user.userId);
-    if (!userId) return notFound();
-
+    const { db, billing, history } = await deps();
     const entry = await history.findHistoryEntryForUser(db, { userId, jobId });
     if (!entry) return notFound();
 
@@ -159,8 +177,9 @@ export async function buildHistoryDetailResponse(
  * The DELETE verb is load-bearing, not decoration: a cross-site form can only
  * issue GET or POST, and a cross-site `fetch` with this method is stopped by
  * the CORS preflight, so a third-party page cannot destroy a signed-in
- * customer's work by navigation alone. There is no session cookie to check
- * beyond that; identity is the boundary-injected header set.
+ * customer's work by navigation alone. The session cookie is `SameSite=Lax`,
+ * which is not sent on a cross-site request of any method — so between the
+ * two, a third-party page holds neither the verb nor the credential.
  *
  * Idempotent: repeating a delete returns the same success body, and a delete
  * of something the caller does not own returns the same 404 as a delete of
@@ -173,14 +192,13 @@ export async function buildHistoryDeleteResponse(
 ): Promise<Response> {
   if (!isJobIdShape(jobId)) return notFound();
 
-  const user = resolveChatGPTUserFromHeaders(request);
-  if (!user) return signInRequired();
+  const deps = once(loadDeps);
+  const caller = await resolveCaller(request, deps);
+  if ("response" in caller) return caller.response;
+  const { userId } = caller;
 
   try {
-    const { db, billing, history } = await loadDeps();
-    const userId = await billing.findUserIdByExternalSubject(db, user.userId);
-    if (!userId) return notFound();
-
+    const { db, history } = await deps();
     const outcome = await history.deleteHistoryEntryForUser(db, { userId, jobId });
     if (outcome === "not-found") return notFound();
     return Response.json({ deleted: true }, { headers: JSON_HEADERS });

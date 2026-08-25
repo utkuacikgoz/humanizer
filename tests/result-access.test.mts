@@ -8,12 +8,14 @@
 // re-implementation of it.
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as auth from "../db/auth-repository";
 import * as billing from "../db/billing-repository";
 import { persistHumanizationJob } from "../db/repository";
 import { SUBSCRIPTION_STATUSES, type SubscriptionStatus } from "../db/schema";
 import { buildResultResponse } from "../src/lib/result-access";
 import { ingestVerifiedStripeEvent } from "../src/lib/stripe-webhook-projection";
 import { createTestDatabase } from "./helpers/sqlite-db.mjs";
+import { sessionHeaders, signIn } from "./helpers/session.mjs";
 import { stripeEvent, stripeStub, stripeSubscription } from "./helpers/stripe-fixtures.mjs";
 import type { AppDatabase } from "../db/repository";
 
@@ -49,15 +51,8 @@ async function digestOf(token: string) {
 function get(db: AppDatabase, query: string, headers: Record<string, string> = {}) {
   return buildResultResponse(
     new Request(`http://localhost/api/result${query}`, { headers }),
-    async () => ({ db, billing }),
+    async () => ({ db, billing, auth }),
   );
-}
-
-function authHeaders(externalSubject: string) {
-  return {
-    "oai-authenticated-user-id": externalSubject,
-    "oai-authenticated-user-email": `${externalSubject}@example.com`,
-  };
 }
 
 async function grantEntitlement(db: AppDatabase, userId: string, overrides: Partial<{
@@ -86,6 +81,8 @@ async function scenario() {
   const job = await persistHumanizationJob(db, jobInput());
   const owner = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: "owner", email: null });
   const stranger = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: "stranger", email: null });
+  await signIn(db, "owner");
+  await signIn(db, "stranger");
   await billing.claimJobForUser(db, { capabilityDigest: await digestOf(job.capabilityToken), userId: owner.userId });
   return { db, job, owner, stranger };
 }
@@ -106,7 +103,7 @@ test("an unauthenticated caller is refused before any lookup", async () => {
 test("a malformed job identifier is refused without a database query", async () => {
   const { db } = await scenario();
   for (const bad of ["", "../../etc/passwd", "' OR 1=1 --", "x".repeat(200), "<script>"]) {
-    const response = await get(db, `?job=${encodeURIComponent(bad)}`, authHeaders("owner"));
+    const response = await get(db, `?job=${encodeURIComponent(bad)}`, sessionHeaders("owner"));
     await assertLocked(response);
   }
 });
@@ -125,7 +122,7 @@ test("forged Checkout return parameters do not unlock anything", async () => {
     `?job=${job.jobId}&subscription=sub_active&status=active`,
   ];
   for (const query of forged) {
-    await assertLocked(await get(db, query, authHeaders("owner")));
+    await assertLocked(await get(db, query, sessionHeaders("owner")));
   }
 });
 
@@ -135,8 +132,8 @@ test("a genuinely entitled owner is unaffected by whatever junk the redirect car
   const { db, job, owner } = await scenario();
   await grantEntitlement(db, owner.userId);
 
-  const clean = await get(db, `?job=${job.jobId}`, authHeaders("owner"));
-  const noisy = await get(db, `?job=${job.jobId}&success=false&plan=nonexistent&session_id=cs_forged`, authHeaders("owner"));
+  const clean = await get(db, `?job=${job.jobId}`, sessionHeaders("owner"));
+  const noisy = await get(db, `?job=${job.jobId}&success=false&plan=nonexistent&session_id=cs_forged`, sessionHeaders("owner"));
 
   assert.equal(clean.status, 200);
   assert.equal(noisy.status, 200);
@@ -147,7 +144,7 @@ test("an unlocked result carries the same qualitative evidence as its preview", 
   const { db, job, owner } = await scenario();
   await grantEntitlement(db, owner.userId);
 
-  const response = await get(db, `?job=${job.jobId}`, authHeaders("owner"));
+  const response = await get(db, `?job=${job.jobId}`, sessionHeaders("owner"));
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     original: "The original text a user submitted.",
@@ -163,16 +160,17 @@ test("an entitled stranger cannot read another user's job", async () => {
   const { db, job, stranger } = await scenario();
   await grantEntitlement(db, stranger.userId, { stripeSubscriptionId: "sub_stranger" });
 
-  await assertLocked(await get(db, `?job=${job.jobId}`, authHeaders("stranger")));
+  await assertLocked(await get(db, `?job=${job.jobId}`, sessionHeaders("stranger")));
 });
 
 test("an unclaimed job is not readable by anyone, entitled or not", async () => {
   const db = await createTestDatabase();
   const job = await persistHumanizationJob(db, jobInput());
   const buyer = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: "buyer", email: null });
+  await signIn(db, "buyer");
   await grantEntitlement(db, buyer.userId);
 
-  await assertLocked(await get(db, `?job=${job.jobId}`, authHeaders("buyer")));
+  await assertLocked(await get(db, `?job=${job.jobId}`, sessionHeaders("buyer")));
 });
 
 test("only active and trialing subscription statuses unlock", async () => {
@@ -181,7 +179,7 @@ test("only active and trialing subscription statuses unlock", async () => {
   for (const status of SUBSCRIPTION_STATUSES) {
     const { db, job, owner } = await scenario();
     await grantEntitlement(db, owner.userId, { status });
-    const response = await get(db, `?job=${job.jobId}`, authHeaders("owner"));
+    const response = await get(db, `?job=${job.jobId}`, sessionHeaders("owner"));
 
     if (unlocking.has(status)) {
       assert.equal(response.status, 200, `${status} should unlock`);
@@ -205,7 +203,7 @@ test("a canceled-at-period-end subscription stops unlocking once the period has 
     currentPeriodEnd: new Date(Date.now() - 1_000),
   });
 
-  await assertLocked(await get(db, `?job=${job.jobId}`, authHeaders("owner")));
+  await assertLocked(await get(db, `?job=${job.jobId}`, sessionHeaders("owner")));
 });
 
 test("a canceled-at-period-end subscription still unlocks before the period ends", async () => {
@@ -216,7 +214,7 @@ test("a canceled-at-period-end subscription still unlocks before the period ends
     currentPeriodEnd: new Date(Date.now() + 60 * 60 * 1000),
   });
 
-  const response = await get(db, `?job=${job.jobId}`, authHeaders("owner"));
+  const response = await get(db, `?job=${job.jobId}`, sessionHeaders("owner"));
   assert.equal(response.status, 200, "cancellation takes effect at the period end, not immediately");
 });
 
@@ -231,7 +229,7 @@ test("a renewing subscription whose period end has passed still unlocks (no fals
     currentPeriodEnd: new Date(Date.now() - 60 * 60 * 1000),
   });
 
-  const response = await get(db, `?job=${job.jobId}`, authHeaders("owner"));
+  const response = await get(db, `?job=${job.jobId}`, sessionHeaders("owner"));
   assert.equal(response.status, 200);
 });
 
@@ -242,7 +240,7 @@ test("a purged payload is not served even to an entitled owner", async () => {
   const { eq } = await import("drizzle-orm");
   await db.update(schema.jobPayloads).set({ purgedAt: new Date() }).where(eq(schema.jobPayloads.jobId, job.jobId));
 
-  await assertLocked(await get(db, `?job=${job.jobId}`, authHeaders("owner")));
+  await assertLocked(await get(db, `?job=${job.jobId}`, sessionHeaders("owner")));
 });
 
 test("webhook lag: the payer sees a pending state, then the same job unlocks once the webhook lands", async () => {
@@ -251,7 +249,7 @@ test("webhook lag: the payer sees a pending state, then the same job unlocks onc
   // projector and the real unlock path.
   const { db, job, owner } = await scenario();
 
-  const beforeWebhook = await get(db, `?job=${job.jobId}&session_id=cs_test_real`, authHeaders("owner"));
+  const beforeWebhook = await get(db, `?job=${job.jobId}&session_id=cs_test_real`, sessionHeaders("owner"));
   assert.equal(beforeWebhook.status, 404);
   const pendingBody = (await beforeWebhook.json()) as { pending?: boolean };
   assert.equal(pendingBody.pending, true, "an owner awaiting confirmation gets a pending hint, not a hard error");
@@ -267,18 +265,43 @@ test("webhook lag: the payer sees a pending state, then the same job unlocks onc
   });
   assert.equal(ingested.outcome, "processed");
 
-  const afterWebhook = await get(db, `?job=${job.jobId}`, authHeaders("owner"));
+  const afterWebhook = await get(db, `?job=${job.jobId}`, sessionHeaders("owner"));
   assert.equal(afterWebhook.status, 200, "the original preserved job unlocks — not an empty dashboard");
   assert.equal(((await afterWebhook.json()) as { result: string }).result, FULL_RESULT);
 });
 
-test("a signed-in visitor with no account row gets the same uniform not-found", async () => {
+test("a cookie naming no live session is nobody, and is told to sign in", async () => {
+  // The header scheme this replaced could assert an identity that had no
+  // account row. A cookie cannot: a session id that matches no row resolves
+  // to no identity at all, which is refused before any lookup of the job.
   const { db, job } = await scenario();
-  await assertLocked(await get(db, `?job=${job.jobId}`, authHeaders("never-seen-before")));
+  const response = await get(db, `?job=${job.jobId}`, sessionHeaders("never-signed-in"));
+  assert.equal(response.status, 401);
+  assert.ok(!(await response.text()).includes(FULL_RESULT));
+});
+
+test("an expired session resolves to nobody", async () => {
+  const { db, job } = await scenario();
+  await signIn(db, "lapsed", { expiresAt: new Date(Date.now() - 1_000) });
+  const response = await get(db, `?job=${job.jobId}`, sessionHeaders("lapsed"));
+  assert.equal(response.status, 401);
+});
+
+test("a session cookie presented on an untrusted host is refused", async () => {
+  // SEC-01 containment, carried over from the header scheme: identity is
+  // honored on the configured domain and dev hosts, nowhere else.
+  const { db, job } = await scenario();
+  const response = await buildResultResponse(
+    new Request(`https://humanizer.workers.dev/api/result?job=${job.jobId}`, {
+      headers: { ...sessionHeaders("owner"), host: "humanizer.workers.dev" },
+    }),
+    async () => ({ db, billing, auth }),
+  );
+  assert.equal(response.status, 401);
 });
 
 test("the unlock path fails closed when the database is unavailable", async () => {
-  const failing = new Request("http://localhost/api/result?job=00000000-0000-4000-8000-000000000000", { headers: authHeaders("owner") });
+  const failing = new Request("http://localhost/api/result?job=00000000-0000-4000-8000-000000000000", { headers: sessionHeaders("owner") });
   const response = await buildResultResponse(failing, async () => { throw new Error("D1 binding unavailable"); });
   await assertLocked(response);
 });
