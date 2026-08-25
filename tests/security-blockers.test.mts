@@ -124,6 +124,20 @@ test("SEC-07: migrations point at the directory drizzle-kit actually writes to",
   assert.match(config, /migrations_dir:\s*"drizzle"/);
 });
 
+test("every secret the Worker needs survives a deploy", () => {
+  // `wrangler deploy --secrets-file` REPLACES the Worker's entire secret set.
+  // A secret the code reads but the workflow does not write is not merely
+  // unset on a new environment — it is deleted from the running one on the
+  // next deploy. RESEND_API_KEY gates sign-in, and sign-in gates every
+  // purchase, so its absence would take the product offline commercially.
+  const workflow = readFileSync(new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8");
+  for (const secret of ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_STARTER", "PREVIEW_GUARD_SECRET", "RESEND_API_KEY"]) {
+    assert.match(workflow, new RegExp(`"${secret}=\\$${secret}"`), `${secret} must be written into the secrets file`);
+    assert.match(workflow, new RegExp(`env\\.${secret} != ''`), `${secret} must gate the deploy`);
+    assert.match(workflow, new RegExp(`env\\.${secret} == ''`), `${secret} must fail the "not configured" check`);
+  }
+});
+
 // SEC-01 — the host gate. It began as containment for forgeable identity
 // headers; those are gone, and it now contains the session cookie: a real
 // session presented on an origin this app does not claim is not read at all.
