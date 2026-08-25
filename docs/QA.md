@@ -128,16 +128,17 @@ Rules the helper keeps, and which any change to it must keep: a raw token, a ses
 - `gotoHydrated()` waits for a `POST /api/events` that only `app/page.tsx` and `app/checkout/success/page.tsx` ever send. On `/signin` and `/history` that wait can only end in its own 30-second timeout, so those pages use `gotoReady()` instead.
 - Playwright's browser build must match its library version. The harness prefers the project's copy and falls back to a global install whose Chromium actually exists. Do not remove that fallback.
 
-#### Open accessibility defects found by this suite
+#### Open defects the suite is failing on
 
-Two tests in `signed-in-accessibility.e2e.test.mts` fail against real defects and are deliberately left failing rather than weakened. They are separate tests so the passing traversal coverage is not hidden behind them.
+These tests fail against real defects and are deliberately left failing rather than weakened. The two accessibility ones are separate tests so the passing traversal coverage is not hidden behind them.
 
 | Test | Defect | Fix |
 |---|---|---|
 | `every keyboard stop on the sign-in page shows where the keyboard is` | `.signin-input` is the only control on either signed-in page with no visible focus indicator. `app/globals.css` sets `outline: 0` on the base `.signin-input` rule, which has the same specificity as the global `:focus-visible` rule and comes later in the file, so it wins. The only remaining focus cue is a 3%-alpha background tint — a colour-only indicator far below any contrast threshold. WCAG 2.4.7. | Drop `outline: 0` from `.signin-input`, or restate the focus ring under `.signin-input:focus-visible`. |
 | `deleting the last history item does not strand keyboard focus` | Deleting the only history item unmounts the row containing the button the customer just pressed, so focus falls to `<body>` and the next Tab restarts from the top of the document. This is the same outcome `app/history/page.tsx` already refuses to accept from the native `disabled` attribute; only the route into it differs. | Move focus to a surviving landmark after the list empties — the `history-title` heading or the empty-state status line. |
+| `anonymous visitor: paste, humanize, compare, hit the paywall` | ACT-09: the test asserts a billing/cancel entry point (`#manage-billing`) on the landing page. There is none, on `main` either — a15f919 deliberately moved billing out of the funnel and left only a "Cancel anytime" link to `/terms#manage-billing`. The failure was previously masked by the disclosure assertion above it failing first. | An activation decision, not a test repair: either ACT-09 is satisfied by the link (and the assertion should say so) or the entry point belongs back on the page. Deliberately not decided here. |
 
-Neither is a regression from this suite's changes: both reproduce against `main`.
+None of these is a regression from this suite's changes; all three reproduce against `main`.
 
 ### Security and abuse automation
 
