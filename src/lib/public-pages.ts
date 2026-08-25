@@ -44,7 +44,7 @@ export const SOCIAL_IMAGE = {
   alt: "Keep your meaning. Lose the machine tone.",
 } as const;
 
-export const LEGAL_PAGES_LAST_UPDATED = "2026-08-23";
+export const LEGAL_PAGES_LAST_UPDATED = "2026-08-25";
 
 /**
  * Only routes that (a) genuinely exist under `app/`, (b) return 200, and (c)
