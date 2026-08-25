@@ -440,7 +440,7 @@ more than a *Done* nobody can support; do not upgrade a row without evidence nam
 | SEO-006 | P0 | Add truthful structured data | Engineering + SEO | SEO-001, pricing config | Partial | `Organization` + `WebSite` JSON-LD ship from `src/lib/site-structured-data.ts` on the canonical host only. Every property is verifiable from `src/config/product.ts`: brand name, `legalName` Bosphorus Elevate LLC, origin, support `ContactPoint`, `inLanguage`. `logo`, `sameAs`, `aggregateRating`, `foundingDate`, `address` and `SearchAction` are deliberately absent and a test fails if any appears. `SoftwareApplication` on `/` still carries its `Offer` from the catalog. Remaining: live Rich Results validation (owner action O-4). |
 | SEO-007 | P0 | Protect customer text from discovery/analytics | Security + Engineering | SEO-002 | Partial | Test confirms text never appears in URL, metadata, analytics, sitemap, public cache, or unauthorized response; private result access control passes. Holds for what is built (anonymous preview, `track()` calls); there is no history/account surface yet (M3) for this to apply to |
 | SEO-008 | P0 | Establish performance budgets | Engineering + Design | Core UI | Open | Not verified in this pass; outside SEO's owned files |
-| SEO-009 | P0 | Verify search-engine consoles | SEO + Hosting (owner action) | Live deployment | Open (owner action, not agent-completable) | No agent can complete this: it requires a Google/Bing login and DNS or file-level proof of ownership. The exact ordered steps are in Section 11.1. Done means: `ownword.pro` verified in Google Search Console and Bing Webmaster Tools, `https://ownword.pro/sitemap.xml` submitted and reporting 3 discovered URLs, and a live URL Inspection on `/` returning Indexable. |
+| SEO-009 | P0 | Verify search-engine consoles | SEO + Hosting (owner action) | Live deployment | Partial (owner-reported 2026-08-25) | The owner reports Google Search Console is connected for `ownword.pro`. **Not independently verified** — no agent in this project can reach GSC or the live host, so this status is the owner's report, not evidence. Still open: submit `https://ownword.pro/sitemap.xml` and confirm 3 discovered URLs; run a live URL Inspection on `/` for Indexing allowed = Yes with canonical `https://ownword.pro`; repeat for `/privacy` and `/terms`; add Bing via *Import from Google Search Console*. Steps 4 onward in Section 11.1. |
 | SEO-010 | P0 | Connect organic funnel attribution | Analytics + Engineering | Existing events | Open | Funnel events exist (`track()` calls per `PRODUCT.md`); no GSC-joined dashboard exists |
 | SEO-011 | P0 | Write responsible claims standard | Legal + Copy + SEO | Product brief | Open | Guardrails are stated in this document, `PRODUCT.md`, and `README.md`, but there is no single Legal-approved allowed/forbidden claims list |
 | SEO-012 | P0 | Publish trust proof modules | Humanization + Copy | Benchmark evidence | Open | No `/trust/*` pages exist; homepage carries inline trust copy only |
@@ -463,6 +463,12 @@ more than a *Done* nobody can support; do not upgrade a row without evidence nam
 
 No agent can do any of this. It needs a Google account, a Bing account, and access to the `ownword.pro` DNS
 zone or the Cloudflare dashboard. Do them in this order; each step's check is the entry condition for the next.
+
+**Progress (owner-reported 2026-08-25):** Google Search Console is connected. Steps 1 to 3 are therefore done.
+Continue from step 4. One caution before submitting the sitemap: the production deploy has not run since the
+sign-in work merged, so the live host may still be serving a build whose sitemap and robots output predate it.
+Re-run step 1's two checks against the live host first; submitting a sitemap the deploy has not published yet
+just records errors in Search Console.
 
 1. **Confirm the live files first.** In a browser (or `curl -I`), open `https://ownword.pro/robots.txt`. It
    must contain `Allow: /` and `Sitemap: https://ownword.pro/sitemap.xml`. Then open
