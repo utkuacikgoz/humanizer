@@ -8,12 +8,13 @@ import { buildHistoryDeleteResponse, buildHistoryDetailResponse } from "@/src/li
 type RouteContext = { params: Promise<{ id: string }> };
 
 async function loadDeps() {
-  const [{ getDb }, billing, history] = await Promise.all([
+  const [{ getDb }, billing, history, auth] = await Promise.all([
     import("../../../../db/index"),
     import("../../../../db/billing-repository"),
     import("../../../../db/history-repository"),
+    import("../../../../db/auth-repository"),
   ]);
-  return { db: getDb(), billing, history };
+  return { db: getDb(), billing, history, auth };
 }
 
 export async function GET(request: Request, context: RouteContext) {

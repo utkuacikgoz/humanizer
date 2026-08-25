@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { eq } from "drizzle-orm";
+import * as auth from "../db/auth-repository";
 import * as billing from "../db/billing-repository";
 import * as history from "../db/history-repository";
 import { persistHumanizationJob } from "../db/repository";
@@ -19,6 +20,7 @@ import {
   type HistoryListBody,
 } from "../src/lib/history-access";
 import { createTestDatabase } from "./helpers/sqlite-db.mjs";
+import { sessionHeaders, signIn } from "./helpers/session.mjs";
 import type { AppDatabase } from "../db/repository";
 
 const OWNER_RESULT = "OWNER-ONLY full rewrite text that must never appear in a list response.";
@@ -50,20 +52,13 @@ function jobInput(result: string) {
   };
 }
 
-function authHeaders(externalSubject: string) {
-  return {
-    "oai-authenticated-user-id": externalSubject,
-    "oai-authenticated-user-email": `${externalSubject}@example.com`,
-  };
-}
-
 async function digestOf(token: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function deps(db: AppDatabase) {
-  return async () => ({ db, billing, history });
+  return async () => ({ db, billing, history, auth });
 }
 
 function list(db: AppDatabase, headers: Record<string, string> = {}, query = "") {
@@ -115,6 +110,8 @@ async function scenario() {
 
   const owner = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: "owner", email: null });
   const stranger = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: "stranger", email: null });
+  await signIn(db, "owner");
+  await signIn(db, "stranger");
 
   await billing.claimJobForUser(db, { capabilityDigest: await digestOf(ownerJob.capabilityToken), userId: owner.userId });
   await billing.claimJobForUser(db, { capabilityDigest: await digestOf(strangerJob.capabilityToken), userId: stranger.userId });
@@ -137,7 +134,7 @@ async function listBody(response: Response): Promise<HistoryListBody> {
 test("the list returns only the jobs the caller owns", async () => {
   const { db, ownerJob } = await scenario();
 
-  const body = await listBody(await list(db, authHeaders("owner")));
+  const body = await listBody(await list(db, sessionHeaders("owner")));
   assert.deepEqual(body.items.map((item) => item.jobId), [ownerJob.jobId]);
   assert.equal(body.entitled, true);
 });
@@ -145,7 +142,7 @@ test("the list returns only the jobs the caller owns", async () => {
 test("another entitled user's list never contains someone else's job", async () => {
   const { db, strangerJob } = await scenario();
 
-  const body = await listBody(await list(db, authHeaders("stranger")));
+  const body = await listBody(await list(db, sessionHeaders("stranger")));
   assert.deepEqual(body.items.map((item) => item.jobId), [strangerJob.jobId]);
 });
 
@@ -153,17 +150,29 @@ test("an unclaimed anonymous job appears in nobody's list", async () => {
   const { db, anonymousJob } = await scenario();
 
   for (const subject of ["owner", "stranger"]) {
-    const body = await listBody(await list(db, authHeaders(subject)));
+    const body = await listBody(await list(db, sessionHeaders(subject)));
     assert.ok(!body.items.some((item) => item.jobId === anonymousJob.jobId));
   }
 });
 
-test("a signed-in visitor with no account row gets an empty history, not an error", async () => {
+test("a newly created account has an empty history, not an error", async () => {
   const { db } = await scenario();
+  await signIn(db, "brand-new");
 
-  const body = await listBody(await list(db, authHeaders("never-seen-before")));
+  const body = await listBody(await list(db, sessionHeaders("brand-new")));
   assert.deepEqual(body.items, []);
   assert.equal(body.entitled, false);
+});
+
+test("a cookie naming no live session, and an expired session, are both nobody", async () => {
+  const { db, ownerJob } = await scenario();
+  await signIn(db, "lapsed", { expiresAt: new Date(Date.now() - 1_000) });
+
+  for (const headers of [sessionHeaders("never-signed-in"), sessionHeaders("lapsed")]) {
+    const response = await list(db, headers);
+    assert.equal(response.status, 401);
+    assert.ok(!(await response.text()).includes(ownerJob.jobId));
+  }
 });
 
 test("no client-supplied filter can widen the list", async () => {
@@ -178,7 +187,7 @@ test("no client-supplied filter can widen the list", async () => {
     "?jobs[]=%2A&order=created_at",
   ];
   for (const query of forged) {
-    const body = await listBody(await list(db, authHeaders("owner"), query));
+    const body = await listBody(await list(db, sessionHeaders("owner"), query));
     assert.deepEqual(body.items.map((item) => item.jobId), [ownerJob.jobId], `query ${query} must change nothing`);
   }
 });
@@ -218,11 +227,13 @@ test("a valid preview capability grants its one job and enumerates nothing", asy
   assert.equal(detailAttempt.status, 401);
 });
 
-test("identity headers are ignored off the trusted host", async () => {
-  // SEC-01 containment: on an origin that does not pass through the hosting
-  // boundary, the identity headers are forgeable, so they buy nothing.
+test("a session cookie is ignored off the trusted host", async () => {
+  // SEC-01 containment, carried over from the header scheme: a real session
+  // cookie presented on an origin this app does not claim buys nothing.
   const { db, ownerJob } = await scenario();
-  const request = new Request(`https://humanizer.workers.dev/api/history`, { headers: authHeaders("owner") });
+  const request = new Request(`https://humanizer.workers.dev/api/history`, {
+    headers: { ...sessionHeaders("owner"), host: "humanizer.workers.dev" },
+  });
 
   const response = await buildHistoryListResponse(request, deps(db));
   assert.equal(response.status, 401);
@@ -236,7 +247,7 @@ test("identity headers are ignored off the trusted host", async () => {
 test("the list response never carries a full rewrite", async () => {
   const { db } = await scenario();
 
-  const raw = await (await list(db, authHeaders("owner"))).text();
+  const raw = await (await list(db, sessionHeaders("owner"))).text();
   assert.ok(!raw.includes(OWNER_RESULT), "the owner's own full rewrite must stay behind the detail path");
   assert.ok(!raw.includes(STRANGER_RESULT));
   assert.ok(raw.includes(PREVIEW_TEXT), "the already-approved preview projection is what the list shows");
@@ -252,7 +263,7 @@ test("the list response never carries a full rewrite", async () => {
 
 test("the list is refused rather than silently emptied when the database is unavailable", async () => {
   const response = await buildHistoryListResponse(
-    new Request("http://localhost/api/history", { headers: authHeaders("owner") }),
+    new Request("http://localhost/api/history", { headers: sessionHeaders("owner") }),
     async () => { throw new Error("D1 binding unavailable"); },
   );
   assert.equal(response.status, 503);
@@ -265,7 +276,7 @@ test("the list is refused rather than silently emptied when the database is unav
 test("the owner opens their own rewrite in full", async () => {
   const { db, ownerJob } = await scenario();
 
-  const response = await detail(db, ownerJob.jobId, authHeaders("owner"));
+  const response = await detail(db, ownerJob.jobId, sessionHeaders("owner"));
   assert.equal(response.status, 200);
   const body = (await response.json()) as { result: string; jobId: string; preview: string };
   assert.equal(body.result, OWNER_RESULT);
@@ -276,7 +287,7 @@ test("the owner opens their own rewrite in full", async () => {
 test("an entitled stranger cannot open someone else's rewrite", async () => {
   const { db, ownerJob } = await scenario();
 
-  const response = await detail(db, ownerJob.jobId, authHeaders("stranger"));
+  const response = await detail(db, ownerJob.jobId, sessionHeaders("stranger"));
   assert.equal(response.status, 404);
   assert.ok(!(await response.text()).includes(OWNER_RESULT));
 });
@@ -284,8 +295,8 @@ test("an entitled stranger cannot open someone else's rewrite", async () => {
 test("an unclaimed job and a job that never existed answer identically", async () => {
   const { db, anonymousJob } = await scenario();
 
-  const unclaimed = await detail(db, anonymousJob.jobId, authHeaders("owner"));
-  const nonexistent = await detail(db, "00000000-0000-4000-8000-000000000000", authHeaders("owner"));
+  const unclaimed = await detail(db, anonymousJob.jobId, sessionHeaders("owner"));
+  const nonexistent = await detail(db, "00000000-0000-4000-8000-000000000000", sessionHeaders("owner"));
 
   assert.equal(unclaimed.status, nonexistent.status);
   assert.deepEqual(await unclaimed.json(), await nonexistent.json());
@@ -306,11 +317,11 @@ test("a lapsed owner sees their metadata but cannot open the full rewrite", asyn
     lastStripeEventId: "evt_cancel",
   });
 
-  const listed = await listBody(await list(db, authHeaders("owner")));
+  const listed = await listBody(await list(db, sessionHeaders("owner")));
   assert.equal(listed.entitled, false);
   assert.deepEqual(listed.items.map((item) => item.jobId), [ownerJob.jobId]);
 
-  const response = await detail(db, ownerJob.jobId, authHeaders("owner"));
+  const response = await detail(db, ownerJob.jobId, sessionHeaders("owner"));
   assert.equal(response.status, 404);
   assert.ok(!(await response.text()).includes(OWNER_RESULT));
 });
@@ -318,8 +329,8 @@ test("a lapsed owner sees their metadata but cannot open the full rewrite", asyn
 test("a malformed job identifier is refused before any lookup", async () => {
   const { db } = await scenario();
   for (const bad of ["", "../../etc/passwd", "' OR 1=1 --", "x".repeat(200), "<script>"]) {
-    assert.equal((await detail(db, bad, authHeaders("owner"))).status, 404);
-    assert.equal((await remove(db, bad, authHeaders("owner"))).status, 404);
+    assert.equal((await detail(db, bad, sessionHeaders("owner"))).status, 404);
+    assert.equal((await remove(db, bad, sessionHeaders("owner"))).status, 404);
   }
 });
 
@@ -335,14 +346,14 @@ async function payloadRow(db: AppDatabase, jobId: string) {
 test("deleting an owned rewrite makes it 404 on both list and detail", async () => {
   const { db, ownerJob } = await scenario();
 
-  const deleted = await remove(db, ownerJob.jobId, authHeaders("owner"));
+  const deleted = await remove(db, ownerJob.jobId, sessionHeaders("owner"));
   assert.equal(deleted.status, 200);
   assert.deepEqual(await deleted.json(), { deleted: true });
 
-  const listed = await listBody(await list(db, authHeaders("owner")));
+  const listed = await listBody(await list(db, sessionHeaders("owner")));
   assert.deepEqual(listed.items, []);
 
-  const opened = await detail(db, ownerJob.jobId, authHeaders("owner"));
+  const opened = await detail(db, ownerJob.jobId, sessionHeaders("owner"));
   assert.equal(opened.status, 404);
   assert.ok(!(await opened.text()).includes(OWNER_RESULT));
 });
@@ -353,7 +364,7 @@ test("delete voids the payload refs and stamps purgedAt rather than only hiding 
   assert.equal(before.resultRef, OWNER_RESULT);
   assert.equal(before.purgedAt, null);
 
-  await remove(db, ownerJob.jobId, authHeaders("owner"));
+  await remove(db, ownerJob.jobId, sessionHeaders("owner"));
 
   const after = await payloadRow(db, ownerJob.jobId);
   assert.equal(after.resultRef, null, "the rewrite text must be gone, not merely unreachable");
@@ -373,14 +384,14 @@ test("delete voids the payload refs and stamps purgedAt rather than only hiding 
 test("delete enqueues exactly one history_item deletion job, and repeating it enqueues no more", async () => {
   const { db, ownerJob } = await scenario();
 
-  await remove(db, ownerJob.jobId, authHeaders("owner"));
+  await remove(db, ownerJob.jobId, sessionHeaders("owner"));
   const first = await db.select().from(schema.deletionJobs).where(eq(schema.deletionJobs.subjectId, ownerJob.jobId));
   assert.equal(first.length, 1);
   assert.equal(first[0].subjectType, "job");
   assert.equal(first[0].scope, "history_item");
   assert.equal(first[0].status, "pending");
 
-  const repeat = await remove(db, ownerJob.jobId, authHeaders("owner"));
+  const repeat = await remove(db, ownerJob.jobId, sessionHeaders("owner"));
   assert.equal(repeat.status, 200);
   assert.deepEqual(await repeat.json(), { deleted: true }, "a repeated delete answers identically");
 
@@ -391,21 +402,21 @@ test("delete enqueues exactly one history_item deletion job, and repeating it en
 test("a stranger's delete is refused and destroys nothing", async () => {
   const { db, ownerJob } = await scenario();
 
-  const response = await remove(db, ownerJob.jobId, authHeaders("stranger"));
+  const response = await remove(db, ownerJob.jobId, sessionHeaders("stranger"));
   assert.equal(response.status, 404);
 
   const row = await payloadRow(db, ownerJob.jobId);
   assert.equal(row.resultRef, OWNER_RESULT, "a refused delete must leave the owner's data untouched");
   assert.equal(row.purgedAt, null);
 
-  const owned = await listBody(await list(db, authHeaders("owner")));
+  const owned = await listBody(await list(db, sessionHeaders("owner")));
   assert.deepEqual(owned.items.map((item) => item.jobId), [ownerJob.jobId]);
 });
 
 test("nobody can delete an unclaimed anonymous job through this path", async () => {
   const { db, anonymousJob } = await scenario();
 
-  const response = await remove(db, anonymousJob.jobId, authHeaders("owner"));
+  const response = await remove(db, anonymousJob.jobId, sessionHeaders("owner"));
   assert.equal(response.status, 404);
   assert.equal((await payloadRow(db, anonymousJob.jobId)).purgedAt, null);
 });
@@ -420,7 +431,7 @@ test("an anonymous caller cannot delete anything", async () => {
 
 test("delete never reports success when the database is unavailable", async () => {
   const response = await buildHistoryDeleteResponse(
-    new Request("http://localhost/api/history/00000000-0000-4000-8000-000000000000", { method: "DELETE", headers: authHeaders("owner") }),
+    new Request("http://localhost/api/history/00000000-0000-4000-8000-000000000000", { method: "DELETE", headers: sessionHeaders("owner") }),
     "00000000-0000-4000-8000-000000000000",
     async () => { throw new Error("D1 binding unavailable"); },
   );
@@ -432,12 +443,12 @@ test("deleting one rewrite leaves the account's other rewrites intact", async ()
   const second = await persistHumanizationJob(db, jobInput("A second owned rewrite."));
   await billing.claimJobForUser(db, { capabilityDigest: await digestOf(second.capabilityToken), userId: owner.userId });
 
-  const before = await listBody(await list(db, authHeaders("owner")));
+  const before = await listBody(await list(db, sessionHeaders("owner")));
   assert.equal(before.items.length, 2);
 
-  await remove(db, second.jobId, authHeaders("owner"));
+  await remove(db, second.jobId, sessionHeaders("owner"));
 
-  const after = await listBody(await list(db, authHeaders("owner")));
+  const after = await listBody(await list(db, sessionHeaders("owner")));
   assert.equal(after.items.length, 1);
   assert.ok(!after.items.some((item) => item.jobId === second.jobId));
 });

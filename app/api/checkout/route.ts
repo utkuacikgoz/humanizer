@@ -4,13 +4,13 @@
 // supplies neither price, plan allowance, nor its own identity as
 // authority (D-003).
 //
-// No app-level CSRF token: this route has no cookie-based session to
-// forge in the first place. Identity arrives exclusively via
-// oai-authenticated-user-* headers injected by the trusted hosting
-// boundary (app/chatgpt-auth.ts) — a cross-site form/fetch cannot set
-// those. If a cookie-based auth path is ever added, this reasoning no
-// longer holds and CSRF protection becomes required here.
-import { chatGPTSignInPath, resolveChatGPTUserFromHeaders } from "@/src/lib/chatgpt-identity";
+// CSRF. Identity is a cookie now, so the note this comment used to carry
+// ("no cookie-based session to forge") no longer holds and the protection it
+// promised is here: the session cookie is SameSite=Lax, which a browser does
+// not attach to a cross-site POST at all, and any request arriving with an
+// Origin naming another site is refused outright (isCrossSiteRequest). Both
+// are needed — Lax is the control, the Origin check is the belt.
+import { isCrossSiteRequest, once, readSessionCookie, resolveSessionUser, signInPath } from "@/src/lib/identity";
 import { isPurchasablePlan } from "@/src/config/stripe";
 
 const CAPABILITY_TOKEN = /^[A-Za-z0-9_-]{16,128}$/;
@@ -27,13 +27,20 @@ async function sha256Hex(value: string) {
 }
 
 export async function POST(request: Request) {
+  if (isCrossSiteRequest(request)) {
+    return Response.json({ error: "This request did not come from Ownword." }, { status: 403, headers: { "cache-control": "no-store" } });
+  }
   if (!request.headers.get("content-type")?.toLowerCase().includes("application/json")) {
     return Response.json({ error: "Send a JSON body." }, { status: 415 });
   }
 
-  const user = resolveChatGPTUserFromHeaders(request);
-  if (!user) {
-    return Response.json({ error: "Sign in to continue.", signInPath: chatGPTSignInPath("/") }, { status: 401, headers: { "cache-control": "no-store" } });
+  // Presence of a session cookie is not authentication — the session is
+  // resolved against the database below, before anything is claimed or
+  // charged. Checking presence first only keeps a signed-out caller from
+  // needing a database binding to be told to sign in, which is the same
+  // property the previous header check had.
+  if (!readSessionCookie(request)) {
+    return signedOut();
   }
 
   let payload: unknown;
@@ -55,12 +62,15 @@ export async function POST(request: Request) {
   }
 
   try {
-    const [{ getDb }, { getStripeClient, StripeNotConfiguredError, StripeConfigInvalidError }, billing] = await Promise.all([
+    const [{ getDb }, { getStripeClient, StripeNotConfiguredError, StripeConfigInvalidError }, billing, auth] = await Promise.all([
       import("../../../db/index"),
       import("../../../db/stripe-client"),
       import("../../../db/billing-repository"),
+      import("../../../db/auth-repository"),
     ]);
     const db = getDb();
+    const user = await resolveSessionUser(request, once(async () => ({ db, auth })));
+    if (!user) return signedOut();
     let stripe, config;
     try {
       ({ stripe, config } = getStripeClient());
@@ -90,7 +100,8 @@ export async function POST(request: Request) {
       }
     }
 
-    const { userId } = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: user.userId, email: user.email });
+    // The session already names the local user row: sign-in created it.
+    const { userId } = user;
 
     // SEC-04: never sell a second subscription to someone who already has
     // one. The idempotency key below is per job+plan, so a returning
@@ -141,4 +152,11 @@ export async function POST(request: Request) {
     // Never surface raw Stripe/driver error details to the client.
     return Response.json({ error: "Checkout could not be started. Please try again." }, { status: 502, headers: { "cache-control": "no-store" } });
   }
+}
+
+function signedOut() {
+  return Response.json(
+    { error: "Sign in to continue.", signInPath: signInPath("/") },
+    { status: 401, headers: { "cache-control": "no-store" } },
+  );
 }

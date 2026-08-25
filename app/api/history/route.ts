@@ -7,11 +7,12 @@ import { buildHistoryListResponse } from "@/src/lib/history-access";
 
 export async function GET(request: Request) {
   return buildHistoryListResponse(request, async () => {
-    const [{ getDb }, billing, history] = await Promise.all([
+    const [{ getDb }, billing, history, auth] = await Promise.all([
       import("../../../db/index"),
       import("../../../db/billing-repository"),
       import("../../../db/history-repository"),
+      import("../../../db/auth-repository"),
     ]);
-    return { db: getDb(), billing, history };
+    return { db: getDb(), billing, history, auth };
   });
 }

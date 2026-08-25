@@ -6,7 +6,7 @@ import {
   previewGuardClientKey,
 } from "@/src/lib/preview-request-guard";
 import { isMateriallyUnchanged, MIN_PAYWALLABLE_INPUT_WORDS, projectPreview } from "@/src/lib/preview-projection";
-import { resolveChatGPTUserFromHeaders } from "@/src/lib/chatgpt-identity";
+import { once, readSessionCookie, resolveSessionUser, type SessionIdentity } from "@/src/lib/identity";
 import { releasePaidUsage, reservePaidUsage } from "@/src/lib/paid-usage";
 import type { PaidUsageReservation } from "@/src/lib/paid-usage";
 import { completeEntitledRewrite } from "@/src/lib/entitled-rewrite";
@@ -251,7 +251,27 @@ export async function POST(request: Request) {
         { status: 503, headers: { "cache-control": "no-store", "retry-after": "2" } },
       );
     }
-    const authenticatedUser = resolveChatGPTUserFromHeaders(request);
+    // Identity is a session row, so this is a database read rather than a
+    // header parse. It happens here, before the guard, because the guard's
+    // client key includes the signed-in user.
+    //
+    // A cookie that is present but cannot be resolved is NOT quietly treated
+    // as anonymous: that would hand a paying subscriber a paywalled preview
+    // of their own rewrite and call it success. It fails closed instead, on
+    // the same 503 the paid-usage path uses.
+    let authenticatedUser: SessionIdentity | null = null;
+    if (readSessionCookie(request)) {
+      try {
+        const [{ getDb }, auth] = await Promise.all([
+          import("../../../db/index"),
+          import("../../../db/auth-repository"),
+        ]);
+        const db = getDb();
+        authenticatedUser = await resolveSessionUser(request, once(async () => ({ db, auth })));
+      } catch {
+        throw new PaidUsageUnavailableError("Identity could not be resolved.");
+      }
+    }
     const clientId = trustedIp
       ? authenticatedUser ? `${trustedIp}\0${authenticatedUser.userId}` : trustedIp
       : "local-test-runtime";
@@ -277,7 +297,7 @@ export async function POST(request: Request) {
               const { getDb } = await import("../../../db/index");
               paidDb = getDb();
               const admission = await reservePaidUsage(paidDb, {
-                externalSubject: authenticatedUser.userId,
+                externalSubject: authenticatedUser.externalSubject,
                 idempotencyKey,
                 words: text.trim().split(/\s+/).length,
               });

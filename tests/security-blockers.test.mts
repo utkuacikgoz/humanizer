@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { MIN_HIDDEN_WORDS, projectPreview, shouldOfferUnlock } from "../src/lib/preview-projection";
-import { isTrustedIdentityHost, resolveChatGPTUserFromHeaders } from "../src/lib/chatgpt-identity";
+import { isTrustedIdentityHost, readSessionCookie, DEV_SESSION_COOKIE, SESSION_COOKIE } from "../src/lib/identity";
 
 function words(count: number) {
   return Array.from({ length: count }, (_, i) => `word${i}`).join(" ");
@@ -124,32 +124,38 @@ test("SEC-07: migrations point at the directory drizzle-kit actually writes to",
   assert.match(config, /migrations_dir:\s*"drizzle"/);
 });
 
-// SEC-01 — identity headers are only honored on the trusted production
-// host. Off it (a *.workers.dev URL, a preview alias) the caller is
-// anonymous, so a forged user id buys nothing.
+// SEC-01 — the host gate. It began as containment for forgeable identity
+// headers; those are gone, and it now contains the session cookie: a real
+// session presented on an origin this app does not claim is not read at all.
 
-test("SEC-01: forged identity headers are ignored off the production host", () => {
-  const forged = {
-    "oai-authenticated-user-id": "victim-subject-9001",
-    "oai-authenticated-user-email": "attacker@evil.test",
-  };
+test("SEC-01: a session cookie is not read off the production host", () => {
+  const cookie = `${SESSION_COOKIE}=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`;
   for (const host of ["ownword.pro.workers.dev", "humanizer.workers.dev", "evil.test", ""]) {
-    const headers = new Headers({ ...forged, ...(host ? { host } : {}) });
+    const headers = new Headers({ cookie, ...(host ? { host } : {}) });
     assert.equal(isTrustedIdentityHost(headers), false, `${host || "(no host)"} must not be trusted`);
-    assert.equal(resolveChatGPTUserFromHeaders(headers), null, `${host || "(no host)"} must resolve no identity`);
+    assert.equal(readSessionCookie(headers), null, `${host || "(no host)"} must resolve no session`);
   }
 });
 
-test("SEC-01: the production host and localhost still resolve identity", () => {
+test("SEC-01: the production host and localhost do read the session cookie", () => {
+  const value = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   for (const host of ["ownword.pro", "www.ownword.pro", "OWNWORD.PRO", "ownword.pro:443", "localhost:3000"]) {
-    const headers = new Headers({
-      host,
-      "oai-authenticated-user-id": "real-subject",
-      "oai-authenticated-user-email": "person@example.com",
-    });
+    const headers = new Headers({ host, cookie: `${SESSION_COOKIE}=${value}` });
     assert.equal(isTrustedIdentityHost(headers), true, `${host} should be trusted`);
-    assert.equal(resolveChatGPTUserFromHeaders(headers)?.userId, "real-subject");
+    assert.equal(readSessionCookie(headers), value);
   }
+});
+
+test("SEC-01: the unprefixed dev cookie name is never honored in production", () => {
+  // `__Host-` is what makes a subdomain unable to plant a session for the
+  // apex. The unprefixed fallback exists only because Secure cookies are not
+  // set over plain http, and it must therefore never be read off a dev host.
+  const value = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const production = new Headers({ host: "ownword.pro", cookie: `${DEV_SESSION_COOKIE}=${value}` });
+  assert.equal(readSessionCookie(production), null);
+
+  const development = new Headers({ host: "localhost:3000", cookie: `${DEV_SESSION_COOKIE}=${value}` });
+  assert.equal(readSessionCookie(development), value);
 });
 
 // KI-01 — measured improvement and material change must agree before
