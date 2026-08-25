@@ -288,8 +288,22 @@ export async function regenerateSentence(
   // Only the recorded values that actually appear in this sentence are handed
   // to the rewriter as terms to mask; the survival check below still uses the
   // whole list against the whole document.
-  const termsInSentence = protectedValues.filter((value) => value.trim() && target.includes(value));
-  const protectedContent = extractProtectedContent(target, termsInSentence);
+  //
+  // A value the extractor already recognises is deliberately NOT handed back
+  // to it. extractProtectedContent keys its dedupe on kind as well as span, so
+  // re-supplying a detected entity as a custom term produces two items over
+  // one span - "Dr. Elena Marsh" as both `person` and `technical-term`. The
+  // verifier then requires each to survive on its own, and a candidate that
+  // contains the name once can only satisfy one of them, so every regeneration
+  // of a sentence containing a protected value rejected. Feeding detected
+  // values back is unique to this path, which is why the extractor's own
+  // behaviour is right for /api/humanize and wrong here.
+  const detected = extractProtectedContent(target);
+  const alreadyCovered = new Set(detected.map((item) => item.normalizedValue));
+  const termsInSentence = protectedValues.filter(
+    (value) => value.trim() && target.includes(value) && !alreadyCovered.has(normalizeForComparison(value)),
+  );
+  const protectedContent = termsInSentence.length ? extractProtectedContent(target, termsInSentence) : detected;
   const analysis = analyzeWriting(target);
 
   let previousFailures: VerificationIssue[] = [];

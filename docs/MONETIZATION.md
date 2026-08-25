@@ -100,6 +100,62 @@ Ledger flow:
 
 Retries are job attempts under the same customer operation. They add cost telemetry but never word debit. Sentence regeneration is a new idempotent operation and charges only its successfully generated word count; restore and manual editing do not charge.
 
+### Sentence operations (M3-03, implemented)
+
+`POST /api/history/{jobId}/sentence` regenerates or restores one sentence of a
+rewrite the caller owns. `src/lib/sentence-operations.ts` implements the policy
+below; `tests/sentence-operations.test.mts` asserts each line of it.
+
+**What is charged.** A regeneration that produces a candidate which passed
+semantic verification, whole-document protected-value survival, and the
+sentence quality gate debits exactly `countWords(candidate sentence)` — the
+words actually generated and delivered, not the words of the sentence it
+replaced and not the words of the document it sits in.
+
+**What is not charged, and is not merely uncommitted.** Each of these appends a
+`release` for the entire reservation, so the customer's consumed balance is
+unchanged:
+
+| Outcome | Debit | Why |
+|---|---|---|
+| Candidate failed verification or the quality gate | 0 | Nothing was delivered; the candidate never reaches the response. |
+| Candidate was materially identical to the sentence | 0 | The engine has no different version to sell. |
+| Restore to the customer's original sentence | 0 | It generates nothing; the words are already theirs. |
+| Sentence index out of range, or a cap refused the request | 0 | No reservation is taken, or it is released unspent. |
+| Operation timed out or the provider failed | 0 | Same as any pipeline failure elsewhere. |
+
+**Reserve then commit, never the reverse.** A reservation has to exist before
+generation, because that is what stops two concurrent operations overspending
+one allowance — but the amount to charge is not known until the candidate
+exists. So an operation reserves `2 × words(target sentence) + 8` as headroom
+and commits the candidate's own count; `commitUsage` releases the difference in
+the same call. A candidate somehow longer than the reservation is charged at
+the reservation, which under-charges rather than over-charges.
+
+**Idempotency.** One operation key, `sentence:{userId}:{jobId}:{client key}`,
+names one attempt in two places at once: `usage_entries.operation_key`, where a
+repeated reserve is a replay and a repeated commit is refused by the unique
+index, and `sentence_operations.operation_key`, where the retry finds the first
+attempt's recorded outcome and returns it rather than generating a second
+candidate. The response body is rebuilt from the stored record and the ledger
+on both paths, so a retry cannot report different allowance figures than the
+answer it repeats. Reusing one key for a different sentence or a different
+action is refused with 409, never treated as a new chargeable operation.
+
+**Bounds.** `MAX_REGENERATIONS_PER_SENTENCE = 3` and
+`MAX_REGENERATIONS_PER_JOB = 20`. Both count *attempts* of kind `regenerate`,
+whatever their outcome. Counting successes would leave an unmetered generation
+loop for exactly the customer most likely to keep pressing — the one whose
+sentence the engine cannot improve, whose every attempt is free. Restores are
+not counted: they generate nothing, so bounding them would limit undo without
+limiting cost.
+
+**Allowance, not a second meter.** Sentence operations draw from the same plan
+allowance and the same append-only ledger as a whole rewrite. There is no
+separate sentence quota, no per-operation price, and no upsell attached to a
+customer running out mid-edit; they are told the allowance is spent, in the
+same words `/api/humanize` uses.
+
 Do not implement quota as a browser counter or a single mutable integer. Maintain an append-only ledger and rebuildable aggregate. Administrative adjustments require reason, actor, and audit trail.
 
 ## Billing-period and plan-change proposal

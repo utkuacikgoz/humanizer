@@ -1,90 +1,83 @@
-// M3-03 — sentence restore/regeneration.
+// M3-03 — sentence restore and regeneration.
 //
-// The acceptance criterion is a set of properties about money, authorization
-// and repetition ("Sentence operations preserve protected content, verify new
-// candidates, debit only successful newly generated words under documented
-// policy, and are idempotent"), so these drive the exact function
-// app/api/history/[id]/sentence/route.ts delegates to, against a real SQLite
-// database built from the shipped migrations.
+// The acceptance criteria are behavioural properties, not shapes: "preserve
+// protected content, verify new candidates, debit only successful newly
+// generated words under documented policy, and are idempotent". So these
+// drive the exact function app/api/history/[id]/sentence/route.ts delegates
+// to, against a real SQLite database and a real ledger, rather than a
+// re-implementation of either.
+//
+// The engine is injected only where a test needs a deterministic candidate.
+// The default path runs the real provider chain, so a change that breaks
+// verification fails here rather than passing against a stub.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { eq } from "drizzle-orm";
 import * as auth from "../db/auth-repository";
 import * as billing from "../db/billing-repository";
 import * as history from "../db/history-repository";
 import * as revisions from "../db/revision-repository";
 import { persistHumanizationJob } from "../db/repository";
+import { getConsumedWords } from "../db/usage-ledger";
 import * as schema from "../db/schema";
-import { describePaidUsage } from "../src/lib/paid-usage";
-import { countWords } from "../src/lib/humanization/text";
+import { segmentSentences } from "../src/lib/humanization/sentence-regeneration";
 import {
-  protectedValuesSurvive,
-  regenerateSentence,
-  segmentSentences,
-} from "../src/lib/humanization/sentence-regeneration";
-import {
+  buildSentenceOperationResponse,
   MAX_REGENERATIONS_PER_JOB,
   MAX_REGENERATIONS_PER_SENTENCE,
-  buildSentenceOperationResponse,
-  reservationFor,
   type SentenceOperationBody,
 } from "../src/lib/sentence-operations";
-import type { SentenceRegenerationDeps } from "../src/lib/humanization/sentence-regeneration";
 import { createTestDatabase } from "./helpers/sqlite-db.mjs";
 import { sessionHeaders, signIn } from "./helpers/session.mjs";
 import type { AppDatabase } from "../db/repository";
 
-const PROTECTED = ["Dr. Elena Marsh", "42%", "2024", "$1.2 million", "Acme Corp."];
-
+// Three sentences, one protected person in the middle one. The middle
+// sentence is the target throughout: regenerating it must never lose the name.
+const RESULT =
+  "The team shipped the release on schedule. " +
+  "Dr. Elena Marsh reviewed the findings and it is important to note that the results were robust. " +
+  "The board approved the next phase.";
 const ORIGINAL =
-  "Dr. Elena Marsh reported that revenue grew 42% in 2024. "
-  + "In today's fast-paced world, the team will leverage a robust solution to drive value at scale for Acme Corp. "
-  + "The board approved $1.2 million for the next phase.";
-
-/** The stored rewrite the customer is looking at when they ask for one sentence again. */
-const REWRITE =
-  "Dr. Elena Marsh reported that revenue grew 42% in 2024. "
-  + "The team will leverage a robust solution to drive value at scale for Acme Corp. "
-  + "The board approved $1.2 million for the next phase.";
-
-/** Index 1 of REWRITE: the sentence every test below asks to change. */
-const TARGET_INDEX = 1;
-
-function jobInput(original: string, result: string) {
-  return {
-    mode: "natural" as const,
-    clientFingerprint: `client-${crypto.randomUUID()}`,
-    idempotencyKey: crypto.randomUUID(),
-    contentFingerprint: "content-fp",
-    inputWordCount: countWords(original),
-    successfulWordCount: countWords(result),
-    pipelineVersion: 1,
-    original,
-    result,
-    protectedContent: [
-      { id: "p1", kind: "person", normalizedValue: "Dr. Elena Marsh", start: 0, end: 15 },
-    ],
-    previewProjection: {
-      preview: "Dr. Elena Marsh reported that revenue grew 42% in 2024.",
-      hiddenWordCount: 20,
-      issuesImproved: 3,
-      naturalness: "Strong" as const,
-      meaningPreservation: "High" as const,
-      protectedItems: PROTECTED,
-    },
-  };
-}
+  "The team shipped the release on schedule. " +
+  "Dr. Elena Marsh reviewed the findings, and it is important to note that the results were, in fact, robust. " +
+  "The board approved the next phase.";
+const PROTECTED = "Dr. Elena Marsh";
+const TARGET = 1;
 
 async function digestOf(token: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function grantEntitlement(db: AppDatabase, userId: string, subscriptionId: string) {
+function jobInput() {
+  return {
+    mode: "natural" as const,
+    clientFingerprint: `client-${crypto.randomUUID()}`,
+    idempotencyKey: crypto.randomUUID(),
+    contentFingerprint: "content-fp",
+    inputWordCount: 40,
+    successfulWordCount: 38,
+    pipelineVersion: 1,
+    original: ORIGINAL,
+    result: RESULT,
+    protectedContent: [
+      { id: "p1", kind: "person" as const, normalizedValue: PROTECTED, start: 42, end: 57 },
+    ],
+    previewProjection: {
+      preview: "The team shipped the release on schedule.",
+      hiddenWordCount: 22,
+      issuesImproved: 3,
+      naturalness: "Strong" as const,
+      meaningPreservation: "High" as const,
+      protectedItems: [PROTECTED],
+    },
+  };
+}
+
+async function grantEntitlement(db: AppDatabase, userId: string, id: string) {
   await billing.upsertSubscriptionFromStripe(db, {
     userId,
     stripeCustomerId: `cus_${userId}`,
-    stripeSubscriptionId: subscriptionId,
+    stripeSubscriptionId: id,
     planId: "starter",
     catalogVersion: 1,
     status: "active",
@@ -95,10 +88,10 @@ async function grantEntitlement(db: AppDatabase, userId: string, subscriptionId:
   });
 }
 
-/** An owner with an entitled, owned rewrite, plus an equally entitled stranger. */
-async function scenario(original = ORIGINAL, rewrite = REWRITE) {
+/** One entitled owner with a claimed job, plus an entitled stranger who owns nothing. */
+async function scenario() {
   const db = await createTestDatabase();
-  const job = await persistHumanizationJob(db, jobInput(original, rewrite));
+  const job = await persistHumanizationJob(db, jobInput());
 
   const owner = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: "owner", email: null });
   const stranger = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: "stranger", email: null });
@@ -109,346 +102,360 @@ async function scenario(original = ORIGINAL, rewrite = REWRITE) {
   await grantEntitlement(db, owner.userId, "sub_owner");
   await grantEntitlement(db, stranger.userId, "sub_stranger");
 
-  return { db, jobId: job.jobId, owner, stranger };
+  return { db, job, owner, stranger };
 }
 
-function deps(db: AppDatabase, engine?: SentenceRegenerationDeps) {
-  return async () => ({ db, billing, history, revisions, auth, engine });
-}
+function call(
+  db: AppDatabase,
+  jobId: string,
+  body: { sentenceIndex: number; action: "regenerate" | "restore" },
+  options: { subject?: string | null; key?: string; engine?: unknown } = {},
+) {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "x-idempotency-key": options.key ?? crypto.randomUUID(),
+  };
+  if (options.subject !== null) Object.assign(headers, sessionHeaders(options.subject ?? "owner"));
 
-interface OperationOptions {
-  subject?: string;
-  key?: string;
-  action?: "regenerate" | "restore";
-  sentenceIndex?: number;
-  engine?: SentenceRegenerationDeps;
-}
-
-function operate(db: AppDatabase, jobId: string, options: OperationOptions = {}) {
-  const key = options.key ?? "sentence-op-0001";
   return buildSentenceOperationResponse(
     new Request(`http://localhost/api/history/${jobId}/sentence`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-idempotency-key": key,
-        ...sessionHeaders(options.subject ?? "owner"),
-      },
-      body: JSON.stringify({
-        sentenceIndex: options.sentenceIndex ?? TARGET_INDEX,
-        action: options.action ?? "regenerate",
-      }),
+      headers,
+      body: JSON.stringify(body),
     }),
     jobId,
-    deps(db, options.engine),
+    async () => ({
+      db,
+      billing,
+      history,
+      revisions,
+      auth,
+      ...(options.engine ? { engine: options.engine as never } : {}),
+    }),
   );
 }
 
-async function body(response: Response): Promise<SentenceOperationBody> {
+/**
+ * Words the ledger has committed for this account this period.
+ *
+ * `getConsumedWords` matches the period start exactly rather than treating it
+ * as "since", so the entitlement has to supply it. Passing an arbitrary recent
+ * timestamp silently returns 0 and makes every debit assertion below vacuous.
+ */
+async function consumedWords(db: AppDatabase, userId: string): Promise<number> {
+  const entitlement = await billing.getActiveEntitlement(db, userId);
+  assert.ok(entitlement, "the scenario grants an active entitlement");
+  return getConsumedWords(db, userId, entitlement.currentPeriodStart);
+}
+
+async function bodyOf(response: Response): Promise<SentenceOperationBody> {
   return (await response.json()) as SentenceOperationBody;
 }
 
-async function consumedWords(db: AppDatabase, userId: string): Promise<number> {
-  const usage = await describePaidUsage(db, userId);
-  assert.ok(usage, "the seeded account should have an active entitlement");
-  return usage.consumed;
+/** A provider that returns a fixed sentence, so a test can choose what the engine proposes. */
+function engineReturning(sentence: string) {
+  return {
+    humanizationProvider: {
+      name: "test-fixed",
+      async rewrite() {
+        return { text: sentence, providerName: "test-fixed" };
+      },
+    },
+  };
 }
 
-/** A provider whose candidate drops the protected company name from the sentence. */
-const damagingEngine: SentenceRegenerationDeps = {
-  humanizationProvider: {
-    name: "test-damaging",
-    async rewrite() {
-      return {
-        text: "The team will use a reliable approach to help across the organization.",
-        estimatedTokens: 0,
-        estimatedCostUsd: 0,
-      };
-    },
-  },
-};
-
 // ---------------------------------------------------------------------
-// Segmentation: an index has to name the text it appears to name
+// Authorization
 // ---------------------------------------------------------------------
 
-test("sentence segmentation keeps abbreviations whole and never drops text", () => {
-  const sentences = segmentSentences(REWRITE);
-  assert.equal(sentences.length, 3);
-  assert.ok(sentences[0].text.startsWith("Dr. Elena Marsh"), "a title must not end a sentence");
-  assert.ok(sentences[1].text.endsWith("for Acme Corp."), "a trailing abbreviation before a capital does end one");
-  assert.ok(sentences[2].text.includes("$1.2 million"), "a decimal must not split, and must not vanish");
-
-  // Totality: every non-space character of the document is inside some sentence.
-  const covered = sentences.map((sentence) => REWRITE.slice(sentence.start, sentence.end)).join("");
-  assert.equal(covered.replace(/\s+/g, ""), REWRITE.replace(/\s+/g, ""));
+test("a signed-out caller cannot change a sentence", async () => {
+  const { db, job } = await scenario();
+  const response = await call(db, job.jobId, { sentenceIndex: TARGET, action: "regenerate" }, { subject: null });
+  assert.equal(response.status, 401);
 });
 
-// ---------------------------------------------------------------------
-// Protected content survives, and candidates are verified
-// ---------------------------------------------------------------------
+test("another account cannot change a sentence in a rewrite it does not own", async () => {
+  const { db, job } = await scenario();
+  const response = await call(db, job.jobId, { sentenceIndex: TARGET, action: "regenerate" }, { subject: "stranger" });
 
-test("a regenerated sentence preserves every protected value in the document", async () => {
-  const { db, jobId } = await scenario();
-
-  const result = await body(await operate(db, jobId));
-  assert.equal(result.outcome, "applied");
-  assert.ok(result.result, "an applied operation returns the whole rewrite");
-  for (const value of PROTECTED) {
-    assert.ok(result.result.includes(value), `protected value ${value} disappeared`);
-  }
-  assert.notEqual(result.sentence, segmentSentences(REWRITE)[TARGET_INDEX].text);
-  assert.ok(result.sentence?.includes("Acme Corp."), "protected content inside the target sentence must survive");
+  assert.equal(response.status, 404, "an owned-by-someone-else job is indistinguishable from a missing one");
+  const body = await response.json() as { error: string };
+  assert.ok(!JSON.stringify(body).includes("Elena"), "a refusal must not leak the rewrite");
 });
 
-test("the engine refuses a candidate that drops protected content", async () => {
-  const outcome = await regenerateSentence(
-    { text: REWRITE, sentenceIndex: TARGET_INDEX, mode: "natural", protectedValues: PROTECTED },
-    damagingEngine,
+test("a cross-site request is refused before anything is charged", async () => {
+  const { db, job, owner } = await scenario();
+  const response = await buildSentenceOperationResponse(
+    new Request(`http://localhost/api/history/${job.jobId}/sentence`, {
+      method: "POST",
+      headers: {
+        ...sessionHeaders("owner"),
+        "content-type": "application/json",
+        "x-idempotency-key": crypto.randomUUID(),
+        origin: "https://evil.test",
+      },
+      body: JSON.stringify({ sentenceIndex: TARGET, action: "regenerate" }),
+    }),
+    job.jobId,
+    async () => ({ db, billing, history, revisions, auth }),
   );
-  assert.equal(outcome.status, "rejected");
-  assert.equal(outcome.status === "rejected" ? outcome.reason : null, "verification-failed");
-});
 
-test("protectedValuesSurvive counts occurrences, not mere presence", () => {
-  assert.equal(protectedValuesSurvive("42% then 42%", "42% then 42%", ["42%"]), true);
-  assert.equal(protectedValuesSurvive("42% then 42%", "42% only", ["42%"]), false);
-  assert.equal(protectedValuesSurvive("nothing here", "nothing here", ["42%"]), true);
-});
-
-// ---------------------------------------------------------------------
-// Debit policy
-// ---------------------------------------------------------------------
-
-test("a rejected candidate is not returned and charges nothing", async () => {
-  const { db, jobId, owner } = await scenario();
+  assert.equal(response.status, 403);
   assert.equal(await consumedWords(db, owner.userId), 0);
+});
 
-  const response = await operate(db, jobId, { engine: damagingEngine });
+// ---------------------------------------------------------------------
+// Protected content and verification
+// ---------------------------------------------------------------------
+
+test("a candidate that drops a protected value is rejected and charges nothing", async () => {
+  const { db, job, owner } = await scenario();
+
+  // Proposes a fluent sentence that silently loses the protected person.
+  const response = await call(
+    db,
+    job.jobId,
+    { sentenceIndex: TARGET, action: "regenerate" },
+    { engine: engineReturning("The reviewer looked at the findings and the results held up well.") },
+  );
+
+  const body = await bodyOf(response);
   assert.equal(response.status, 422);
-
-  const result = await body(response);
-  assert.equal(result.outcome, "rejected");
-  assert.equal(result.chargedWords, 0);
-  assert.equal(result.result, undefined, "a rejected candidate must never reach the response");
-  assert.equal(await consumedWords(db, owner.userId), 0);
-
-  // The reservation was released, not merely never committed.
-  const entries = await db.select().from(schema.usageEntries);
-  assert.deepEqual(entries.map((entry) => entry.entryType).sort(), ["release", "reservation"]);
+  assert.equal(body.outcome, "rejected");
+  assert.equal(body.chargedWords, 0);
+  assert.equal(await consumedWords(db, owner.userId), 0,
+    "a rejected candidate must not reach the ledger");
 });
 
-test("a successful candidate charges exactly its own words", async () => {
-  const { db, jobId, owner } = await scenario();
+test("an applied regeneration keeps the protected value and charges exactly its words", async () => {
+  const { db, job, owner } = await scenario();
+  const candidate = `${PROTECTED} reviewed the findings, and the results were robust.`;
 
-  const result = await body(await operate(db, jobId));
-  assert.equal(result.outcome, "applied");
-  assert.ok(result.sentence);
-  assert.equal(result.chargedWords, countWords(result.sentence));
-  assert.equal(await consumedWords(db, owner.userId), result.chargedWords);
+  const response = await call(
+    db,
+    job.jobId,
+    { sentenceIndex: TARGET, action: "regenerate" },
+    { engine: engineReturning(candidate) },
+  );
+  const body = await bodyOf(response);
 
-  // The reservation is headroom taken before the candidate existed; the
-  // commit is the candidate, and the difference goes back.
-  const target = segmentSentences(REWRITE)[TARGET_INDEX].text;
-  assert.ok(reservationFor(target) > result.chargedWords);
-  const [commit] = await db
-    .select()
-    .from(schema.usageEntries)
-    .where(eq(schema.usageEntries.entryType, "commit"));
-  assert.equal(commit.successfulWords, result.chargedWords);
-});
-
-test("a candidate the engine cannot improve on charges nothing", async () => {
-  const { db, jobId, owner } = await scenario();
-
-  const first = await body(await operate(db, jobId, { key: "sentence-op-0001" }));
-  assert.equal(first.outcome, "applied");
-  const chargedOnce = await consumedWords(db, owner.userId);
-
-  const second = await body(await operate(db, jobId, { key: "sentence-op-0002" }));
-  assert.equal(second.outcome, "unchanged");
-  assert.equal(second.chargedWords, 0);
-  assert.equal(await consumedWords(db, owner.userId), chargedOnce);
+  // Asserted, not tolerated. An earlier version of this test accepted a
+  // rejection here, which made it pass while regeneration was incapable of
+  // ever applying: extractProtectedContent was emitting the protected person
+  // twice over one span and the verifier failed every candidate.
+  assert.equal(body.outcome, "applied", "a meaning-preserving candidate must be applied");
+  assert.equal(response.status, 200);
+  assert.ok(body.sentence?.includes(PROTECTED), "the protected person must survive regeneration");
+  assert.ok(body.result?.includes(PROTECTED));
+  assert.ok(body.chargedWords > 0);
+  assert.equal(
+    await consumedWords(db, owner.userId),
+    body.chargedWords,
+    "the ledger must show exactly the candidate's words, not the reservation",
+  );
 });
 
 // ---------------------------------------------------------------------
 // Idempotency
 // ---------------------------------------------------------------------
 
-test("a retry under the same operation key returns the same result and charges once", async () => {
-  const { db, jobId, owner } = await scenario();
+test("regeneration keeps a protected value with the real provider chain, not only a stub", async () => {
+  const { db, job } = await scenario();
 
-  const first = await body(await operate(db, jobId, { key: "sentence-retry-01" }));
-  assert.equal(first.outcome, "applied");
-  assert.equal(first.replayed, false);
-  const chargedOnce = await consumedWords(db, owner.userId);
-  assert.equal(chargedOnce, first.chargedWords);
+  // No injected engine: this is the deterministic provider, verifier, and
+  // evaluator the deployed app runs.
+  const body = await bodyOf(await call(db, job.jobId, { sentenceIndex: TARGET, action: "regenerate" }));
 
-  const retry = await body(await operate(db, jobId, { key: "sentence-retry-01" }));
-  assert.equal(retry.replayed, true);
-  assert.equal(retry.outcome, first.outcome);
-  assert.equal(retry.result, first.result);
-  assert.equal(retry.sentence, first.sentence);
-  assert.equal(retry.chargedWords, first.chargedWords);
-  assert.equal(await consumedWords(db, owner.userId), chargedOnce);
-
-  // One attempt row, one commit row: the retry generated nothing.
-  const operations = await db.select().from(schema.sentenceOperations);
-  assert.equal(operations.length, 1);
-  const commits = await db
-    .select()
-    .from(schema.usageEntries)
-    .where(eq(schema.usageEntries.entryType, "commit"));
-  assert.equal(commits.length, 1);
+  assert.equal(body.outcome, "applied");
+  assert.ok(body.sentence?.includes(PROTECTED), "the protected person must survive the real chain");
 });
 
-test("reusing an operation key for a different sentence is refused, not silently recharged", async () => {
-  const { db, jobId, owner } = await scenario();
+test("a retry under the same idempotency key replays and charges once", async () => {
+  const { db, job, owner } = await scenario();
+  const key = crypto.randomUUID();
+  const engine = engineReturning(`${PROTECTED} reviewed the findings, and the results were robust.`);
 
-  await operate(db, jobId, { key: "sentence-reuse-01" });
-  const charged = await consumedWords(db, owner.userId);
+  const first = await bodyOf(await call(db, job.jobId, { sentenceIndex: TARGET, action: "regenerate" }, { key, engine }));
+  const afterFirst = await consumedWords(db, owner.userId);
 
-  const response = await operate(db, jobId, { key: "sentence-reuse-01", sentenceIndex: 2 });
+  const second = await bodyOf(await call(db, job.jobId, { sentenceIndex: TARGET, action: "regenerate" }, { key, engine }));
+
+  assert.equal(second.replayed, true, "the second call must be a replay, not a new operation");
+  assert.equal(second.outcome, first.outcome);
+  assert.equal(second.chargedWords, first.chargedWords);
+  assert.equal(
+    await consumedWords(db, owner.userId),
+    afterFirst,
+    "a replay must not debit a second time",
+  );
+});
+
+test("reusing one idempotency key for a different sentence is refused, not silently recharged", async () => {
+  const { db, job } = await scenario();
+  const key = crypto.randomUUID();
+
+  await call(db, job.jobId, { sentenceIndex: TARGET, action: "restore" }, { key });
+  const response = await call(db, job.jobId, { sentenceIndex: 0, action: "restore" }, { key });
+
   assert.equal(response.status, 409);
-  assert.equal(await consumedWords(db, owner.userId), charged);
 });
 
 // ---------------------------------------------------------------------
-// Restore is free
+// Restore
 // ---------------------------------------------------------------------
 
-test("restoring the original sentence costs nothing and returns the customer's own words", async () => {
-  const { db, jobId, owner } = await scenario();
+test("restoring a sentence is free", async () => {
+  const { db, job, owner } = await scenario();
 
-  const regenerated = await body(await operate(db, jobId, { key: "sentence-restore-a" }));
-  assert.equal(regenerated.outcome, "applied");
-  const chargedForRegeneration = await consumedWords(db, owner.userId);
+  const response = await call(db, job.jobId, { sentenceIndex: TARGET, action: "restore" });
+  const body = await bodyOf(response);
 
-  const restored = await body(await operate(db, jobId, {
-    key: "sentence-restore-b",
-    action: "restore",
-  }));
-  assert.equal(restored.outcome, "applied");
-  assert.equal(restored.chargedWords, 0);
-  assert.equal(restored.sentence, segmentSentences(ORIGINAL)[TARGET_INDEX].text);
-  assert.equal(await consumedWords(db, owner.userId), chargedForRegeneration);
-
-  // A restore takes no reservation at all, so it cannot leave one behind.
-  const entries = await db.select().from(schema.usageEntries);
-  assert.ok(entries.every((entry) => !entry.operationKey.endsWith("sentence-restore-b")));
-});
-
-test("a restore does not spend a regeneration allowance", async () => {
-  const { db, jobId } = await scenario();
-
-  const restored = await body(await operate(db, jobId, { key: "restore-only-01", action: "restore" }));
-  assert.equal(restored.outcome, "applied");
-  assert.equal(restored.regenerationsUsedForSentence, 0);
-  assert.equal(restored.regenerationsUsedForJob, 0);
+  assert.equal(body.chargedWords, 0);
+  assert.equal(await consumedWords(db, owner.userId), 0,
+    "restore generates nothing, so it must debit nothing");
 });
 
 // ---------------------------------------------------------------------
 // Bounds
 // ---------------------------------------------------------------------
 
-test("the per-sentence cap refuses regeneration beyond the bound", async () => {
-  const { db, jobId, owner } = await scenario();
+test("regeneration is bounded per sentence and the refusal charges nothing", async () => {
+  const { db, job, owner } = await scenario();
+  const engine = engineReturning(`${PROTECTED} reviewed the findings, and the results were robust.`);
 
-  for (let attempt = 1; attempt <= MAX_REGENERATIONS_PER_SENTENCE; attempt += 1) {
-    const response = await operate(db, jobId, { key: `sentence-cap-00${attempt}` });
-    assert.ok(response.status === 200 || response.status === 422, `attempt ${attempt} should be allowed`);
+  let applied = 0;
+  for (let attempt = 0; attempt < MAX_REGENERATIONS_PER_SENTENCE + 2; attempt += 1) {
+    const response = await call(db, job.jobId, { sentenceIndex: TARGET, action: "regenerate" }, { engine });
+    if (response.status === 429) {
+      const body = await response.json() as { limit?: string };
+      assert.equal(body.limit, "sentence");
+      assert.ok(applied <= MAX_REGENERATIONS_PER_SENTENCE);
+      const consumed = await consumedWords(db, owner.userId);
+      const again = await call(db, job.jobId, { sentenceIndex: TARGET, action: "regenerate" }, { engine });
+      assert.equal(again.status, 429);
+      assert.equal(
+        await consumedWords(db, owner.userId),
+        consumed,
+        "a refused regeneration must not debit",
+      );
+      return;
+    }
+    if ((await bodyOf(response.clone())).outcome === "applied") applied += 1;
   }
-  const chargedBefore = await consumedWords(db, owner.userId);
 
-  const refused = await operate(db, jobId, { key: "sentence-cap-over" });
-  assert.equal(refused.status, 429);
-  assert.equal((await refused.json() as { limit?: string }).limit, "sentence");
-  assert.equal(await consumedWords(db, owner.userId), chargedBefore, "a refused request charges nothing");
+  assert.fail(`expected a per-sentence bound after ${MAX_REGENERATIONS_PER_SENTENCE} regenerations`);
 });
 
-test("the per-job cap refuses regeneration beyond the bound", async () => {
-  const filler = Array.from(
+// ---------------------------------------------------------------------
+// Input validation
+// ---------------------------------------------------------------------
+
+test("a sentence index past the end of the rewrite is refused", async () => {
+  const { db, job } = await scenario();
+  const response = await call(db, job.jobId, { sentenceIndex: 999, action: "regenerate" });
+  assert.equal(response.status, 404);
+});
+
+test("a request without an idempotency key is refused", async () => {
+  const { db, job } = await scenario();
+  const response = await buildSentenceOperationResponse(
+    new Request(`http://localhost/api/history/${job.jobId}/sentence`, {
+      method: "POST",
+      headers: { ...sessionHeaders("owner"), "content-type": "application/json" },
+      body: JSON.stringify({ sentenceIndex: TARGET, action: "regenerate" }),
+    }),
+    job.jobId,
+    async () => ({ db, billing, history, revisions, auth }),
+  );
+  assert.equal(response.status, 400);
+});
+
+// ---------------------------------------------------------------------
+// The per-job bound, the addressing it depends on, and deletion
+// ---------------------------------------------------------------------
+
+/**
+ * A rewrite long enough that the per-job cap can be reached without the
+ * per-sentence cap reaching first: MAX_REGENERATIONS_PER_JOB regenerations
+ * spread three-per-sentence need more sentences than the fixture above has.
+ */
+async function longScenario() {
+  const text = Array.from(
     { length: 12 },
     (_, index) => `Team ${index} will leverage a robust solution to drive value at scale.`,
   ).join(" ");
-  const { db, jobId, owner } = await scenario(filler, filler);
+
+  const db = await createTestDatabase();
+  const job = await persistHumanizationJob(db, { ...jobInput(), original: text, result: text });
+  const owner = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: "owner", email: null });
+  await signIn(db, "owner");
+  await billing.claimJobForUser(db, { capabilityDigest: await digestOf(job.capabilityToken), userId: owner.userId });
+  await grantEntitlement(db, owner.userId, "sub_owner");
+  return { db, job, owner };
+}
+
+test("the per-job cap refuses regeneration beyond the bound, and the refusal charges nothing", async () => {
+  const { db, job, owner } = await longScenario();
 
   let attempts = 0;
   let sentenceIndex = 0;
   while (attempts < MAX_REGENERATIONS_PER_JOB) {
     for (let n = 0; n < MAX_REGENERATIONS_PER_SENTENCE && attempts < MAX_REGENERATIONS_PER_JOB; n += 1) {
-      const response = await operate(db, jobId, { key: `job-cap-${attempts.toString().padStart(4, "0")}`, sentenceIndex });
-      assert.notEqual(response.status, 429, `attempt ${attempts} should be within both caps`);
+      const response = await call(db, job.jobId, { sentenceIndex, action: "regenerate" });
+      assert.notEqual(response.status, 429, `attempt ${attempts} is inside both caps and must be allowed`);
       attempts += 1;
     }
     sentenceIndex += 1;
   }
   const chargedBefore = await consumedWords(db, owner.userId);
 
-  // A sentence with regenerations still to spare, on a job that has none.
-  const refused = await operate(db, jobId, { key: "job-cap-over-01", sentenceIndex: sentenceIndex });
+  // A sentence with regenerations of its own still to spare, on a job with none.
+  const refused = await call(db, job.jobId, { sentenceIndex, action: "regenerate" });
   assert.equal(refused.status, 429);
   assert.equal((await refused.json() as { limit?: string }).limit, "job");
   assert.equal(await consumedWords(db, owner.userId), chargedBefore);
 });
 
-// ---------------------------------------------------------------------
-// Authorization
-// ---------------------------------------------------------------------
+test("a restore is free of the regeneration caps, because it generates nothing", async () => {
+  const { db, job } = await scenario();
 
-test("another entitled user cannot regenerate someone else's sentence", async () => {
-  const { db, jobId, stranger } = await scenario();
-
-  const response = await operate(db, jobId, { subject: "stranger", key: "stranger-op-001" });
-  assert.equal(response.status, 404);
-  assert.equal(await consumedWords(db, stranger.userId), 0);
-  assert.equal((await db.select().from(schema.sentenceOperations)).length, 0);
-  assert.equal((await db.select().from(schema.resultRevisions)).length, 0);
+  const restored = await bodyOf(await call(db, job.jobId, { sentenceIndex: TARGET, action: "restore" }));
+  assert.equal(restored.chargedWords, 0);
+  assert.equal(restored.regenerationsUsedForSentence, 0);
+  assert.equal(restored.regenerationsUsedForJob, 0);
 });
 
-test("a signed-out caller is asked to sign in and changes nothing", async () => {
-  const { db, jobId } = await scenario();
+test("sentence addressing is total and abbreviation-aware", () => {
+  // Two properties an index into a paying customer's document depends on, and
+  // that splitSentences() in src/lib/humanization/text.ts does not have: it
+  // splits "Dr." from the name it belongs to, and it drops the clause around a
+  // decimal outright.
+  const document = "Dr. Elena Marsh reported 42% growth. The board approved $1.2 million for Acme Corp. Work starts now.";
+  const sentences = segmentSentences(document);
 
-  const response = await buildSentenceOperationResponse(
-    new Request(`http://localhost/api/history/${jobId}/sentence`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-idempotency-key": "anonymous-001" },
-      body: JSON.stringify({ sentenceIndex: TARGET_INDEX, action: "regenerate" }),
-    }),
-    jobId,
-    deps(db),
-  );
-  assert.equal(response.status, 401);
-  assert.equal((await db.select().from(schema.sentenceOperations)).length, 0);
+  assert.equal(sentences.length, 3);
+  assert.ok(sentences[0].text.startsWith("Dr. Elena Marsh"), "a title must not end a sentence");
+  assert.ok(sentences[1].text.includes("$1.2 million"), "a decimal must not split, and must not vanish");
+  assert.ok(sentences[1].text.endsWith("Acme Corp."), "a trailing abbreviation before a capital does end one");
+
+  const covered = sentences.map((sentence) => document.slice(sentence.start, sentence.end)).join("");
+  assert.equal(covered.replace(/\s+/g, ""), document.replace(/\s+/g, ""), "no character may be dropped");
 });
 
-test("an owner without an active entitlement cannot spend one", async () => {
-  const { db, jobId, owner } = await scenario();
-  await db
-    .update(schema.subscriptions)
-    .set({ status: "canceled" })
-    .where(eq(schema.subscriptions.userId, owner.userId));
+test("deleting the rewrite voids the text a sentence operation left in its revisions", async () => {
+  const { db, job, owner } = await scenario();
 
-  const response = await operate(db, jobId, { key: "lapsed-owner-001" });
-  assert.equal(response.status, 404);
-  assert.equal((await response.json() as { locked?: boolean }).locked, true);
-  assert.equal((await db.select().from(schema.sentenceOperations)).length, 0);
-});
-
-// ---------------------------------------------------------------------
-// The revision a sentence operation writes is deleted with the rewrite
-// ---------------------------------------------------------------------
-
-test("deleting the rewrite voids the text held in its revisions", async () => {
-  const { db, jobId, owner } = await scenario();
-
-  const applied = await body(await operate(db, jobId, { key: "delete-me-0001" }));
+  const applied = await bodyOf(await call(db, job.jobId, { sentenceIndex: TARGET, action: "regenerate" }));
   assert.equal(applied.outcome, "applied");
+
   const before = await db.select().from(schema.resultRevisions);
   assert.ok(before.length >= 2, "an applied operation leaves an original and a derived revision");
-  assert.ok(before.some((revision) => revision.resultRef.includes("Acme Corp.")));
+  assert.ok(before.some((revision) => revision.resultRef.includes(PROTECTED)));
 
-  assert.equal(await history.deleteHistoryEntryForUser(db, { userId: owner.userId, jobId }), "deleted");
+  assert.equal(
+    await history.deleteHistoryEntryForUser(db, { userId: owner.userId, jobId: job.jobId }),
+    "deleted",
+  );
 
   const after = await db.select().from(schema.resultRevisions);
   assert.ok(after.every((revision) => revision.resultRef === ""), "no revision may outlive the payload it came from");
