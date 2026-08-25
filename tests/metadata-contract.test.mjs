@@ -84,14 +84,64 @@ test("keeps private surfaces out of the sitemap and out of the index", async () 
     );
   }
 
-  for (const path of ["/history", "/checkout/success?job=9a3a2a68-ec26-49a3-a8b3-fbd5950d88e6"]) {
+  for (const path of ["/history", "/signin", "/checkout/success?job=9a3a2a68-ec26-49a3-a8b3-fbd5950d88e6"]) {
     const html = await (await render(path)).text();
     assert.match(meta(html, "robots") ?? "", /noindex/, `${path} must be noindex`);
+    assert.match(meta(html, "robots") ?? "", /nofollow/, `${path} must be nofollow`);
     assert.equal(
       tag(html, /rel="canonical" href="([^"]*)"/),
       null,
       `${path} is private: it must not inherit the homepage canonical`,
     );
+    // Everything below is inherited from the root layout unless a private
+    // surface explicitly drops it, and the root layout's default is the
+    // homepage's own public metadata. A private URL that unfurls as the
+    // homepage is claiming to be a page it is not.
+    assert.equal(meta(html, "description"), null, `${path} must not inherit the homepage description`);
+    for (const name of ["og:title", "og:description", "og:url", "og:image", "og:site_name"]) {
+      assert.equal(property(html, name), null, `${path} must not inherit the homepage ${name}`);
+    }
+    for (const name of ["twitter:card", "twitter:title", "twitter:description"]) {
+      assert.equal(meta(html, name), null, `${path} must not inherit the homepage ${name}`);
+    }
+  }
+});
+
+// SEO-020 handoff H-4. Before app/not-found.tsx existed, an unknown path fell
+// through to the framework's built-in 404 underneath the root layout and so
+// declared the homepage as its canonical. Repeated across every broken link
+// and stale URL, that is how a missing page gets folded into `/`.
+test("a genuine 404 is a 404, and claims nothing about the homepage", async () => {
+  for (const path of ["/this-page-does-not-exist", "/result/abc", "/guides/not-written-yet"]) {
+    const response = await render(path);
+    assert.equal(response.status, 404, `${path} must return a genuine 404, not a soft 200`);
+    const html = await response.text();
+
+    assert.equal(
+      tag(html, /rel="canonical" href="([^"]*)"/),
+      null,
+      `${path} must not point crawlers at a page that is not this one`,
+    );
+    assert.equal(meta(html, "description"), null, `${path} must not inherit the homepage description`);
+    for (const name of ["og:title", "og:url", "og:image"]) {
+      assert.equal(property(html, name), null, `${path} must not inherit the homepage ${name}`);
+    }
+
+    // The framework emits its own `noindex` too, so there are two robots
+    // tags. Crawlers combine them and the most restrictive wins; both are
+    // noindex, so what matters is that neither of them ever says index.
+    const robotsTags = [...html.matchAll(/<meta name="robots" content="([^"]*)"/g)].map((match) => match[1]);
+    assert.ok(robotsTags.length > 0, `${path} must tell crawlers not to index it`);
+    for (const directive of robotsTags) {
+      assert.match(directive, /noindex/, `${path} emitted a robots tag without noindex: ${directive}`);
+    }
+    assert.ok(robotsTags.some((directive) => /nofollow/.test(directive)), `${path} must also be nofollow`);
+
+    const headings = [...html.matchAll(/<h1[^>]*>([\s\S]*?)<\/h1>/g)];
+    assert.equal(headings.length, 1, `${path} must have exactly one H1, found ${headings.length}`);
+    assert.match(html, /href="\/"/, `${path} must offer a route back into the site`);
+    assert.ok(!/Ownword \| Natural AI Rewrites/.test(tag(html, /<title>([^<]*)<\/title>/) ?? ""),
+      `${path} must not wear the homepage title`);
   }
 });
 

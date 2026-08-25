@@ -173,3 +173,27 @@ export function buildPublicPageMetadata(page: PublicPage, requestHost: string): 
     },
   };
 }
+
+/**
+ * SEO-002 / SEO-005. The metadata every *non*-indexable surface owes, and the
+ * counterpart to `buildPublicPageMetadata`. Private and error surfaces sit
+ * under the root layout, which supplies the homepage's public metadata as the
+ * site-wide default, so without an explicit override a signed-in history page
+ * or a genuine 404 ships the homepage's canonical, description, `og:url` and
+ * social card. SEO-020 measured exactly that.
+ *
+ * Every field is nulled rather than replaced: Next merges a `null` as "drop
+ * the inherited value", which is what a page with nothing to say to a crawler
+ * needs. `title` is the one thing a caller may supply, because a browser tab
+ * and a bookmark still need a name.
+ */
+export function buildPrivateSurfaceMetadata(title?: string): Metadata {
+  return {
+    ...(title ? { title } : {}),
+    description: null,
+    alternates: { canonical: null },
+    robots: { index: false, follow: false, nocache: true },
+    openGraph: null,
+    twitter: null,
+  };
+}

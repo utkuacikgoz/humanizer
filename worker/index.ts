@@ -4,6 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../db/schema";
 import { runScheduledPurge } from "../src/lib/purge-worker";
+import { canonicalOrigin, normalizeHost } from "../src/lib/public-pages";
 
 interface Env {
   ASSETS: Fetcher;
@@ -34,9 +35,45 @@ interface ScheduledController {
 // dangerouslyAllowSVG: true in next.config.js and uncomment below:
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
+/**
+ * SEO-003 handoff H-3. `www.ownword.pro` is bound as a second custom domain
+ * (see `productionRoutes()` in vite.config.ts), so before this it served the
+ * entire application on a second hostname. The host gate in
+ * app/robots.txt/route.ts and src/lib/public-pages.ts kept that copy out of
+ * the index — off the canonical host everything is `Disallow: /` and
+ * `noindex` — so nothing duplicate was ever indexed. What it could not do is
+ * consolidate: a link, a share, or a typed `www` URL earned the apex nothing.
+ *
+ * 308 rather than 301 on purpose. A 301 lets a client rewrite the method to
+ * GET, which would silently drop the body of a POST to `/api/*` or to the
+ * Stripe webhook path if either were ever addressed through `www`. 308 is the
+ * permanent redirect that promises method and body survive, and search
+ * engines treat it exactly as they treat a 301 for consolidation.
+ *
+ * The decision reads the real request host, never `x-forwarded-host`: an
+ * inbound header claiming to be `www` while the socket is on the apex would
+ * redirect the apex to itself, forever.
+ */
+function redirectWwwToApex(request: Request, url: URL): Response | null {
+  const canonical = canonicalOrigin();
+  if (!canonical) return null;
+
+  const host = normalizeHost(request.headers.get("host") ?? url.host);
+  if (host !== `www.${canonical.host.toLowerCase()}`) return null;
+
+  const target = new URL(url.pathname + url.search, canonical.origin);
+  return new Response(null, {
+    status: 308,
+    headers: { location: target.toString(), "cache-control": "public, max-age=3600" },
+  });
+}
+
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    const wwwRedirect = redirectWwwToApex(request, url);
+    if (wwwRedirect) return wwwRedirect;
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
