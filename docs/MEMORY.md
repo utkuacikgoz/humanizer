@@ -96,6 +96,27 @@ A workable split from this project:
 Sequence agents that share files. DES had to wait for COPY to release
 `page.tsx`; that was correct, and running them together would have lost work.
 
+### Two agents in one working tree will commit each other's work
+
+Running SEO and ENG concurrently under a declared file split mostly worked, but `git add -A` does not respect
+ownership. One agent's commit swept up another's staged deletions; a second commit captured the other agent's
+uncommitted working tree under its own message and pushed it. Nothing was lost, but attribution was, and it
+could as easily have committed a half-finished refactor.
+
+**Commit explicit paths — `git commit --only <path>` or `git add <path>` — never `git add -A`, whenever another
+agent may be live in the tree.** And never `git checkout`, `git restore`, or `git stash` a file you do not own:
+that destroys work rather than merely mislabelling it.
+
+### A new secret must be added to the deploy workflow in the same change
+
+`wrangler deploy --secrets-file` REPLACES the Worker's entire secret set on every deploy. A secret added only
+to the Cloudflare dashboard is wiped by the next deploy, and a secret the code reads but the workflow never
+writes is simply absent in production. Both failures are invisible locally.
+
+Add the name to the `printf` list, to the deploy step's non-empty gate, and to the not-configured check, in the
+same commit that introduces the code reading it. `tests/security-blockers.test.mts` now asserts all three, so
+the trap cannot silently claim the next secret.
+
 ### Assume the session can die mid-run
 
 Agents were killed by usage limits four times, several with substantial

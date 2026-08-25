@@ -195,6 +195,33 @@ email, as `/privacy` states. Completion evidence for the published window, backu
 propagation to any future non-D1 store remain open; the worker takes a processor registry so adding one is a
 registration rather than a rewrite of the deletion path.
 
+## D-019 — Email magic-link sessions replace Sign in with ChatGPT (2026-08-25)
+
+Decision: Ownword owns its own authentication. A single-use, 256-bit token is mailed to the address and
+redeemed exactly once for a `__Host-ownword_session` cookie backed by D1. `src/lib/chatgpt-identity.ts` and
+`app/chatgpt-auth.ts` are deleted; no code reads `oai-authenticated-user-*` any more.
+
+Reason: two independent failures, both fatal. First, every sign-in link targeted `/signin-with-chatgpt`, a
+route this repository never contained because the OpenAI hosting platform supplied it. On `ownword.pro` that
+path 404s, so no customer could sign in and therefore none could pay, unlock, view history, or manage billing.
+Second, the header scheme it fronted was unauthenticated: nothing on a plain Worker strips
+`oai-authenticated-user-*`, so any caller could assert any identity (SEC-01, proven end to end). Deleting the
+resolver removes the forgeable input rather than containing it.
+
+Alternatives considered and rejected: Google OAuth (fast, but locks out anyone without a Google account and
+asks a writing tool's users to attach one); passwords (needs an email sender anyway for resets, and takes on
+credential storage risk); a third-party auth vendor (cost and a dependency this product does not need at
+$9.99).
+
+Consequence: Ownword now owns deliverability. Production requires a verified Resend sending domain and the
+`RESEND_API_KEY` secret, and the deploy workflow fails loudly without it rather than shipping a dead front
+door. A cookie is sent automatically where a header was not, so CSRF became reachable and is answered by
+`SameSite=Lax` plus an Origin check on every state-changing route. Any legacy `users` row keyed to a ChatGPT
+subject is unreachable under the new `email:<address>` subject scheme and must be mapped if any exist; if
+nobody could sign in on that host, there are none. No sign-in has yet completed against a real mailer on the
+production host, and no adversarial pass has been run against the new scheme.
+
+
 ## Rejected
 
 - Unlocking on a `success=true` query parameter or Checkout redirect.

@@ -5,7 +5,7 @@ Status: Implemented modular monolith on Cloudflare; M3 history/deletion and M4 c
 
 ## Context
 
-The repository is a vinext/React application deployed as a Cloudflare Worker. D1/Drizzle is in use for jobs, preview capabilities, the usage ledger, Stripe event projection, and the anonymous preview admission guard. R2 is still unused. Sign in with ChatGPT is the identity path for checkout. Treat this document as the target shape; `AGENTS.md` is the implementation-status record.
+The repository is a vinext/React application deployed as a Cloudflare Worker. D1/Drizzle is in use for jobs, preview capabilities, the usage ledger, Stripe event projection, and the anonymous preview admission guard. R2 is still unused. Identity is an email magic-link session: a single-use token mailed to the address, redeemed for a `__Host-` session cookie backed by D1. It replaced Sign in with ChatGPT on 2026-08-25, which was header-based and unauthenticated off the hosting boundary (SEC-01). Treat this document as the target shape; `AGENTS.md` is the implementation-status record.
 
 The architecture favors a modular monolith deployed at the edge. Separate services are not justified for V1, but domain boundaries must be explicit enough to move model work or webhook processing later.
 
@@ -168,7 +168,7 @@ Thresholds are versioned. Each job records the effective pipeline, prompt, provi
 | D1 usage ledger concurrency | D1 transactional append-only ledger | Platform transaction semantics must prove correct under concurrent requests and webhook/upgrade races | ENG + MON load/concurrency spike before M2-07 |
 | Text payload storage | D1 initially, optional separate encrypted R2 payload | D1 simplicity conflicts with payload isolation, size, purge, and encryption needs | SEC + ENG decide before M1-09 |
 | Anonymous capability retention | Proposed 24 hours | Longer improves checkout recovery; shorter reduces sensitive-data exposure and abuse | PO + LEGAL + SEC before M1 launch |
-| Dispatch identity versus conventional auth | Use available optional Sign in with ChatGPT | Portability and Stripe customer account recovery may need another auth provider later | ENG document migration boundary before M2-01; do not build second auth in V1 without blocker |
+| Dispatch identity versus conventional auth | **Superseded 2026-08-25.** Sign in with ChatGPT was platform-provided and had no route in this repository, so on `ownword.pro` nobody could sign in and the header scheme was forgeable (SEC-01). Replaced by email magic-link sessions | Ownword now owns its own auth, including deliverability and session lifetime | ENG owns `src/lib/identity.ts`, `src/lib/magic-link.ts`, `db/auth-repository.ts`; legacy `users` rows keyed to a ChatGPT subject are unreachable and must be mapped if any exist |
 | AI provider retention | Prefer zero/short retention configuration | Model quality/cost may conflict with privacy terms | HE benchmarks; SEC/LEGAL approve final provider before M4 |
 | Independent verifier | Prefer distinct verification prompt/model and deterministic checks | Same-model correlated errors can miss semantic drift; distinct models add latency/cost | HE compare mixes on benchmark before freezing production config |
 | Partial preview selection | Expose coherent beginning/selected hunks | A simple prefix may leak enough value or misrepresent quality; selected hunks can cherry-pick | PO + DES define fixed transparent policy before M1-10 |

@@ -30,13 +30,17 @@ What an agent cannot do from this repository is fetch the live site — this ses
 Repository behavior is verified by rendering the built Worker in `tests/`; live behavior is verified by a
 human with a browser and a Search Console login.
 
-### The real blocker, verified: nobody can sign in
+### The sign-in blocker, resolved 2026-08-25
 
-Every sign-in link in the application targets `/signin-with-chatgpt` — `app/page.tsx:342`,
-`app/history/page.tsx:46`, `app/checkout/success/page.tsx:151`. That route does not exist in this repository;
-it was provided by the OpenAI hosting platform (see `docs/SECURITY.md` and `docs/PRODUCT.md`). On
-`ownword.pro` those three links are dead ends, so checkout, unlock, history, and billing are unreachable for
-a customer. Email magic-link authentication is being built now.
+Every sign-in link used to target `/signin-with-chatgpt`, a route this repository does not contain (it was
+provided by the OpenAI hosting platform), so on `ownword.pro` checkout, unlock, history, and billing were all
+unreachable. Email magic-link sign-in shipped at `/signin` and the dead links are gone; `/signin` is
+`noindex` and robots-disallowed by design.
+
+What remains is not an SEO blocker but bounds every conversion claim on this page: **no purchase has ever
+completed end to end on the production host.** Sign-in has not run against a real mailer there, and the
+checkout readiness probe is still failing. Treat organic conversion metrics as unmeasurable until one real
+purchase completes.
 
 This does not block indexing: the pages a crawler sees are public, server-rendered, and correct. It does
 block the conversion half of the funnel. Until auth lands, **do not write measurement copy, targets, or page
@@ -50,7 +54,7 @@ Section 9 as measurable.
   localhost, staging, preview, and `www.ownword.pro` — robots.txt returns a blanket `Disallow: /` and the
   sitemap is an empty `<urlset>`. This is enforced by `tests/rendered-html.test.mjs` and is by design
   (SEO-002), not a defect. On the `ownword.pro` Host, robots.txt allows crawling (with `/api/`, `/account/`,
-  `/admin/`, `/billing/`, `/checkout/`, `/history/`, `/result/`, `/signin-with-chatgpt` disallowed) and
+  `/admin/`, `/billing/`, `/checkout/`, `/history/`, `/result/`, `/signin` disallowed) and
   references the sitemap. The sitemap lists exactly `/`, `/privacy`, and `/terms`.
 - `src/lib/public-pages.ts` is the single registry of publicly indexable pages and the single builder for
   the metadata contract (SEO-005). `app/layout.tsx`, `app/privacy/page.tsx`, `app/terms/page.tsx` and
@@ -447,7 +451,7 @@ more than a *Done* nobody can support; do not upgrade a row without evidence nam
 | SEO-017 | P1 | Publish Academic mode page | SEO + Legal + Copy | SEO-011, real examples | Open (evidence-blocked) | Distinct academic workflow/example, citation protection proof, visible integrity notice, and zero evasion claims. Blocked on evidence, not on writing: see the note under SEO-018. |
 | SEO-018 | P1 | Publish Professional mode page | SEO + Copy | Real examples | Open (evidence-blocked) | Distinct business workflow/example, factual/terminology proof, and product start CTA; not duplicated from core page. **Deliberately not built in the 2026-08-25 pass.** The deployed engine is a deterministic demo baseline: `src/lib/humanization/deterministic-provider.ts` distinguishes Professional from the other modes by exactly three regular-expression substitutions layered on a shared table. A page claiming a distinct professional workflow, or mode-specific quality, would state something the product cannot do today, which Section 1 forbids outright. Build it when the mode genuinely differs and a real annotated before/after exists. |
 | SEO-019 | P1 | Publish meaning-preservation checklist | Humanization + SEO | SEO-012 | Open | Web and accessible downloadable versions cover all protected claim classes, cite methodology, and contain no customer text |
-| SEO-020 | P1 | Run crawl/render QA | QA + SEO | SEO-002..008 | Partial | A render pass over every existing route (`/`, `/privacy`, `/terms`, `/history`, `/checkout/success`, `/robots.txt`, `/sitemap.xml`, an unknown path) is recorded in Section 11.2. Three defects were found and fixed (`nonocache` robots directive, private pages inheriting the homepage canonical, sitemap/registry drift). Three findings remain open in ENG-locked files: the dead `/signin-with-chatgpt` links, the 404 page's inherited canonical, and the un-redirected `www` host. No orphan indexable page, no broken internal link between public pages, and no invalid JSON-LD were found. |
+| SEO-020 | P1 | Run crawl/render QA | QA + SEO | SEO-002..008 | Partial | A render pass over every existing route (`/`, `/privacy`, `/terms`, `/history`, `/checkout/success`, `/robots.txt`, `/sitemap.xml`, an unknown path) is recorded in Section 11.2. Three defects were found and fixed (`nonocache` robots directive, private pages inheriting the homepage canonical, sitemap/registry drift). Of the three findings then open in ENG-locked files, the dead sign-in links are fixed; the 404 page's inherited canonical and the un-redirected `www` host remain open. No orphan indexable page, no broken internal link between public pages, and no invalid JSON-LD were found. |
 | SEO-021 | P1 | Create weekly SEO scorecard | SEO + Analytics | SEO-009, SEO-010 | Open | Report includes business, funnel, demand, quality, technical, link, and risk KPIs with 7/28-day comparisons and written decisions |
 | SEO-022 | P2 | Publish category comparison | SEO + Legal | Firsthand test corpus | Open | Dated methodology, real testing, balanced findings, relationship disclosures, correction route, and update owner are visible |
 | SEO-023 | P2 | Build content pruning cadence | SEO | 60 days of data | Open | Monthly review labels each page keep/improve/merge/retire; changes preserve redirects and are tied to traffic/conversion/citation evidence |
@@ -512,9 +516,8 @@ Fixed in this pass:
 
 Open findings, all in files SEO does not own (see handoffs):
 
-- **Three dead sign-in links.** `app/page.tsx:342`, `app/history/page.tsx:46`,
-  `app/checkout/success/page.tsx:151` all point at `/signin-with-chatgpt`, which returns 404. Crawlers are
-  kept off it by robots.txt, so this is not an indexing defect; it is a conversion defect. (H-1)
+- ~~**Three dead sign-in links.**~~ **Fixed 2026-08-25.** All three now point at `/signin`, which exists,
+  is `noindex`, and is robots-disallowed. Re-verified after the auth work landed. (was H-1)
 - **The 404 page inherits the homepage canonical.** An unknown path correctly returns HTTP 404 and
   `noindex`, but also emits `<link rel="canonical" href="https://ownword.pro">`. A genuine 404 should not
   point at `/`. Needs an `app/not-found.tsx`. (H-4)
@@ -538,8 +541,8 @@ rather than done, on purpose. Pick them up once auth lands.
 - **H-1 — Adopt the shared metadata helper in `app/page.tsx`.** The homepage's metadata currently comes from
   the root layout via the `/` registry entry, which is correct but implicit. Once `app/page.tsx` is free,
   give it `export async function generateMetadata()` returning
-  `buildPublicPageMetadata(publicPage("/"), readRequestHost(await headers()))`, and while there replace the
-  dead `/signin-with-chatgpt` link with the new magic-link route. Do not add a second `<h1>` — the CI gate
+  `buildPublicPageMetadata(publicPage("/"), readRequestHost(await headers()))`. The dead-link half of this
+  handoff is already done: `app/page.tsx` now links to `/signin`. Do not add a second `<h1>` — the CI gate
   fails the build on it.
 - **H-2 — Adopt the shared host rule in `app/robots.txt/route.ts`.** It still carries its own copy of
   `configuredSiteUrl()` + host normalization. Replace with `canonicalOrigin()` / `isCanonicalHost()` /
@@ -599,7 +602,7 @@ Pause publishing and investigate when any of these occurs:
 
 | Risk / decision | Why it matters | V1 response |
 |---|---|---|
-| No customer can sign in on `ownword.pro` (verified 2026-08-25) | Every sign-in link targets `/signin-with-chatgpt`, a route this repository does not contain, so checkout, unlock, history, and billing are unreachable. Indexing is unaffected; the conversion half of every funnel claim is not | Treat organic conversion targets as unmeasurable until magic-link auth ships. Do not publish page copy, ads, or measurement claims that assume a purchase can complete today |
+| Sign-in exists but is unproven in production (updated 2026-08-25) | Magic-link sign-in shipped and the dead `/signin-with-chatgpt` links are gone, but no sign-in has completed against a real mailer on the production host, and checkout readiness is still failing there | Treat organic conversion targets as unmeasurable until one real purchase completes end to end. Do not publish page copy, ads, or measurement claims that assume a purchase can complete today |
 | `www.ownword.pro` is a bound custom domain with no redirect | It serves the whole application under `Disallow: /` and `noindex`, so it cannot be indexed (good) but also consolidates nothing (bad): any link earned on a `www` URL is wasted | One-hop 301/308 `www` -> apex (handoff H-3). Until then, never link to, advertise, or build links to a `www` URL |
 | Competitive query space is spam-heavy | Pressure toward bypass claims and manufactured backlinks | Differentiate with meaning protection, original benchmark evidence, and strict claim/link rules |
 | “Academic humanizer” can imply misconduct | Legal, trust, institution, and reputation exposure | Frame as revision support; visible integrity language; exclude evasion keywords |
