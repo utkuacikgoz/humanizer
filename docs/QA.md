@@ -91,12 +91,53 @@ Implemented in `tests/e2e/` (browser, requires `npm run dev` and Chromium):
 | 1 Anonymous paste → modes → preview → paywall disclosure | `anonymous-journey.e2e.test.mts`. Live Stripe checkout, sign-in, unlock, and a paid second generation are not automated (need test-mode secrets). A second *preview* in the same visit is covered. |
 | 2 Refresh/back/forward without loss | Not covered. Preview lives in React state only; D-004 forbids storing writing in `sessionStorage`. Server capability redemption exists (`GET /api/preview`) but the landing page does not restore from it yet. |
 | 3 Payment canceled / failed / recovered, cancel-at-period-end, quota exhausted | Cancel return: `recovery.e2e.test.mts` (`/?checkout=canceled`). Failed/recovered payment, subscription end, and quota exhaustion are not browser-covered. |
-| 4 History, sentence restore, protected phrases, account deletion | Not covered; those product surfaces are still open (see `AGENTS.md` M3). |
-| 5 Mobile and keyboard | `responsive.e2e.test.mts`, `accessibility.e2e.test.mts`. |
+| 4 History, sentence restore, protected phrases, account deletion | History list/detail/delete: `signed-in-journey.e2e.test.mts` and `session-integrity.e2e.test.mts`. Sentence restore/regenerate, protected phrases and account deletion are not browser-covered. |
+| 5 Mobile and keyboard | `responsive.e2e.test.mts`, `accessibility.e2e.test.mts`, `signed-in-accessibility.e2e.test.mts`. |
+| 6 Signed-in journey: request a link → redeem → rewrite → history → delete → sign out | `signed-in-journey.e2e.test.mts`, `session-integrity.e2e.test.mts`. |
 
 Also covered: locked-remainder leak checks, hostile input, unchanged/cosmetic un-sellable guards, activation landing, paid-result copy (API mocked), error/rate-limit UX.
 
+Not covered by the signed-in suite, and known to be gaps rather than oversights:
+
+- **The "check your inbox" success path.** A local dev server has no `RESEND_API_KEY`, so `POST /api/auth/request-link` answers `503` by design ("never return 'check your inbox' for mail nobody sent"). The enumeration test asserts the property that matters — a registered and an unregistered address produce byte-identical status, body and headers — and it asserts it in whichever configuration the server is in, including the `200` one. But on an unconfigured machine the bytes being compared are the `503`'s. The `200` path's equality is pinned by `tests/magic-link.test.mts` at the unit layer.
+- **Rate limiting on sign-in.** `MAGIC_LINK_LIMITS` (5 links per address per hour, 15 per client) is not exercised in the browser; doing so would poison the shared local database for every later test in the run.
+- **Session expiry.** `SESSION_TTL_MS` is 30 days and there is no injectable clock on the browser path.
+- **Real Stripe checkout.** Entitlements are seeded rather than purchased, so the checkout redirect, the webhook, and the claim transaction are unit-covered only.
+- **Multi-device sign-out.** Sign-out ends the session it was presented with; that one session is proven dead server-side by replaying its exact cookie. Whether a second device's session survives is untested.
+
 KI-01 and KI-02 are resolved (2026-08-24). Do not treat a green summary line as proof the suite ran in a browser — check that tests are not skipped (`environmentBlocker`).
+
+#### Signing a browser in without sending mail
+
+Sign-in is an emailed magic link, so the browser suite has to obtain a credential that normally only an inbox ever sees. Three seams were considered and `tests/e2e/helpers/identity.mts` records the reasoning; the short form:
+
+- **Reading the token's row back out of the local D1 is impossible**, and deliberately so. `auth_magic_link_tokens` stores `sha256(token)` and never the token (`db/auth-repository.ts`). Changing that to make a test work would destroy the property the table exists to provide.
+- **Injecting a recording `EmailSender`** is the seam `src/lib/email-sender.ts` was designed for, but the sender is resolved per request from the Workers `env` inside `app/api/auth/auth-deps.ts`. Reaching it from a browser test means editing that production module *and* adding a channel to read the recording back out of the Worker — more new production surface than the thing under test, and surface whose only purpose is to be a sign-in bypass.
+- **What the suite actually does:** the test mints the token itself and writes its digest into the same table `insertMagicLinkToken` writes, then hands the raw token to the browser as a URL. Delivery, and only delivery, is substituted. `GET /api/auth/verify`, the single-use guarded `UPDATE`, account creation, session issuance and the `Set-Cookie` are all the unmodified production path.
+
+**There is no production change and therefore no test-only flag to audit.** The only privilege the helper needs is write access to the dev server's own SQLite file under `.wrangler/state`, which is a developer-machine artifact that does not exist in a deployed Worker. Entitlements are seeded the same way: a `subscriptions` row identical in shape to the one the Stripe webhook writes, read back by the unmodified `getActiveEntitlement`. The plan is chosen at run time from `pricingConfig` rather than named, and nothing in the signed-in suite asserts a price, an allowance or a plan name.
+
+Rules the helper keeps, and which any change to it must keep: a raw token, a session id and a cookie value are never printed, never written to a file, and never interpolated into an assertion message — failure messages carry shapes, counts and lengths. Every address is synthetic and in the reserved `.test` TLD. The deletion assertion reads stored *lengths*, so it proves the text is gone without ever handling the text.
+
+#### Running the browser suite
+
+- The suite drives a dev server it never starts. `npm run dev` must already be listening on `:3000`.
+- A fresh `.wrangler/state` has no tables. Run `npm run db:migrate:local` after the first request that touches `getDb()`, or every signed-in test blocks with a message saying exactly that. Without it `/api/auth/session` answers `503` for any presented cookie and sign-in cannot work at all.
+- **A skipped test reports `ok`.** Read `# skipped` in the TAP summary, never the pass count. A run reporting "37 tests, 37 pass" with 37 skips executed nothing. Both `environmentBlocker()` (Chromium, server) and `identityBlocker()` (local D1 schema) must return `null`.
+- `waitUntil: "networkidle"` times out on polling pages; `/checkout/success` polls `/api/result`. Use `"domcontentloaded"`.
+- `gotoHydrated()` waits for a `POST /api/events` that only `app/page.tsx` and `app/checkout/success/page.tsx` ever send. On `/signin` and `/history` that wait can only end in its own 30-second timeout, so those pages use `gotoReady()` instead.
+- Playwright's browser build must match its library version. The harness prefers the project's copy and falls back to a global install whose Chromium actually exists. Do not remove that fallback.
+
+#### Open accessibility defects found by this suite
+
+Two tests in `signed-in-accessibility.e2e.test.mts` fail against real defects and are deliberately left failing rather than weakened. They are separate tests so the passing traversal coverage is not hidden behind them.
+
+| Test | Defect | Fix |
+|---|---|---|
+| `every keyboard stop on the sign-in page shows where the keyboard is` | `.signin-input` is the only control on either signed-in page with no visible focus indicator. `app/globals.css` sets `outline: 0` on the base `.signin-input` rule, which has the same specificity as the global `:focus-visible` rule and comes later in the file, so it wins. The only remaining focus cue is a 3%-alpha background tint — a colour-only indicator far below any contrast threshold. WCAG 2.4.7. | Drop `outline: 0` from `.signin-input`, or restate the focus ring under `.signin-input:focus-visible`. |
+| `deleting the last history item does not strand keyboard focus` | Deleting the only history item unmounts the row containing the button the customer just pressed, so focus falls to `<body>` and the next Tab restarts from the top of the document. This is the same outcome `app/history/page.tsx` already refuses to accept from the native `disabled` attribute; only the route into it differs. | Move focus to a surviving landmark after the list empties — the `history-title` heading or the empty-state status line. |
+
+Neither is a regression from this suite's changes: both reproduce against `main`.
 
 ### Security and abuse automation
 
