@@ -21,6 +21,7 @@ import {
   resultRegion,
   submitDraft,
   unlockButton,
+  unlockCard,
 } from "./helpers/harness.mts";
 import { REWRITABLE_DRAFT } from "./helpers/fixtures.mts";
 
@@ -67,7 +68,7 @@ test("anonymous visitor: paste, humanize, compare, hit the paywall", { skip: blo
 
   // ACT-10: the recurring terms are disclosed at the decision point, and they
   // come from the plan catalog rather than being typed into the page.
-  const unlockCardText = (await unlock.locator("xpath=..").innerText()).replace(/\s+/g, " ");
+  const unlockCardText = (await unlockCard(page).innerText()).replace(/\s+/g, " ");
   assert.ok(
     unlockCardText.includes(subscriptionDisclosure(starter)),
     `the purchase card must carry the catalog disclosure. Card read: ${JSON.stringify(unlockCardText)}`,

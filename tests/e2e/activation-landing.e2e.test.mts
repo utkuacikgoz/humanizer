@@ -9,6 +9,7 @@ import {
   openSession,
   resultHeading,
   unlockButton,
+  unlockCard,
 } from "./helpers/harness.mts";
 
 const blocker = await environmentBlocker();
@@ -93,6 +94,6 @@ test("a verified purchase CTA explains sign-in before the click", { skip: blocke
 
   const unlock = unlockButton(page);
   assert.equal(await unlock.isEnabled(), true);
-  assert.match(await unlock.locator("xpath=..").innerText(), /sign in with your email before checkout/i);
+  assert.match(await unlockCard(page).innerText(), /sign in with your email before checkout/i);
   assert.deepEqual(session.pageErrors, []);
 });

@@ -260,6 +260,21 @@ export function unlockButton(page: Page) {
   return page.locator(".unlock-card button, [data-testid=unlock]").first();
 }
 
+/**
+ * The whole purchase card: the control, the plan choices, and the terms.
+ *
+ * Named rather than reached as `unlockButton(page).locator("xpath=..")`, which
+ * is what the ACT-10 disclosure assertions used to do. That worked only while
+ * the button happened to be a direct child of the card; wrapping the buttons
+ * in their own row moved the terms out of the button's parent and the
+ * assertions started failing on a DOM change that broke nothing a customer
+ * can see. The card is the thing those assertions were always about, so it is
+ * resolved by its own stable container instead.
+ */
+export function unlockCard(page: Page) {
+  return page.locator(".unlock-card").first();
+}
+
 /** The two comparison panels, source first. */
 export function comparisonPanels(page: Page) {
   return page.locator(".comparison > article");
