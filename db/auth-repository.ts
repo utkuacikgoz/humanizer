@@ -44,6 +44,15 @@ function rowsChanged(result: unknown): number {
 /** How many expired rows one opportunistic sweep removes. Bounded so sign-in never becomes an unbounded scan. */
 const SWEEP_BATCH = 50;
 
+/**
+ * How stale `lastSeenAt` may get before a resolution refreshes it. Writing on
+ * every request would double the cost of every authenticated read for a field
+ * nothing makes a decision on; never writing would leave the column a
+ * duplicate of `createdAt` and make an idle-session policy impossible to add
+ * later.
+ */
+const TOUCH_INTERVAL_MS = 15 * 60 * 1000;
+
 export async function insertMagicLinkToken(
   db: AppDatabase,
   input: { tokenDigest: string; email: string; issuedAt: Date; expiresAt: Date },
@@ -140,6 +149,7 @@ export async function findSessionIdentity(
       contactEmail: users.contactEmail,
       deletedAt: users.deletedAt,
       expiresAt: authSessions.expiresAt,
+      lastSeenAt: authSessions.lastSeenAt,
     })
     .from(authSessions)
     .innerJoin(users, eq(users.id, authSessions.userId))
@@ -149,6 +159,12 @@ export async function findSessionIdentity(
   if (!row) return null;
   if (row.deletedAt) return null;
   if (row.expiresAt.getTime() <= input.now.getTime()) return null;
+
+  // Throttled liveness. Best-effort by construction: a failure here must never
+  // turn a signed-in customer into a signed-out one.
+  if (input.now.getTime() - row.lastSeenAt.getTime() > TOUCH_INTERVAL_MS) {
+    try { await touchSession(db, { sessionDigest: input.sessionDigest, now: input.now }); } catch { /* liveness is not a control */ }
+  }
 
   const email = row.contactEmail ?? "";
   return { userId: row.userId, externalSubject: row.externalSubject, email, displayName: email || row.externalSubject };
