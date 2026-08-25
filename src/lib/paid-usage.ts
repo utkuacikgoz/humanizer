@@ -23,12 +23,39 @@ export async function reservePaidUsage(
 ): Promise<PaidUsageAdmission> {
   const userId = await findUserIdByExternalSubject(db, input.externalSubject);
   if (!userId) return { kind: "not-entitled" };
+  return reserveForUser(db, { userId, operationKey: `humanize:${userId}:${input.idempotencyKey}`, words: input.words });
+}
+
+/**
+ * M3-03. One sentence operation's reservation.
+ *
+ * Same ledger, same admission rules, same replay semantics as a whole
+ * rewrite's — only the operation key's namespace differs, so a sentence
+ * operation and the rewrite it edits can never collide on a key while both
+ * still draw from the one allowance the plan grants.
+ *
+ * Takes an already server-derived user id rather than an external subject:
+ * the caller established this account's ownership of the job and its active
+ * entitlement before getting here, and re-deriving the id from a subject
+ * would add a second place identity is decided.
+ */
+export function reserveSentenceUsage(
+  db: AppDatabase,
+  input: { userId: string; operationKey: string; words: number },
+): Promise<PaidUsageAdmission> {
+  return reserveForUser(db, input);
+}
+
+async function reserveForUser(
+  db: AppDatabase,
+  input: { userId: string; operationKey: string; words: number },
+): Promise<PaidUsageAdmission> {
+  const { userId, operationKey } = input;
   const entitlement = await getActiveEntitlement(db, userId);
   if (!entitlement) return { kind: "not-entitled" };
 
   const plan = pricingConfig.plans[entitlement.planId as keyof typeof pricingConfig.plans];
   if (!plan || plan.availability !== "active") return { kind: "not-entitled" };
-  const operationKey = `humanize:${userId}:${input.idempotencyKey}`;
   const admission = await reserveUsage(db, {
     userId,
     subscriptionId: entitlement.subscriptionId,
@@ -68,4 +95,37 @@ export async function commitPaidUsage(db: AppDatabase, reservation: PaidUsageRes
 
 export function releasePaidUsage(db: AppDatabase, reservation: PaidUsageReservation) {
   return releaseUsage(db, reservation.operationKey);
+}
+
+export type PaidUsageState = {
+  consumed: number;
+  allowance: number;
+  remaining: number;
+  periodEnd: string;
+  paidUseCount: number;
+};
+
+/**
+ * The account's allowance state right now, read straight from the ledger.
+ *
+ * M3-03 uses this instead of the numbers a reservation carries, so that the
+ * response to a retried sentence operation — which holds no reservation of
+ * its own, having generated nothing — is identical to the response the first
+ * attempt returned. Null means there is no active entitlement to describe.
+ */
+export async function describePaidUsage(db: AppDatabase, userId: string): Promise<PaidUsageState | null> {
+  const entitlement = await getActiveEntitlement(db, userId);
+  if (!entitlement) return null;
+  const plan = pricingConfig.plans[entitlement.planId as keyof typeof pricingConfig.plans];
+  if (!plan) return null;
+
+  const consumed = await getConsumedWords(db, userId, entitlement.currentPeriodStart);
+  const paidUseCount = await getSuccessfulPaidUseCount(db, userId);
+  return {
+    consumed,
+    allowance: plan.wordLimit,
+    remaining: Math.max(0, plan.wordLimit - consumed),
+    periodEnd: entitlement.currentPeriodEnd.toISOString(),
+    paidUseCount,
+  };
 }
