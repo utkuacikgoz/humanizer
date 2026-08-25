@@ -25,6 +25,7 @@ import { and, asc, eq, inArray, isNull, lt, ne, or } from "drizzle-orm";
 import * as schema from "../../db/schema";
 import type { AppDatabase } from "../../db/repository";
 import { purgeExpiredAnonymousPayloads } from "../../db/repository";
+import { purgeExpiredAuthRows } from "../../db/auth-repository";
 import { recordDeletionAudit } from "../../db/deletion-audit";
 
 const { deletionJobs, humanizationJobs, jobPayloads, protectedItems, resultRevisions } = schema;
@@ -323,6 +324,8 @@ export async function drainDeletionJobs(db: AppDatabase, options: DrainOptions =
 export interface ScheduledPurgeSummary {
   deletions: DrainSummary;
   anonymousPayloadsPurged: number;
+  /** True when the spent-authentication sweep completed this pass. */
+  authRowsSwept: boolean;
 }
 
 /**
@@ -355,5 +358,20 @@ export async function runScheduledPurge(db: AppDatabase, options: DrainOptions =
     // Retention is opportunistic; a later pass collects what this one missed.
   }
 
-  return { deletions, anonymousPayloadsPurged };
+  // Spent sign-in state: expired links, expired sessions, and rate-limit
+  // windows nobody is counting against any more. All of it is already inert —
+  // an expired session resolves to nothing — so this is hygiene rather than a
+  // control, and it is here for the same reason the anonymous sweep is: the
+  // opportunistic copy on the sign-in path only runs when someone is signing
+  // in.
+  let authRowsSwept = false;
+  try {
+    const windowFloor = now.getTime() - 24 * 60 * 60 * 1000;
+    await purgeExpiredAuthRows(db, now, windowFloor);
+    authRowsSwept = true;
+  } catch {
+    // Independent of the two passes above, and never able to fail them.
+  }
+
+  return { deletions, anonymousPayloadsPurged, authRowsSwept };
 }

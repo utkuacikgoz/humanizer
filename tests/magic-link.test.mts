@@ -506,6 +506,39 @@ test("with no mail provider configured, sign-in fails closed", async () => {
   assert.equal((await h.db.select().from(schema.authMagicLinkTokens)).length, 0, "no token may be minted for mail nobody sent");
 });
 
+test("a missing database binding is an honest outage, not a 500 and not an expired link", async () => {
+  // getDb() throws when the D1 binding is absent. Letting that escape a route
+  // handler produces a bare 500 with no body: a broken page for the visitor
+  // and nothing actionable for the operator.
+  const failing = async () => { throw new Error("D1 binding unavailable"); };
+
+  const requested = await buildSignInRequestResponse(
+    new Request("http://localhost/api/auth/request-link", {
+      method: "POST",
+      headers: { "content-type": "application/json", host: "localhost", "cf-connecting-ip": CLIENT_IP },
+      body: JSON.stringify({ email: "person@example.com" }),
+    }),
+    failing,
+  );
+  assert.equal(requested.status, 503);
+
+  const verified = await buildVerifyResponse(
+    new Request(`http://localhost/api/auth/verify?token=${"a".repeat(43)}&return_to=%2Fhistory`, { headers: { host: "localhost" } }),
+    failing,
+  );
+  assert.equal(verified.status, 303);
+  assert.equal(verified.headers.get("location"), "/signin?error=unavailable&return_to=%2Fhistory");
+  assert.equal(cookieValue(verified), null);
+
+  const state = await buildSessionStateResponse(
+    new Request("http://localhost/api/auth/session", {
+      headers: { host: "localhost", cookie: `${DEV_SESSION_COOKIE}=${"a".repeat(43)}` },
+    }),
+    failing,
+  );
+  assert.equal(state.status, 503);
+});
+
 test("a delivery failure is reported rather than presented as success", async () => {
   const h = await harness();
   h.setSender({ async send() { throw new EmailDeliveryError("http_422"); } });

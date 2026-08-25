@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { and, eq } from "drizzle-orm";
+import * as authRepository from "../db/auth-repository";
 import * as billing from "../db/billing-repository";
 import * as history from "../db/history-repository";
 import { persistHumanizationJob, purgeExpiredAnonymousPayloads, ANONYMOUS_RETENTION_MS } from "../db/repository";
@@ -319,4 +320,32 @@ test("the scheduled pass also ages out unclaimed anonymous payloads", async () =
 
   // Nothing left to collect on the next pass.
   assert.equal(await purgeExpiredAnonymousPayloads(db), 0);
+});
+
+
+test("the scheduled pass also sweeps spent sign-in state", async () => {
+  // Expired links and sessions are already inert, but nothing else removes
+  // them: the opportunistic sweep on the sign-in path only runs when someone
+  // is signing in, so a quiet week would leave them accumulating.
+  const db = await createTestDatabase();
+  const longAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+  const { userId } = await billing.getOrCreateUserByExternalSubject(db, { externalSubject: "email:person@example.com", email: "person@example.com" });
+
+  await authRepository.insertMagicLinkToken(db, {
+    tokenDigest: "a".repeat(64),
+    email: "person@example.com",
+    issuedAt: longAgo,
+    expiresAt: longAgo,
+  });
+  await authRepository.createSession(db, {
+    sessionDigest: "b".repeat(64),
+    userId,
+    issuedAt: longAgo,
+    expiresAt: longAgo,
+  });
+
+  const summary = await runScheduledPurge(db);
+  assert.equal(summary.authRowsSwept, true);
+  assert.equal((await db.select().from(schema.authMagicLinkTokens)).length, 0);
+  assert.equal((await db.select().from(schema.authSessions)).length, 0);
 });

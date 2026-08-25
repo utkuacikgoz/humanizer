@@ -42,7 +42,9 @@ export default function SignInPage() {
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
   const returnTo = safeReturnTo(useSyncExternalStore(subscribeToLocation, readReturnTo, noServerValue));
-  const linkErrored = useSyncExternalStore(subscribeToLocation, readLinkError, noServerValue) === "link";
+  const linkError = useSyncExternalStore(subscribeToLocation, readLinkError, noServerValue);
+  const linkErrored = linkError === "link";
+  const serviceUnavailable = linkError === "unavailable";
   const [dismissedLinkError, setDismissedLinkError] = useState(false);
   const linkFailed = linkErrored && !dismissedLinkError;
   const [session, setSession] = useState<SessionState>({ kind: "unknown" });
@@ -137,6 +139,13 @@ export default function SignInPage() {
             <p className="error" role="alert" style={{ borderTop: "none" }}>
               That sign-in link has expired or has already been used. Each link works once and lasts
               15 minutes. Request a new one below.
+            </p>
+          ) : null}
+
+          {serviceUnavailable && !dismissedLinkError ? (
+            <p className="error" role="alert" style={{ borderTop: "none" }}>
+              We could not complete your sign-in just now. This is a problem on our side and your link
+              may still be good. Try opening it again in a moment, or request a new one below.
             </p>
           ) : null}
 
