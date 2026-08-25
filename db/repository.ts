@@ -14,7 +14,7 @@
 // runtime). A crash mid-write leaves an orphaned job row rather than
 // nothing; these are sequential inserts, not a D1 `batch()`/transaction.
 // Revisit that before this path gates real money movement in M2.
-import { and, eq, isNull, lt } from "drizzle-orm";
+import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "./schema";
 import type { JobState, WritingModeValue } from "./schema";
@@ -64,12 +64,35 @@ export interface PersistJobInput {
   protectedContent: PersistProtectedItem[];
   previewProjection: PreviewProjection;
   capabilityTtlMs?: number;
+  /**
+   * Server-derived owner. Present only for a rewrite an entitled account
+   * produced for itself (M3-02); never anything a client sent. Setting it
+   * makes the owner the job's access principal, which is why no anonymous
+   * capability is minted alongside it — see the invariant on
+   * db/schema.ts's humanizationJobs.
+   */
+  ownerUserId?: string;
 }
 
 export interface PersistedJob {
   jobId: string;
   capabilityToken: string;
   capabilityExpiresAt: Date;
+}
+
+/**
+ * What an owned write returns. There is deliberately no capability field to
+ * read, so no caller can accidentally hand an anonymous capability to an
+ * owned job's owner.
+ */
+export interface PersistedOwnedJob {
+  jobId: string;
+  /**
+   * False when this owner already had a job row for this idempotency key, so
+   * nothing was written and `jobId` names no row. A retried request lands
+   * here instead of producing a second history entry.
+   */
+  recorded: boolean;
 }
 
 export interface RedeemedPreview {
@@ -100,6 +123,16 @@ async function digestCapabilityToken(token: string): Promise<string> {
 async function hashValue(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * D1's real write result carries rows-affected at `meta.changes`; the
+ * sqlite-proxy test harness mirrors that shape deliberately. See the copies
+ * in db/usage-ledger.ts and db/history-repository.ts.
+ */
+function rowsChanged(result: unknown): number {
+  const changes = (result as { meta?: { changes?: number } } | undefined)?.meta?.changes;
+  return typeof changes === "number" ? changes : 0;
 }
 
 function base64UrlEncode(bytes: Uint8Array): string {
@@ -154,26 +187,70 @@ export async function purgeExpiredAnonymousPayloads(db: AppDatabase, now = new D
   return purged;
 }
 
-export async function persistHumanizationJob(db: AppDatabase, input: PersistJobInput): Promise<PersistedJob> {
+export async function persistHumanizationJob(
+  db: AppDatabase,
+  input: PersistJobInput & { ownerUserId: string },
+): Promise<PersistedOwnedJob>;
+export async function persistHumanizationJob(
+  db: AppDatabase,
+  input: PersistJobInput & { ownerUserId?: undefined },
+): Promise<PersistedJob>;
+export async function persistHumanizationJob(
+  db: AppDatabase,
+  input: PersistJobInput,
+): Promise<PersistedJob | PersistedOwnedJob> {
   const now = new Date();
   const jobId = crypto.randomUUID();
   const capabilityToken = await randomCapabilityToken();
   const capabilityDigest = await digestCapabilityToken(capabilityToken);
   const capabilityExpiresAt = new Date(now.getTime() + (input.capabilityTtlMs ?? DEFAULT_CAPABILITY_TTL_MS));
 
-  await db.insert(humanizationJobs).values({
-    id: jobId,
-    mode: input.mode,
-    state: "succeeded",
-    clientFingerprint: input.clientFingerprint,
-    idempotencyKey: input.idempotencyKey,
-    contentFingerprint: input.contentFingerprint,
-    inputWordCount: input.inputWordCount,
-    successfulWordCount: input.successfulWordCount,
-    pipelineVersion: input.pipelineVersion,
-    createdAt: now,
-    updatedAt: now,
-  });
+  if (input.ownerUserId) {
+    // M3-02 idempotency, decided by rows-affected on one guarded statement.
+    //
+    // (owner_user_id, idempotency_key) is exactly the identity of the paid
+    // usage operation this rewrite was charged under — src/lib/paid-usage.ts
+    // builds its operation key as `humanize:${userId}:${idempotencyKey}` from
+    // the same two values — so a retry of that operation cannot write a
+    // second history row. The NOT EXISTS is evaluated inside the same write
+    // that inserts, and SQLite/D1 serializes writes, so two concurrent
+    // retries cannot both find nothing and both insert. Deciding this by
+    // reading first and then inserting would be the race db/usage-ledger.ts's
+    // header describes; a re-read afterwards cannot tell "I wrote it" from
+    // "someone else wrote an identical row" either.
+    //
+    // Raw SQL because drizzle's insert builder has no INSERT ... SELECT ...
+    // WHERE form; the column list must stay in step with the values below.
+    const guarded = await db.run(sql`
+      insert into humanization_jobs
+        (id, owner_user_id, mode, state, client_fingerprint, idempotency_key,
+         content_fingerprint, input_word_count, successful_word_count,
+         pipeline_version, created_at, updated_at)
+      select
+        ${jobId}, ${input.ownerUserId}, ${input.mode}, 'succeeded', ${input.clientFingerprint},
+        ${input.idempotencyKey}, ${input.contentFingerprint}, ${input.inputWordCount},
+        ${input.successfulWordCount}, ${input.pipelineVersion}, ${now.getTime()}, ${now.getTime()}
+      where not exists (
+        select 1 from humanization_jobs
+        where owner_user_id = ${input.ownerUserId} and idempotency_key = ${input.idempotencyKey}
+      )
+    `);
+    if (rowsChanged(guarded) !== 1) return { jobId, recorded: false };
+  } else {
+    await db.insert(humanizationJobs).values({
+      id: jobId,
+      mode: input.mode,
+      state: "succeeded",
+      clientFingerprint: input.clientFingerprint,
+      idempotencyKey: input.idempotencyKey,
+      contentFingerprint: input.contentFingerprint,
+      inputWordCount: input.inputWordCount,
+      successfulWordCount: input.successfulWordCount,
+      pipelineVersion: input.pipelineVersion,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
 
   await db.insert(jobPayloads).values({
     id: crypto.randomUUID(),
@@ -200,17 +277,26 @@ export async function persistHumanizationJob(db: AppDatabase, input: PersistJobI
     );
   }
 
-  await db.insert(anonymousSessions).values({
-    id: crypto.randomUUID(),
-    jobId,
-    capabilityDigest,
-    createdAt: now,
-    expiresAt: capabilityExpiresAt,
-  });
+  // A job has exactly one access principal (db/schema.ts). An owned job's
+  // principal is its owner, so no anonymous session is written for it: the
+  // two together would be a second, unrevoked way into the same rewrite,
+  // and the capability's raw token would have nowhere legitimate to go.
+  if (!input.ownerUserId) {
+    await db.insert(anonymousSessions).values({
+      id: crypto.randomUUID(),
+      jobId,
+      capabilityDigest,
+      createdAt: now,
+      expiresAt: capabilityExpiresAt,
+    });
+  }
 
   // Best-effort retention sweep; a failure here must never fail the preview.
+  // It only ever touches unowned work, so an owned write does not shorten
+  // anyone's paid history by running it.
   try { await purgeExpiredAnonymousPayloads(db); } catch { /* retention is opportunistic */ }
 
+  if (input.ownerUserId) return { jobId, recorded: true };
   return { jobId, capabilityToken, capabilityExpiresAt };
 }
 

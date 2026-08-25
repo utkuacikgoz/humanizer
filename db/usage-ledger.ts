@@ -167,6 +167,37 @@ async function insertOnce(
   `);
 }
 
+/**
+ * M3-02. Links a committed operation to the history row it produced, by
+ * attaching that job id to the operation's `commit` ledger row while it is
+ * still unattached.
+ *
+ * Bookkeeping, not the idempotency decision: `usage_entries.job_id` has a
+ * foreign key to `humanization_jobs`, so this can only run once the job row
+ * exists, which means it cannot be the thing that decides whether to write
+ * that row. The one-row-per-operation guarantee is enforced instead by the
+ * guarded insert in db/repository.ts, whose NOT EXISTS is keyed on the same
+ * (owner, idempotency key) pair this operation key is built from.
+ *
+ * Still decided on rows-affected rather than a re-read: a read cannot
+ * distinguish "I attached it" from "someone else attached it a millisecond
+ * ago". False means there was no unattached commit row to link, which is not
+ * an error — the history row stands on its own.
+ */
+export async function claimOperationForJob(
+  db: AppDatabase,
+  input: { operationKey: string; jobId: string },
+): Promise<boolean> {
+  const result = await db.run(sql`
+    update usage_entries
+    set job_id = ${input.jobId}
+    where operation_key = ${input.operationKey}
+      and entry_type = 'commit'
+      and job_id is null
+  `);
+  return rowsChanged(result) === 1;
+}
+
 /** Words currently counted against the allowance for this period. */
 export async function getConsumedWords(db: AppDatabase, userId: string, periodStart: Date): Promise<number> {
   const [row] = await db
