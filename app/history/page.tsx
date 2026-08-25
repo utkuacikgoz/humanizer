@@ -43,7 +43,7 @@ const MODE_LABELS = {
   casual: "Casual",
 } as const;
 
-const SIGN_IN_HREF = "/signin-with-chatgpt?return_to=%2Fhistory";
+const SIGN_IN_HREF = "/signin?return_to=%2Fhistory";
 const MAX_FACT_CHIPS = 6;
 
 function formatDate(iso: string) {
@@ -211,7 +211,7 @@ export default function HistoryPage() {
 
           {list.kind === "signed-out" ? (
             <p className="error" role="alert" style={{ borderTop: "none" }}>
-              <a href={SIGN_IN_HREF}>Sign in</a> to see the rewrites saved to your account. Nothing is
+              <Link href={SIGN_IN_HREF}>Sign in</Link> to see the rewrites saved to your account. Nothing is
               stored under an account until you sign in and unlock a rewrite.
             </p>
           ) : null}

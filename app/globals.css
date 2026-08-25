@@ -1329,3 +1329,54 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
 
 .history-detail { display: grid; gap: var(--s4); }
 .history-detail .comparison { border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
+
+/* Sign in. The same workspace shell the rewriter and history use, with the
+   textarea swapped for one field: same paper, same rule weights, same
+   editor-footer holding the one action. Nothing new is introduced here. */
+.signin-copy {
+  margin: 0;
+  padding: var(--s5) var(--s5) 0;
+  max-width: 58ch;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+}
+
+.signin-label {
+  display: block;
+  padding: var(--s4) var(--s5) 0;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.signin-input {
+  display: block; width: 100%;
+  padding: var(--s3) var(--s5) var(--s5);
+  border: 0; outline: 0;
+  background: transparent; color: var(--ink);
+  font-family: var(--font-read); font-size: var(--t-lg); line-height: 1.62;
+  transition: background var(--dur-base) var(--ease-out);
+}
+.signin-input::placeholder { color: var(--ink-3); }
+.signin-input:focus { background: color-mix(in srgb, var(--green-bright) 3%, transparent); }
+
+.signin-note {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+}
+
+.signin-legal {
+  margin: 0;
+  padding: var(--s4) var(--s5) var(--s5);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  line-height: 1.55;
+}
+.signin-legal a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
+.signin-legal a:hover { color: var(--ink); }

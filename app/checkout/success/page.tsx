@@ -148,7 +148,7 @@ export default function CheckoutSuccessPage() {
 
         {visibleStatus === "signed-out" ? (
           <p className="error" role="alert" style={{ borderTop: "none" }}>
-            <a href="/signin-with-chatgpt?return_to=%2Fcheckout%2Fsuccess">Sign in</a> to view your unlocked result.
+            <Link href="/signin?return_to=%2Fcheckout%2Fsuccess">Sign in</Link> to view your unlocked result.
           </p>
         ) : null}
 

@@ -37,7 +37,7 @@ export function GET(request: Request) {
       `Disallow: /checkout/`,
       `Disallow: /history/`,
       `Disallow: /result/`,
-      `Disallow: /signin-with-chatgpt`,
+      `Disallow: /signin`,
       `Sitemap: ${canonical.origin}/sitemap.xml`,
       ``,
     ].join("\n"),
