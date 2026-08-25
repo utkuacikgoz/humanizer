@@ -56,6 +56,34 @@ The current test suite covers protected-content extraction, targeted rewriting, 
 - Evaluation thresholds: `src/lib/humanization/pipeline.ts`
 - Hosting metadata: `.openai/hosting.json`
 - Anonymous preview abuse protection: D1 migrations plus `PREVIEW_GUARD_SECRET`
+- Sign-in: email magic link, `RESEND_API_KEY` (and the optional `AUTH_EMAIL_FROM`)
+
+### Sign-in (email magic link)
+
+Sign-in is the gate in front of checkout, unlock, history, and the billing
+portal, so nothing is purchasable until it is configured. Three things an
+operator must do before it works in production:
+
+1. **Verify the sending domain with Resend.** Sends from an unverified domain
+   fail, and the failure surfaces to the customer as "the sign-in email could
+   not be sent".
+2. **Set `RESEND_API_KEY` as a repository secret.** The deploy workflow gates
+   on it and writes it into the `--secrets-file`. That file replaces the
+   Worker's *entire* secret set on every deploy, so a secret missing from it
+   is a secret wiped from production. Set `AUTH_EMAIL_FROM` too only if the
+   verified sending identity is not `no-reply@ownword.pro`.
+3. **Apply the D1 migrations** (the deploy workflow does this). Sign-in stores
+   link tokens and sessions in `auth_magic_link_tokens` and `auth_sessions`;
+   without the tables nobody can sign in.
+
+With no key configured the sign-in route answers 503 and logs
+`[auth] RESEND_API_KEY is not configured...` where `wrangler tail` can see it.
+It never reports success for mail that was not sent.
+
+Locally, `npm run dev` over plain http issues an unprefixed `ownword_session`
+cookie because `Secure` cookies (and therefore the `__Host-` prefix) are not
+set over http. Production issues `__Host-ownword_session` with `Secure`; the
+unprefixed name is never read off a dev host.
 
 Production deploys must set `PREVIEW_GUARD_SECRET` to at least 32 random bytes
 with `wrangler secret put PREVIEW_GUARD_SECRET`, set `D1_DATABASE_ID`, and apply

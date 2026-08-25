@@ -17,6 +17,14 @@ declare namespace Cloudflare {
     STRIPE_PRICE_STARTER?: string;
     /** Required outside explicit local/test environments; >=32 random bytes. */
     PREVIEW_GUARD_SECRET?: string;
+    /**
+     * Resend API key. Without it magic-link sign-in fails closed with a
+     * console.error naming this variable (src/lib/magic-link.ts) rather than
+     * silently accepting sign-ins nobody can complete.
+     */
+    RESEND_API_KEY?: string;
+    /** Envelope sender. Optional: defaults to no-reply@<productConfig.domain>. */
+    AUTH_EMAIL_FROM?: string;
     /** Set to `production`, `development`, `local`, or `test`. */
     ENVIRONMENT?: string;
   }

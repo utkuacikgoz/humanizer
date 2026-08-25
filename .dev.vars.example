@@ -1,4 +1,4 @@
-# Local Stripe secrets for `npm run dev` (Miniflare, via
+# Local secrets for `npm run dev` (Miniflare, via
 # @cloudflare/vite-plugin). Copy this file to `.dev.vars` (gitignored —
 # never commit real values) and fill in real test-mode Stripe values.
 #
@@ -20,3 +20,15 @@
 STRIPE_SECRET_KEY=sk_test_replace_me
 STRIPE_WEBHOOK_SECRET=whsec_replace_me
 STRIPE_PRICE_STARTER=price_replace_me
+
+# Magic-link sign-in (Resend). Without RESEND_API_KEY the sign-in route
+# answers 503 and logs why, so local sign-in needs either a real key or a
+# tail of the Worker log to read the link out of. Get a key at
+# https://resend.com -> API Keys. The sending domain must be verified there
+# or every send fails.
+#
+# AUTH_EMAIL_FROM is optional and defaults to
+# `Ownword <no-reply@ownword.pro>`. Set it when the verified sending
+# identity differs, e.g. a mail subdomain.
+RESEND_API_KEY=re_replace_me
+# AUTH_EMAIL_FROM=Ownword <no-reply@mail.ownword.pro>
