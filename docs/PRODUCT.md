@@ -101,7 +101,7 @@ Retention for owned payloads: kept until the owner deletes the item or the accou
 - No history path reads an anonymous preview capability, so a capability grants its one job through `/api/preview` as before and enumerates nothing.
 - Deleting an item voids the stored source, result, and projection, nulls any protected-item reference, stamps the purge tombstone, and queues a `history_item` deletion job. It is idempotent, and it is not gated on an active entitlement, so a lapsed customer can still erase their own writing.
 
-One limit is worth stating plainly: history currently holds only rewrites claimed through checkout, because that is the only path that assigns an owner.
+A successful entitled rewrite is also recorded as an owned job, so a subscriber's day-to-day rewrites reach history and not only the ones claimed through checkout. That write is best-effort and outside the paid guarantee: if it fails the customer still receives the complete rewrite and the ledger is left as committed. It is idempotent on the owner plus the request's idempotency key, so a retry writes no second row.
 
 ### Purge worker
 
@@ -180,13 +180,13 @@ Status: code-complete or substantially complete through M2-10, including D-015 l
 
 ### M3 â€” Paid result workflow
 
-Status: partial. Copy, direct paid result rendering, post-checkout result evidence, bottom-funnel analytics, second-paid-use semantics, and M3-01's authorized history list/detail/delete are implemented. The purge worker that drains queued deletion jobs and runs the scheduled anonymous retention sweep is implemented. Still open: persisting an entitled request's rewrite so it reaches history at all, the edit/revision workflow, sentence restore/regeneration, protected phrases, self-service account deletion (manual by email by PO decision), the completion evidence for the published deletion window, history/deletion analytics events, and full responsive/manual QA.
+Status: partial. Copy, direct paid result rendering, post-checkout result evidence, bottom-funnel analytics, second-paid-use semantics, and M3-01's authorized history list/detail/delete are implemented. The purge worker that drains queued deletion jobs and runs the scheduled anonymous retention sweep is implemented. Still open: the edit/revision workflow, sentence restore/regeneration, protected phrases, self-service account deletion (manual by email by PO decision), the completion evidence for the published deletion window, history/deletion analytics events, and full responsive/manual QA.
 
 ### M4 â€” Commercial release
 
 Status: open. Release blockers include:
 
-- `ownword.pro` currently serves a Hostinger parked-domain page rather than this application;
+- no customer can sign in on `ownword.pro`: every sign-in link targets `/signin-with-chatgpt`, a route this repository does not contain and the OpenAI hosting platform used to provide, so checkout, unlock, history, and billing are all unreachable there. Email magic-link authentication is the accepted replacement and is not built yet;
 - production provider selection and frozen benchmark;
 - production D1/guard/Stripe/webhook/live-price configuration and smoke/reconciliation;
 - Legal review and approval of Terms, Privacy, retention, provider, refund, and jurisdiction language;
