@@ -258,6 +258,49 @@ PO's decision.
 | M4-06 | MON | Audit revenue leakage and dark patterns | M4-05 | Locked data is not leaked, entitlements/quotas are correct, pricing is consistent, cancellation is clear, and no unavailable feature or artificial urgency is implied. |
 | M4-07 | PO | Authorize limited commercial launch | M4-01..M4-06 | All release gates are signed by PO, HE, MON, AQA, SEC, and LEGAL; monitoring/rollback owners are on record. |
 
+**M4-03 remains OPEN. It is not approved, and no agent can close it.** (2026-08-25, LEGAL)
+
+`app/terms/page.tsx` and `app/privacy/page.tsx` now carry a complete conventional draft rather than thin or
+generic language: governing law and jurisdiction, a refunds section, warranty disclaimer and a proportionate
+liability cap, acceptable use with the academic-integrity framing, subscription/billing/cancellation mechanics,
+and the privacy specifics (processors, retention, choices, cookies, security, children, complaints). Every
+factual claim was checked against `docs/MONETIZATION.md`, `docs/SECURITY.md`, D-017, D-018, and D-019 before it
+was written.
+
+This is drafting, not advice. It exists so that counsel edits a real draft instead of starting from nothing.
+The notice on `/terms` stating that these terms **have not been reviewed by counsel** is accurate and must stay
+until a lawyer has actually reviewed them. M4-03 closes when a human lawyer signs off, not when the pages read
+well.
+
+Owner decisions the draft depends on:
+
+1. **State of formation: Delaware — confirmed by the owner (2026-08-25, owner-reported).** The governing-law
+   and jurisdiction clause names Delaware, and both pages describe Bosphorus Elevate LLC as a Delaware limited
+   liability company. This is the one fact a wrong answer would make worse than useless, so if the certificate
+   of formation says another state, both pages must be corrected before launch.
+2. **Refund policy: OWNER MUST CONFIRM.** `docs/MONETIZATION.md` is the authority and it states no refund
+   policy — only that cancellation is straightforward and that failed attempts are never charged. The drafted
+   clause is therefore a conventional default, not a recorded decision: cancel anytime, access continues to the
+   end of the paid period, no automatic pro-rata refund, discretionary refunds by email, and a full refund of
+   the unused period if we terminate without cause. The owner must confirm this is the policy they will
+   actually honour, and it should then be recorded in `docs/MONETIZATION.md` and `DECISIONS.md` rather than
+   living only on the page.
+3. **Liability cap.** Set at the greater of twelve months' fees or $50. Deliberately modest for a $9.99/month
+   consumer subscription; an unconscionable cap is unenforceable anyway. Counsel may want to revisit.
+4. **Disclosures that are true today and become false on a change.** The pages state that no third-party AI
+   provider receives customer text (the deployed engine is the deterministic baseline), that Cloudflare, Stripe
+   and Resend are the only processors, and that no consent-based processing exists. Adding a model provider, a
+   processor, or a consent flow requires updating `/privacy` before the change ships, as D-P05 already requires.
+5. **No compliance status is asserted.** `/privacy` describes practices and explicitly says no regulator or
+   auditor has reviewed the service against the GDPR, UK GDPR, or CCPA. Do not upgrade that wording into a
+   compliance claim without counsel and an actual assessment.
+6. **Prohibited claims.** Both pages repeat that no AI-detector or plagiarism-detector outcome is guaranteed and
+   that the service is not a way to evade academic-integrity controls. This is a hard product guardrail; it
+   survives any future copy edit.
+
+`LEGAL_PAGES_LAST_UPDATED` in `src/lib/public-pages.ts` moved to 2026-08-25 so the published date matches the
+content. That constant is the only line touched outside the two pages and this file.
+
 ## Scope-change protocol
 
 Any new feature requires a written user problem, commercial or safety evidence, impact on current milestones, explicit exclusions, and Product Orchestrator approval. Voice DNA defaults to V1.1. SEO/GEO and growth work may proceed independently but cannot change the product journey, claims, or engineering priorities without this protocol.
