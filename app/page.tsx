@@ -495,6 +495,13 @@ export default function Home() {
                 <p className="copy-status" role="status" aria-live="polite">
                   {copyStatus === "copied" ? "Copied to your clipboard." : copyStatus === "failed" ? "Copy was blocked. Select the text and copy it manually." : ""}
                 </p>
+                {/* Saved the moment it succeeded, so the link is honest here.
+                    It was deliberately absent until entitled rewrites were
+                    persisted, because pointing at an empty history would not
+                    have been. */}
+                <p className="paid-result-history">
+                  Saved to <Link href="/history">your history</Link>. Delete it there whenever you want.
+                </p>
               </div>
             ) : null}
 

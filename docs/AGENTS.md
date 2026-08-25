@@ -134,6 +134,19 @@ implemented while persisted edit/revision behavior is open. M3-06 is partial for
 history, deletion, and cancellation-related event acceptance remains open. M3-03, M3-04, and the self-service
 parts of M3-05 are open.
 
+M3-01 implementation note (2026-08-25): list, detail, and delete are implemented and every query filters by the
+server-derived user id. A successful entitled rewrite is now persisted as an owned job, so history is no longer
+limited to checkout-claimed work. Deleting an item voids the stored source, result, projection, and protected-item
+references inline and stamps the purge tombstone, so the text is erased at the moment of deletion rather than when
+a worker runs; the queued `deletion_jobs` row is for propagation and nothing drains it yet (M3-05). Delete is not
+gated on an active entitlement, so a lapsed customer can still erase their own writing. Not closed: no gate is
+self-granted here, and M3-01 remains PO's to close.
+
+Retention decision pending Legal review (M4-03): owned payloads are kept until the owner deletes the item or the
+account, with no timed expiry. This is now stated to customers in `app/privacy/page.tsx` under "What we store, and
+for how long" and "Deletion requests". Legal has not reviewed that wording. Account deletion is still manual by
+email and the privacy page says so plainly rather than implying self-service.
+
 Implementation note (2026-08-25, M3-01, ENG): authorized history list/detail/delete is implemented and covered by
 `tests/history-access.test.mts`. `src/lib/history-access.ts` holds the decisions, `db/history-repository.ts` the
 queries, `app/api/history/route.ts` and `app/api/history/[id]/route.ts` the thin handlers, and `/history` the

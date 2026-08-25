@@ -85,7 +85,11 @@ The append-only ledger from D-015 is now wired into entitled `/api/humanize` req
 
 An entitled successful request returns the **complete result** directly, not an anonymous preview, together with the qualitative checks, measured improvement count, protected items, and a usage summary (`consumed`, `allowance`, `remaining`, `periodEnd`, and `paidUseCount`). The landing workspace renders this full paid result and supports copy.
 
-This closes the previous gap where the ledger existed but no request path used it. It does not implement editing, sentence controls, protected phrases, or account deletion. It also does not persist the rewrite: an entitled request returns the complete result and writes no job row, so a subscriber's direct rewrites do not enter history. Persisting owned jobs needs a retention rule for owned payloads first, which is a PO/LEGAL decision and is still open.
+This closes the previous gap where the ledger existed but no request path used it. It does not implement editing, sentence controls, protected phrases, or account deletion.
+
+A successful entitled rewrite is now also recorded as an owned job, so a subscriber's day-to-day rewrites reach `/history`. The write is best-effort and deliberately outside the paid guarantee: if it fails the customer still receives the complete rewrite and the ledger is left exactly as committed, because a missing history row is not worth a failed request. It is idempotent on the owner plus the request's idempotency key, so a retry writes no second row. Owned jobs never receive an anonymous capability; the schema's invariant is exactly one access principal per job.
+
+Retention for owned payloads: kept until the owner deletes the item or the account, never aged out on a timer. A regression test asserts an owned payload survives the same purge run that removes an expired anonymous one. This is documented for customers in Privacy and still requires Legal review under M4-03.
 
 ### Paid history
 

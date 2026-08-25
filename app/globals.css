@@ -872,6 +872,11 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .paid-result-actions > p:first-child { margin: 0; color: var(--ink-2); font-size: var(--t-sm); }
 .paid-result-actions .copy-result { min-width: 180px; }
 .paid-result-actions .copy-status { grid-column: 1 / -1; }
+/* Sits under the copy control, full width, quieter than the quota line
+   above it: reassurance the rewrite is kept, not another action. */
+.paid-result-history {
+  grid-column: 1 / -1; margin: 0; color: var(--ink-3); font-size: var(--t-xs);
+}
 
 .protected-note em { max-width: 46ch; color: var(--ink-3); font-style: normal; font-size: var(--t-xs); line-height: 1.5; }
 
