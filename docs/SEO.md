@@ -2,14 +2,15 @@
 
 **Owner:** SEO/GEO Agent
 **Status:** V1 acquisition architecture
-**Updated:** 2026-08-25
+**Updated:** 2026-08-25 (SEO backlog completion pass)
 **Canonical brand:** Ownword at `ownword.pro` (`humanizer` remains the internal codename and a generic query category)
 
 ## 0. Current build reality (verified 2026-08-25, second pass)
 
 Most of this document describes the target architecture, not what exists in `app/` today. The routes that
-actually exist are `/` (homepage/workspace), `/privacy`, `/terms`, `/history` (private, `noindex`),
-`/checkout/success` (private, `noindex`), plus `/robots.txt` and `/sitemap.xml`. None of the cluster pages in
+actually exist are `/` (homepage/workspace), `/privacy`, `/terms`, `/signin` (private, `noindex`),
+`/history` (private, `noindex`), `/checkout/success` (private, `noindex`), a real 404 at any unknown path,
+plus `/robots.txt` and `/sitemap.xml`. None of the cluster pages in
 Section 4's information architecture (`/pricing`, `/how-it-works`, `/examples/*`, `/ai-writing-patterns`,
 `/make-ai-writing-sound-natural`, `/meaning-preserving-rewrite`, mode pages, `/compare`, `/research`,
 `/guides`, `/trust/*`) exist yet. Do not read Section 4 as a description of the live site — it is the target,
@@ -30,48 +31,66 @@ What an agent cannot do from this repository is fetch the live site — this ses
 Repository behavior is verified by rendering the built Worker in `tests/`; live behavior is verified by a
 human with a browser and a Search Console login.
 
-### The sign-in blocker, resolved 2026-08-25
+### The sign-in blocker, closed 2026-08-25
 
 Every sign-in link used to target `/signin-with-chatgpt`, a route this repository does not contain (it was
 provided by the OpenAI hosting platform), so on `ownword.pro` checkout, unlock, history, and billing were all
-unreachable. Email magic-link sign-in shipped at `/signin` and the dead links are gone; `/signin` is
-`noindex` and robots-disallowed by design.
+unreachable. Email magic-link sign-in shipped at `/signin`, the dead links are gone, and a rendered pass over
+the current build confirms `/signin` exists, returns 200, is `noindex, nofollow, nocache`, carries no
+canonical, and is `Disallow`ed in robots.txt. The owner reports the flow works in production. **This finding
+is closed.**
 
-What remains is not an SEO blocker but bounds every conversion claim on this page: **no purchase has ever
-completed end to end on the production host.** Sign-in has not run against a real mailer there, and the
-checkout readiness probe is still failing. Treat organic conversion metrics as unmeasurable until one real
-purchase completes.
+What remains is not an SEO blocker but still bounds every conversion claim on this page: **no purchase has
+been evidenced end to end on the production host from this repository.** Treat organic conversion metrics as
+unmeasurable until the owner confirms one real purchase completed.
 
-This does not block indexing: the pages a crawler sees are public, server-rendered, and correct. It does
-block the conversion half of the funnel. Until auth lands, **do not write measurement copy, targets, or page
-promises that assume a purchase can complete today**, and do not treat any preview-to-paid metric in
-Section 9 as measurable.
+This does not block indexing: the pages a crawler sees are public, server-rendered, and correct. It does bound
+the conversion half of the funnel. **Do not write measurement copy, targets, or page promises that assume a
+measured purchase rate exists today**, and do not treat any preview-to-paid metric in Section 9 as measurable
+until the funnel has been observed end to end.
 
 ### Verified working today (against the current repository)
 
 - `app/robots.txt/route.ts` and `app/sitemap.xml/route.ts` gate all output on the request `Host` header
-  matching `productConfig.domain` (`ownword.pro`) exactly (case-insensitive). Off that host — including
-  localhost, staging, preview, and `www.ownword.pro` — robots.txt returns a blanket `Disallow: /` and the
-  sitemap is an empty `<urlset>`. This is enforced by `tests/rendered-html.test.mjs` and is by design
-  (SEO-002), not a defect. On the `ownword.pro` Host, robots.txt allows crawling (with `/api/`, `/account/`,
-  `/admin/`, `/billing/`, `/checkout/`, `/history/`, `/result/`, `/signin` disallowed) and
-  references the sitemap. The sitemap lists exactly `/`, `/privacy`, and `/terms`.
-- `src/lib/public-pages.ts` is the single registry of publicly indexable pages and the single builder for
-  the metadata contract (SEO-005). `app/layout.tsx`, `app/privacy/page.tsx`, `app/terms/page.tsx` and
-  `app/sitemap.xml/route.ts` all read from it, so the sitemap cannot list a URL whose page does not exist.
-  `app/robots.txt/route.ts` still carries its own copy of the host rule — see the handoff list in Section 11.
+  matching `productConfig.domain` (`ownword.pro`) exactly (case-insensitive). Off that host — localhost,
+  staging, preview — robots.txt returns a blanket `Disallow: /` and the sitemap is an empty `<urlset>`. This
+  is enforced by `tests/rendered-html.test.mjs` and is by design (SEO-002), not a defect. On the
+  `ownword.pro` Host, robots.txt allows crawling (with `/api/`, `/account/`, `/admin/`, `/billing/`,
+  `/checkout/`, `/history/`, `/result/`, `/signin` disallowed) and references the sitemap. The sitemap lists
+  exactly `/`, `/privacy`, and `/terms`. Both routes now read the one host rule from
+  `src/lib/public-pages.ts` rather than a private copy of it.
+- `www.ownword.pro` no longer serves the application. `worker/index.ts` answers it with a **308** to the
+  apex before anything else runs, preserving path, query, and method. Verified in `tests/rendered-html.test.mjs`
+  for one hop, for query preservation, for a `POST`, for a mixed-case `Host`, and for the neighbouring
+  hostnames (`staging.ownword.pro`, `wwwownword.pro`, `www.ownword.pro.example.com`) that must *not* be swept
+  up. The decision reads the real `Host` and ignores `x-forwarded-host`, so a spoofed header cannot redirect
+  the apex to itself. **Live behavior is unverified from this repository** — see owner action O-6.
+- `src/lib/public-pages.ts` is the single registry of publicly indexable pages and holds both metadata
+  builders (SEO-005): `buildPublicPageMetadata()` for indexable pages and `buildPrivateSurfaceMetadata()` for
+  everything that must claim nothing. `app/layout.tsx`, `app/privacy/page.tsx`, `app/terms/page.tsx`,
+  `app/robots.txt/route.ts`, `app/sitemap.xml/route.ts`, `app/not-found.tsx` and the three private layouts
+  all read from it, so the sitemap cannot list a URL whose page does not exist and a private page cannot
+  quietly inherit the homepage's identity. The one file that does not read it is `app/page.tsx` — see H-1.
 - `src/lib/site-structured-data.ts` emits `Organization` + `WebSite` JSON-LD on the canonical host only
   (SEO-006). The homepage additionally emits `SoftwareApplication` from `app/page.tsx`, whose `Offer` block
-  is conditional on `productConfig.billingEnabled` (currently `true`). Commercial launch still requires the
-  legal, security, and pricing release gates.
+  is conditional on `productConfig.billingEnabled` (currently `true`). That second block is **not** host-gated
+  — `app/page.tsx` is a client component and cannot read the request host — so it ships on staging and
+  localhost too, on pages that are `noindex` there. See finding F4 in Section 11.2. Commercial launch still
+  requires the legal, security, and pricing release gates.
 - `/privacy` and `/terms` return 200 with unique Ownword metadata, the configured operator and support
   address, substantive policy text, and host-gated canonical/index directives. They contain no `PENDING`
   placeholders, but final counsel review remains part of M4-03.
-- `/checkout/success` and `/history` are private: both emit `noindex, nofollow, nocache`, both now drop the
-  inherited homepage canonical, and rendered tests prove neither appears in the sitemap.
+- `/signin`, `/history` and `/checkout/success` are private: all three emit `noindex, nofollow, nocache` and,
+  since this pass, no canonical, no meta description, and no Open Graph or Twitter card at all. Rendered tests
+  prove none of them appears in the sitemap.
+- A genuine 404 is a genuine 404. `app/not-found.tsx` returns HTTP 404 with one H1, a link back to `/`, no
+  canonical, and no inherited homepage card. Trailing slashes normalize in one hop (`/privacy/` -> 308 ->
+  `/privacy`).
 - `tests/metadata-contract.test.mjs` is the CI gate for SEO-005: it crawls the canonical-host sitemap and
   fails the build if any listed URL is not 200, or is missing a title, meta description, self-canonical,
-  `og:title/description/type/url/site_name/image`, `twitter:card/title/description`, or exactly one H1.
+  `og:title/description/type/url/site_name/image`, `twitter:card/title/description`, or exactly one H1. It
+  now also holds the pages that are deliberately *out* of the sitemap to their own contract. The gate was
+  mutation-checked on 2026-08-25 rather than assumed — see SEO-005 in Section 11.
 
 
 ## 1. Outcome and guardrails
@@ -433,14 +452,14 @@ more than a *Done* nobody can support; do not upgrade a row without evidence nam
 | ID | Pri | Task | Owner | Depends on | Status | Acceptance criteria |
 |---|---|---|---|---|---|---|
 | SEO-001 | P0 | Define canonical domain and brand metadata contract | Engineering + Product | Naming config | Partial | One config source supplies confirmed product name, domain, support email, and legal entity, and staging cannot emit production canonicals. Official logo artwork and social handles remain unconfirmed and are intentionally omitted. |
-| SEO-002 | P0 | Implement indexation matrix | Engineering + Security | SEO-001 | Partial | Rendered tests prove the canonical-host public allow path, the off-host `noindex`/empty-sitemap default, and `noindex` + no-canonical on both private surfaces (`/checkout/success`, `/history`); no private URL appears in the sitemap. `tests/metadata-contract.test.mjs` re-checks this every build. Remaining gap: the framework 404 page still inherits the homepage canonical (see handoff H-4), and account/admin surfaces do not exist yet. |
-| SEO-003 | P0 | Implement canonical and redirect policy | Engineering | SEO-001 | Partial | Repository behavior is verified: `/`, `/privacy`, `/terms` self-canonicalize on the canonical host only, private surfaces carry no canonical, and off-host output fails closed. Not verified and not implementable from SEO's owned files: `www.ownword.pro` is bound as a second custom domain (`vite.config.ts`) and currently serves the app under `Disallow: /` + `noindex` with no redirect, so www earns nothing and consolidates nothing. One-hop `www` -> apex and HTTP -> HTTPS redirects are owner action O-6 / handoff H-3. |
-| SEO-004 | P0 | Generate XML sitemap and robots.txt | Engineering | SEO-002 | Done (repository) / owner-verified live | Canonical-host output lists exactly `/`, `/privacy`, `/terms`, each an existing 200 route drawn from `src/lib/public-pages.ts`; robots.txt references the sitemap; off-host output fails closed. `lastmod` is emitted only for `/privacy` and `/terms`, from the same constant those pages display, and a test fails if a sitemap date is not visible on its page; `/` tracks no material modification date and correctly omits `lastmod`. `/history` is private and is proven absent. Live fetch of the two files is owner action O-1. |
-| SEO-005 | P0 | Build reusable metadata API | Engineering + Copy | SEO-001 | Partial | `src/lib/public-pages.ts` is the shared registry + builder; `app/layout.tsx`, `/privacy` and `/terms` are migrated to it. `tests/metadata-contract.test.mjs` is the CI check: every sitemap URL must return 200 with a unique title and description, a self-canonical, the OG and Twitter set, and exactly one H1. Two adoptions remain: `app/page.tsx` (ENG-locked during auth work, handoff H-1) and `app/robots.txt/route.ts` (ENG-locked, handoff H-2). The gate passes on the homepage today because it checks rendered output, not source. |
-| SEO-006 | P0 | Add truthful structured data | Engineering + SEO | SEO-001, pricing config | Partial | `Organization` + `WebSite` JSON-LD ship from `src/lib/site-structured-data.ts` on the canonical host only. Every property is verifiable from `src/config/product.ts`: brand name, `legalName` Bosphorus Elevate LLC, origin, support `ContactPoint`, `inLanguage`. `logo`, `sameAs`, `aggregateRating`, `foundingDate`, `address` and `SearchAction` are deliberately absent and a test fails if any appears. `SoftwareApplication` on `/` still carries its `Offer` from the catalog. Remaining: live Rich Results validation (owner action O-4). |
-| SEO-007 | P0 | Protect customer text from discovery/analytics | Security + Engineering | SEO-002 | Partial | Test confirms text never appears in URL, metadata, analytics, sitemap, public cache, or unauthorized response; private result access control passes. Holds for what is built (anonymous preview, `track()` calls); there is no history/account surface yet (M3) for this to apply to |
-| SEO-008 | P0 | Establish performance budgets | Engineering + Design | Core UI | Open | Not verified in this pass; outside SEO's owned files |
-| SEO-009 | P0 | Verify search-engine consoles | SEO + Hosting (owner action) | Live deployment | Partial (owner-reported 2026-08-25) | The owner reports Google Search Console is connected for `ownword.pro` and the sitemap is submitted. The live sitemap was observed serving the correct three apex URLs, but with no `<lastmod>`, which the merged code emits for `/privacy` and `/terms` — evidence that production is still running a pre-merge build. **Not independently verified** — no agent in this project can reach GSC or the live host, so this status is the owner's report, not evidence. Still open: submit `https://ownword.pro/sitemap.xml` and confirm 3 discovered URLs; run a live URL Inspection on `/` for Indexing allowed = Yes with canonical `https://ownword.pro`; repeat for `/privacy` and `/terms`; add Bing via *Import from Google Search Console*. Steps 4 onward in Section 11.1. |
+| SEO-002 | P0 | Implement indexation matrix | Engineering + Security | SEO-001 | Done (repository) | Rendered tests prove the canonical-host public allow path, the off-host `noindex`/empty-sitemap default, `noindex, nofollow, nocache` with no canonical and no social card on all three private surfaces (`/signin`, `/history`, `/checkout/success`), and a genuine 404 that declares no canonical. No private URL appears in the sitemap. `tests/metadata-contract.test.mjs` re-checks every class each build. The 404 gap that held this at *Partial* is closed by `app/not-found.tsx`. Account and admin surfaces do not exist yet; robots.txt already disallows their paths. Live verification is owner action O-1. |
+| SEO-003 | P0 | Implement canonical and redirect policy | Engineering | SEO-001 | Done (repository) / owner-verified live | Verified against the built Worker: `/`, `/privacy`, `/terms` self-canonicalize on the canonical host only; private surfaces and the 404 carry no canonical; off-host output fails closed; trailing slashes normalize in one hop (`/privacy/` -> 308 -> `/privacy`); and `www.ownword.pro` now 308s to the apex in one hop with path, query and method preserved, so `www` consolidates instead of leaking. 308 rather than 301 so a `POST` to `/api/*` cannot be silently downgraded to `GET`. **Not verifiable here:** that the deploy carrying the redirect is live, and that HTTP -> HTTPS is enforced at the Cloudflare edge. Both are owner action O-6. |
+| SEO-004 | P0 | Generate XML sitemap and robots.txt | Engineering | SEO-002 | Done (repository) / owner-verified live | Canonical-host output lists exactly `/`, `/privacy`, `/terms`, each an existing 200 route drawn from `src/lib/public-pages.ts`; robots.txt references the sitemap; off-host output fails closed. `lastmod` is emitted only for `/privacy` and `/terms`, from the same constant those pages display, and a test fails if a sitemap date is not visible on its page; `/` tracks no material modification date and correctly omits `lastmod`. `/signin`, `/history` and `/checkout/success` are private and are proven absent. Since this pass both files read the shared host rule rather than a private copy, and their output is pinned on and off the canonical host. Live fetch of the two files is owner action O-1. |
+| SEO-005 | P0 | Build reusable metadata API | Engineering + Copy | SEO-001 | Partial | `src/lib/public-pages.ts` is the shared registry and holds both builders. Adopted by `app/layout.tsx`, `/privacy`, `/terms`, `app/sitemap.xml/route.ts`, `app/robots.txt/route.ts` (H-2, done this pass), `app/not-found.tsx`, and the `/signin`, `/history`, `/checkout/success` layouts. **The gate is proven, not asserted:** on 2026-08-25 five deliberate mutations were each caught by `tests/metadata-contract.test.mjs` with a message naming the defect — removing `og:image` from the builder (*is missing og:image*), duplicating a description across two pages (*duplicates another page's meta description*), adding a second H1 (*must have exactly one H1, found 2*), registering a sitemap URL with no route (*does not return 200*), and dropping the canonical (*does not self-canonicalize*). One adoption remains and cannot be done as specified: `app/page.tsx` is a `"use client"` component, so it cannot export `generateMetadata` — see H-1 for what was measured and what it would cost. |
+| SEO-006 | P0 | Add truthful structured data | Engineering + SEO | SEO-001, pricing config | Partial | `Organization` + `WebSite` JSON-LD ship from `src/lib/site-structured-data.ts` **on the canonical host only**, and parse valid. Every property is verifiable from `src/config/product.ts`: brand name, `legalName` Bosphorus Elevate LLC, origin, support `ContactPoint`, `inLanguage`. `logo`, `sameAs`, `aggregateRating`, `foundingDate`, `address` and `SearchAction` are deliberately absent and a test fails if any appears. **Correction to the previous status:** the homepage's `SoftwareApplication` block is *not* host-gated — it is emitted from the client component `app/page.tsx`, which cannot read the request `Host`, so a rendered pass finds it on `staging.ownword.pro` too (finding F4, Section 11.2). Those pages are `noindex` there, so nothing is indexed, but the gating claim was overstated. Remaining: host-gate `SoftwareApplication` (blocked behind H-1) and live Rich Results validation (owner action O-4). |
+| SEO-007 | P0 | Protect customer text from discovery/analytics | Security + Engineering | SEO-002 | Partial | Test confirms text never appears in a URL, in metadata, in analytics, in the sitemap, in a public cache, or in an unauthorized response; private result access control passes. Re-checked this pass against the routes that now exist: `/history` and `/signin` render no customer text into any title, canonical, social tag or sitemap entry, carry no canonical at all, and are `noindex, nofollow, nocache`. Not yet covered: `/history` renders a signed-in customer's own writing and is `Disallow`ed only below `/history/`, which is deliberate (a `noindex` a crawler may not fetch is a `noindex` it never reads) but means the page itself must stay authenticated on the server, not merely `noindex`. |
+| SEO-008 | P0 | Establish performance budgets | Engineering + Design | Core UI | Open | Not verified in either QA pass, and not verifiable from this repository: Core Web Vitals need field data or a Lighthouse run against a live host this session cannot reach. Owner action O-8. The budgets themselves are stated in Section 6; what is missing is a measurement, not a target. |
+| SEO-009 | P0 | Verify search-engine consoles | SEO + Hosting (owner action) | Live deployment | Partial (owner-reported; steps 1-4 and 7 done, 5-6 and 8 open) | **Owner-reported, not verified by any agent:** Google Search Console is connected for `ownword.pro`, the sitemap is submitted, and Bing Webmaster Tools verification is complete. **Verified from the repository:** the `msvalidate.01` token is present and ungated in `app/layout.tsx` (it renders on every host, including off-canonical, which is deliberate so a Bing fetch through any hostname still finds it), and the canonical-host sitemap serves exactly the three apex URLs with `lastmod` on `/privacy` and `/terms`. **No agent in this project can reach GSC, Bing, or the live host** — outbound to `ownword.pro` is blocked from the sandbox — so nothing below the repository line is evidence. Still open and owner-only: live URL Inspection on `/`, `/privacy`, `/terms` for *Indexing allowed = Yes* and the expected canonical (step 5); re-check `www` now that the 308 has shipped (step 6); record the console-reported URL counts and the Rich Results result here (step 8). |
 | SEO-010 | P0 | Connect organic funnel attribution | Analytics + Engineering | Existing events | Open | Funnel events exist (`track()` calls per `PRODUCT.md`); no GSC-joined dashboard exists |
 | SEO-011 | P0 | Write responsible claims standard | Legal + Copy + SEO | Product brief | Open | Guardrails are stated in this document, `PRODUCT.md`, and `README.md`, but there is no single Legal-approved allowed/forbidden claims list |
 | SEO-012 | P0 | Publish trust proof modules | Humanization + Copy | Benchmark evidence | Open | No `/trust/*` pages exist; homepage carries inline trust copy only |
@@ -451,7 +470,7 @@ more than a *Done* nobody can support; do not upgrade a row without evidence nam
 | SEO-017 | P1 | Publish Academic mode page | SEO + Legal + Copy | SEO-011, real examples | Open (evidence-blocked) | Distinct academic workflow/example, citation protection proof, visible integrity notice, and zero evasion claims. Blocked on evidence, not on writing: see the note under SEO-018. |
 | SEO-018 | P1 | Publish Professional mode page | SEO + Copy | Real examples | Open (evidence-blocked) | Distinct business workflow/example, factual/terminology proof, and product start CTA; not duplicated from core page. **Deliberately not built in the 2026-08-25 pass.** The deployed engine is a deterministic demo baseline: `src/lib/humanization/deterministic-provider.ts` distinguishes Professional from the other modes by exactly three regular-expression substitutions layered on a shared table. A page claiming a distinct professional workflow, or mode-specific quality, would state something the product cannot do today, which Section 1 forbids outright. Build it when the mode genuinely differs and a real annotated before/after exists. |
 | SEO-019 | P1 | Publish meaning-preservation checklist | Humanization + SEO | SEO-012 | Open | Web and accessible downloadable versions cover all protected claim classes, cite methodology, and contain no customer text |
-| SEO-020 | P1 | Run crawl/render QA | QA + SEO | SEO-002..008 | Partial | A render pass over every existing route (`/`, `/privacy`, `/terms`, `/history`, `/checkout/success`, `/robots.txt`, `/sitemap.xml`, an unknown path) is recorded in Section 11.2. Three defects were found and fixed (`nonocache` robots directive, private pages inheriting the homepage canonical, sitemap/registry drift). Of the three findings then open in ENG-locked files, the dead sign-in links are fixed; the 404 page's inherited canonical and the un-redirected `www` host remain open. No orphan indexable page, no broken internal link between public pages, and no invalid JSON-LD were found. |
+| SEO-020 | P1 | Run crawl/render QA | QA + SEO | SEO-002..008 | Partial | Second render pass completed 2026-08-25 over **every** route that now exists — `/`, `/privacy`, `/terms`, `/signin`, `/history`, `/checkout/success`, `/robots.txt`, `/sitemap.xml`, three unknown paths, and trailing-slash variants — on the canonical host, on `www`, and on an off-canonical host. Recorded in Section 11.2. Five findings: three fixed in this pass (404 inheriting the homepage canonical; private surfaces inheriting the homepage description and social card; `www` serving the app unredirected), two open (F3, no H1 on the three private surfaces, DESIGN-owned; F4, un-host-gated `SoftwareApplication`, blocked behind H-1). Zero orphan indexable pages, zero broken internal links, valid JSON-LD everywhere it is emitted, no customer text in any crawlable surface. Held at *Partial* because the two open findings are real and because performance (SEO-008) still needs a live host this session cannot reach. |
 | SEO-021 | P1 | Create weekly SEO scorecard | SEO + Analytics | SEO-009, SEO-010 | Open | Report includes business, funnel, demand, quality, technical, link, and risk KPIs with 7/28-day comparisons and written decisions |
 | SEO-022 | P2 | Publish category comparison | SEO + Legal | Firsthand test corpus | Open | Dated methodology, real testing, balanced findings, relationship disclosures, correction route, and update owner are visible |
 | SEO-023 | P2 | Build content pruning cadence | SEO | 60 days of data | Open | Monthly review labels each page keep/improve/merge/retire; changes preserve redirects and are tied to traffic/conversion/citation evidence |
@@ -464,12 +483,18 @@ more than a *Done* nobody can support; do not upgrade a row without evidence nam
 No agent can do any of this. It needs a Google account, a Bing account, and access to the `ownword.pro` DNS
 zone or the Cloudflare dashboard. Do them in this order; each step's check is the entry condition for the next.
 
-**Progress (owner-reported 2026-08-25):** Google Search Console is connected and `sitemap.xml` is submitted,
-so steps 1 to 4 are done. Bing's verification token is in the homepage head (`app/layout.tsx`) but Bing cannot
-confirm it until the deploy runs. Continue from step 5 (live URL Inspection). One caution before submitting the sitemap: the production deploy has not run since the
-sign-in work merged, so the live host may still be serving a build whose sitemap and robots output predate it.
-Re-run step 1's two checks against the live host first; submitting a sitemap the deploy has not published yet
-just records errors in Search Console.
+**Progress (owner-reported 2026-08-25, second pass).** Steps 1-4 and step 7 are reported done: Google Search
+Console is connected for `ownword.pro`, `sitemap.xml` is submitted, and Bing Webmaster Tools verification has
+completed. None of that is verifiable by any agent here — outbound to `ownword.pro` is blocked from this
+sandbox — so it is recorded as the owner's report, not as evidence.
+
+**Continue from step 5.** Two cautions:
+
+- The `www` -> apex 308 (H-3) and the 404 fix (H-4) are in the repository but have not necessarily been
+  deployed. Step 6 below now checks for the redirect; if `www.ownword.pro` still serves the application, the
+  deploy has not run and the rest of this list is being checked against stale output.
+- Before requesting indexing for anything, re-run step 1's two checks against the live host. Requesting
+  indexing for a page the deploy has not published yet just records errors in Search Console.
 
 1. **Confirm the live files first.** In a browser (or `curl -I`), open `https://ownword.pro/robots.txt`. It
    must contain `Allow: /` and `Sitemap: https://ownword.pro/sitemap.xml`. Then open
@@ -491,94 +516,196 @@ just records errors in Search Console.
    and, under the rendered HTML, that the `Organization`, `WebSite` and `SoftwareApplication` JSON-LD are
    present. Then *Request indexing*. Repeat the inspection (without requesting indexing) for `/privacy` and
    `/terms`.
-6. **Check the `www` behavior.** Open `https://www.ownword.pro/`. Today it serves the application with
-   `Disallow: /` and `noindex` and no redirect (handoff H-3). Until that is fixed, do not link to, advertise,
-   or build links to any `www` URL.
+6. **Check the `www` behavior.** Open `https://www.ownword.pro/privacy?x=1` with redirects visible
+   (`curl -sSI` shows the status and `Location` without following). Expect **exactly one** hop: `308` with
+   `Location: https://ownword.pro/privacy?x=1`. That is the behavior in the repository as of this pass. If
+   you instead get a `200` with page content, the deploy carrying it has not run — do not link to, advertise,
+   or build links to any `www` URL until it has. While here, confirm `http://ownword.pro/` also reaches
+   `https://ownword.pro/` in one hop; that redirect is Cloudflare's *Always Use HTTPS*, not application code,
+   and nothing in this repository can assert it.
 7. **Bing Webmaster Tools.** Go to <https://www.bing.com/webmasters>, add `https://ownword.pro`, and use
    *Import from Google Search Console* (fastest, and it carries the verification across). If importing is
    declined, verify with the same DNS TXT method, then submit `https://ownword.pro/sitemap.xml`.
 8. **Record the outcome here.** Write the verification date, property type, and the URL counts each console
-   reports into this section, and only then move SEO-009 off *Open*. Also open Google's Rich Results Test
+   reports into this section, and only then move SEO-009 to *Done*. Also open Google's Rich Results Test
    (<https://search.google.com/test/rich-results>) against `https://ownword.pro/` and record that it reports
    zero errors for `Organization`, `WebSite`, and `SoftwareApplication` — that closes the live half of SEO-006.
 
-Do not request indexing for `/checkout/success`, `/history`, or any `/api/` URL. They are private by design.
+   Write what the console actually said, including the numbers. "Submitted" is not "Success, 3 URLs
+   discovered", and only the second one tells you a route did not regress.
 
-### 11.2 Crawl and render QA pass (SEO-020, 2026-08-25)
+Do not request indexing for `/signin`, `/checkout/success`, `/history`, or any `/api/` URL. They are private
+by design, and all of them are `noindex, nofollow, nocache` with no canonical.
 
-Method: every route that exists was rendered from the built Worker (`dist/server/index.js`) on
-`Host: ownword.pro` and on an off-canonical host, and the returned HTML was parsed for status, title,
-description, canonical, robots, OG/Twitter tags, H1 count, JSON-LD validity, and internal links.
+### 11.2 Crawl and render QA pass (SEO-020, second pass 2026-08-25)
 
-Fixed in this pass:
+**Method.** Every route that exists was rendered from the built Worker (`dist/server/index.js`) and the
+returned HTML parsed for status, title, description, canonical, robots, OG/Twitter tags, H1 count, JSON-LD
+validity, and internal links. Three host profiles were used: the canonical host (`ownword.pro`),
+`www.ownword.pro`, and an off-canonical host (`staging.ownword.pro`, plus `localhost`). Routes covered:
+`/`, `/privacy`, `/terms`, `/signin`, `/history`, `/checkout/success?job=...`, `/robots.txt`, `/sitemap.xml`,
+the trailing-slash variants `/privacy/`, `/terms/`, `/history/`, and three unknown paths
+(`/this-page-does-not-exist`, `/result/abc`, `/guides/not-written-yet`).
 
-- **Malformed robots directive on every indexable page.** Pages shipped `<meta name="robots" content="index,
-  follow, nonocache">`. Next serializes an explicit `nocache: false` as the literal token `nonocache`, which
-  no crawler defines. `nocache` is now emitted only when it is true.
-- **Canonical conflict on two private URLs.** `/history` and `/checkout/success` inherited the root layout's
-  self-canonical and so declared `https://ownword.pro` — the homepage — as their canonical, along with the
-  homepage's title and OG card. Both layouts now set `alternates: { canonical: null }`.
-- **Sitemap/route drift risk.** The sitemap kept its own hand-maintained list. It now derives from the same
-  registry the pages use, and a test fails the build if a sitemap URL does not return 200.
+**This is a rendered-HTML pass, not a live-site pass.** Outbound to `ownword.pro` is blocked from this
+sandbox. Nothing here is an observation of production; every statement is about the code in this repository
+as built. The live equivalents are owner actions O-1 and O-6.
 
-Open findings, all in files SEO does not own (see handoffs):
+#### Findings
 
-- ~~**Three dead sign-in links.**~~ **Fixed 2026-08-25.** All three now point at `/signin`, which exists,
-  is `noindex`, and is robots-disallowed. Re-verified after the auth work landed. (was H-1)
-- **The 404 page inherits the homepage canonical.** An unknown path correctly returns HTTP 404 and
-  `noindex`, but also emits `<link rel="canonical" href="https://ownword.pro">`. A genuine 404 should not
-  point at `/`. Needs an `app/not-found.tsx`. (H-4)
-- **`www.ownword.pro` is a bound custom domain with no redirect.** It serves the whole application under
-  `Disallow: /` and `noindex`. Fail-closed, so no duplicate content is indexed, but any link earned on a
-  `www` URL is wasted. (H-3)
+| # | Finding | Severity | State |
+|---|---|---|---|
+| F1 | A genuine 404 emitted `<link rel="canonical" href="https://ownword.pro">` along with the homepage title, description and social card. A canonical asserts that two URLs are the same page; a missing URL is not the homepage, and repeated across every stale link that is how a 404 gets folded into `/`. | High | **Fixed** — `app/not-found.tsx` |
+| F2 | `/signin`, `/history` and `/checkout/success` inherited the homepage's meta description and its whole Open Graph and Twitter card from the root layout, including `og:url` pointing at `https://ownword.pro`. A private URL pasted into a chat unfurled as the homepage. `/checkout/success` also wore the homepage `<title>` verbatim. | Medium | **Fixed** — `buildPrivateSurfaceMetadata()` |
+| F3 | `/signin`, `/history` and `/checkout/success` render **zero** `<h1>` elements; each opens its content with an `<h2>` inside `<main>`. Not an indexing problem (all three are `noindex`), but Section 6 requires one clear H1 per page for the document outline, and screen-reader users navigating by heading level find no top-level heading. | Low | **Open** — handoff H-7, DESIGN/COPY-owned |
+| F4 | The homepage's `SoftwareApplication` JSON-LD, `Offer` block included, is emitted on **every** host — it renders from `app/page.tsx`, a client component that cannot read the request `Host`. `Organization` and `WebSite` are correctly gated to the canonical host. Nothing is indexed off-host (those pages are `noindex`), but SEO-006's gating claim did not hold for this block and has been corrected. | Low | **Open** — blocked behind H-1 |
+| F5 | `www.ownword.pro` was a bound custom domain serving the entire application with no redirect. Fail-closed (`Disallow: /`, `noindex`), so nothing duplicate was ever indexed, but nothing consolidated either: a link or share on a `www` URL earned the apex nothing. | Medium | **Fixed in code** — 308 in `worker/index.ts`; live state unverified (O-6) |
 
-Verified clean: zero orphan indexable pages (`/privacy` and `/terms` are linked from the homepage footer and
-from each other; every sitemap URL is reachable); zero broken internal links between public pages; one H1 per
-public page; valid, parseable JSON-LD on every route that emits it; no private surface indexable; no customer
-text in any URL, title, canonical, sitemap entry, or OG tag.
+Findings fixed in the first pass and re-confirmed still fixed: the malformed `nonocache` robots directive;
+the `/history` and `/checkout/success` canonical conflict; sitemap/registry drift; the three dead
+`/signin-with-chatgpt` links (now `/signin`, which exists, returns 200, and is robots-disallowed).
 
-Not covered by this pass, and still open: Core Web Vitals / performance budgets (SEO-008) — they need field
-data or Lighthouse against the live host, not a rendered-HTML parse.
+#### Verified clean
+
+- **Status codes.** Every sitemap URL returns 200. Every unknown path returns a genuine 404, never a soft
+  200 — including one under a route prefix that exists (`/result/abc`).
+- **Redirects.** Trailing slashes normalize in one hop (`/privacy/`, `/terms/`, `/history/` -> 308 -> the
+  unslashed path). `www` -> apex is one hop, preserves path and query, and uses 308 so a `POST` body is not
+  dropped. Neighbouring hostnames (`staging.ownword.pro`, `wwwownword.pro`, `www.ownword.pro.example.com`)
+  are not redirected. A spoofed `x-forwarded-host: www.ownword.pro` on the apex does not start a loop.
+- **Host gate.** On `staging.ownword.pro` and `localhost` every page is `noindex, nofollow, nocache` with no
+  canonical, no `og:url` and no social image; robots.txt is `Disallow: /` with no `Sitemap:` line; the
+  sitemap is an empty `<urlset>`. This is the SEO-002 design, not a defect.
+- **Structured data.** Every JSON-LD block on every route parses. The site graph carries no `logo`,
+  `sameAs`, `aggregateRating`, `foundingDate`, `address` or `SearchAction`, and a test fails if one appears.
+- **Links and orphans.** Zero orphan indexable pages: `/privacy` and `/terms` are reachable from the
+  homepage footer, from each other, and now from the 404. Zero broken internal links between public pages —
+  every internal `href` on every rendered route resolves to a route that returns 200 or an intentional
+  redirect.
+- **Privacy.** No customer text in any URL, title, canonical, description, sitemap entry, social tag or
+  JSON-LD payload on any route, on any host.
+
+#### Known and accepted
+
+- **A 404 carries two `robots` meta tags.** The framework emits its own `<meta name="robots"
+  content="noindex">` and `app/not-found.tsx` adds `noindex, nofollow, nocache`. Crawlers combine multiple
+  robots tags and apply the most restrictive; both say `noindex`, so the combined directive is correct. The
+  framework's tag cannot be suppressed from application code. A test asserts every robots tag on a 404 says
+  `noindex`, so a future framework change that emitted `index` would fail the build.
+- **`/checkout/success` is both `Disallow`ed and `noindex`.** A crawler forbidden to fetch a page cannot read
+  its `noindex`, so the URL could in principle be indexed URL-only from an external link. It is reached only
+  through a Stripe redirect and carries no title or content claim, so `Disallow` is the stronger posture
+  here. `/history` takes the opposite trade deliberately: it stays crawlable so its `noindex` is readable,
+  and only `/history/` below it is disallowed.
+- **A 404 still emits the site-level `Organization`/`WebSite` graph** from the root layout. That graph
+  describes the site, not the page, and is valid on any URL of the site.
+
+#### Not covered by this pass
+
+Core Web Vitals and the performance budgets (SEO-008). They need field data or a Lighthouse run against the
+live host, not a rendered-HTML parse, and this session cannot reach it.
 
 ### 11.3 Handoffs — work SEO deliberately did not do
 
-Each of these is in a file another agent is actively editing (magic-link authentication). They are written up
-rather than done, on purpose. Pick them up once auth lands.
+Statuses below are as of 2026-08-25 (second pass). H-2, H-3 and H-4 are **done**; they are kept here with
+what was actually built, because the acceptance criteria in Sections 11 and 6 point at them.
 
-- **H-1 — Adopt the shared metadata helper in `app/page.tsx`.** The homepage's metadata currently comes from
-  the root layout via the `/` registry entry, which is correct but implicit. Once `app/page.tsx` is free,
-  give it `export async function generateMetadata()` returning
-  `buildPublicPageMetadata(publicPage("/"), readRequestHost(await headers()))`. The dead-link half of this
-  handoff is already done: `app/page.tsx` now links to `/signin`. Do not add a second `<h1>` — the CI gate
-  fails the build on it.
-- **H-2 — Adopt the shared host rule in `app/robots.txt/route.ts`.** It still carries its own copy of
-  `configuredSiteUrl()` + host normalization. Replace with `canonicalOrigin()` / `isCanonicalHost()` /
-  `normalizeHost()` from `src/lib/public-pages.ts`. Behavior must not change: off-host stays `Disallow: /`
-  with no `Sitemap:` line, and `tests/rendered-html.test.mjs` enforces that. While there, add the new
-  sign-in route to the `Disallow` list; note that `Disallow: /history/` does not cover `/history` itself,
-  which is intentional — a `noindex` page must stay crawlable for the `noindex` to be seen.
-- **H-3 — Redirect `www.ownword.pro` to the apex in one hop.** Either a Cloudflare Redirect Rule
-  (`http.host eq "www.ownword.pro"` -> `https://ownword.pro${http.request.uri.path}`, status 301, preserve
-  query string), or, in `worker/index.ts` before `handler.fetch`, a 308 to the apex when the request host
-  equals `www.` + `productConfig.domain`. Prefer 308 in the Worker if it is done in code: it preserves method
-  and body, so a POST to a webhook or API path is not silently downgraded to GET. Add a rendered test
-  asserting one hop and a `Location` on the apex.
-- **H-4 — Add `app/not-found.tsx`.** A real 404 page with one H1, a link back to `/`, no canonical
-  (`alternates: { canonical: null }`), and `robots: { index: false, follow: false }`. This is also a copy
-  surface, so COPY should own the words.
-- **H-6 — No new content page was published in this pass, on purpose.** The two safest candidates were
-  assessed and both fail today's evidence bar. `/how-it-works` would substantially restate the homepage's
-  existing `#how-it-works` section, and Section 3's decision rule requires at least 60% of a new page to
-  differ from the nearest existing one; Section 4 gates that split on experiment evidence that does not
-  exist yet. The Professional mode page (SEO-018) would have to describe mode behavior the deterministic
-  baseline does not have. A `/pricing` page was ruled out for the same near-duplicate reason. The first new
-  page worth building is one carrying evidence the product can actually back — the pattern diagnostic
-  (SEO-014) or the benchmark results (SEO-016) — not another description of the same claims.
+- **H-1 — Adopt the shared metadata helper in `app/page.tsx`. Not done, and not doable as written.**
+  `app/page.tsx` opens with `"use client"`. A client component cannot own route metadata. This was measured,
+  not assumed: adding `export async function generateMetadata()` to the file and building did **not** fail —
+  it silently emptied the homepage's entire head. Title, description, canonical, robots, Open Graph and
+  Twitter tags all disappeared from the rendered HTML. That is a worse failure mode than a build error,
+  because it ships.
 
-- **H-5 — Re-check the funnel copy once purchases can complete.** Section 9's preview-to-checkout and
-  checkout-to-paid KPIs are unmeasurable while sign-in is broken. When auth lands, confirm the events fire
-  end to end before any acquisition target is set against them.
+  Doing it properly means splitting the route: `app/page.tsx` becomes a small server component exporting
+  `generateMetadata()` and rendering a client component that holds the current 660 lines. Nothing about the
+  homepage's rendered metadata would change — it is already exactly
+  `buildPublicPageMetadata(publicPage("/"), host)`, supplied through the root layout — so the payoff is not
+  the homepage. The payoff is two other things: the root layout stops broadcasting the homepage's identity as
+  the site-wide default (this pass neutralized the symptom on every private surface, but the cause remains),
+  and the `SoftwareApplication` JSON-LD becomes host-gateable, closing finding F4.
 
+  **Why it was left.** Five tests read `app/page.tsx` *as source*, not as rendered output, and treat it as
+  the landing-copy surface: `tests/rendered-html.test.mjs` (centralized brand/pricing copy, and the em-dash
+  ban that scans the whole file), `tests/landing-activation.test.mts` (ACT-12/ACT-16), and
+  `tests/activation-blockers.test.mts` (ACT-09, ACT-10, twice). Moving the copy out of `app/page.tsx`
+  without moving every one of those guards to the new path would quietly disarm them. That is a coordinated
+  change across COPY's and ENG's files, and a design agent was live in the copy surfaces during this pass.
+  Do it as one commit that relocates the component **and** repoints all five tests, or not at all.
+
+- **H-2 — Adopt the shared host rule in `app/robots.txt/route.ts`. Done.** The route's private
+  `configuredSiteUrl()` and its own host normalization are gone; it now uses `canonicalOrigin()`,
+  `isCanonicalHost()` and `normalizeHost()` from `src/lib/public-pages.ts`. Output is unchanged on and off
+  the canonical host, and `tests/rendered-html.test.mjs` now pins both: the full `Allow`/`Disallow`/`Sitemap`
+  set on `ownword.pro`, and a bare `Disallow: /` with no `Sitemap:` line on three off-canonical hosts.
+  `/signin` was already in the `Disallow` list. `Disallow: /history/` still does not cover `/history` itself,
+  which remains intentional and is now asserted as such — a `noindex` a crawler may not fetch is a `noindex`
+  it never reads.
+
+- **H-3 — Redirect `www.ownword.pro` to the apex in one hop. Done in the Worker.** `worker/index.ts`
+  answers a request whose real `Host` is `www.` + `productConfig.domain` with a **308** to the apex,
+  preserving path, query and method, before anything else in the handler runs. 308 rather than 301 because a
+  301 permits a client to rewrite the method to `GET`, which would silently drop the body of a `POST` to
+  `/api/*` or to the Stripe webhook path. The decision reads the real `Host` and ignores `x-forwarded-host`,
+  so an inbound header claiming to be `www` cannot redirect the apex to itself forever.
+
+  **A Cloudflare Redirect Rule would also have been a defensible answer** — it is cheaper (no Worker
+  invocation) and it survives an application outage. It was not chosen because it is a dashboard change no
+  agent can make, review, or test, and because the Worker version can be asserted in CI, which it now is.
+  If the owner would rather move it to the edge later, delete `redirectWwwToApex()` and its two tests in the
+  same change as adding the rule — never run both.
+
+- **H-4 — Add `app/not-found.tsx`. Done.** A real 404 now returns HTTP 404 with one H1, links back to `/`,
+  `/privacy` and `/terms`, declares no canonical, and inherits none of the homepage's description or social
+  card. See the *Known and accepted* note in Section 11.2 about the duplicate framework `robots` tag. **The
+  words are placeholders owned by COPY**, not by SEO: they state only that the URL does not exist and offer
+  the routes that do.
+
+- **H-5 — Re-check the funnel copy once purchases can complete.** Still open. Section 9's
+  preview-to-checkout and checkout-to-paid KPIs are unmeasurable until a purchase has been observed end to
+  end on the production host. Sign-in shipping does not close this; a completed purchase does.
+
+- **H-6 — No new content page was published in this pass either, on purpose, and for the same reason.**
+  Re-examined and re-declined. The Professional mode page (SEO-018) would have to describe a distinct
+  professional workflow, but `src/lib/humanization/deterministic-provider.ts` still distinguishes
+  Professional from the other modes by exactly three regular-expression substitutions layered on a shared
+  table. A page claiming mode-specific quality would state something the engine cannot do, which Section 1
+  forbids outright. `/how-it-works` and `/pricing` remain near-duplicates of existing homepage sections and
+  fail Section 3's 60%-different rule. **This is not a backlog item waiting for writing time; it is waiting
+  for evidence.** The first new page worth building is one carrying evidence the product can actually back:
+  the pattern diagnostic (SEO-014) or the benchmark results (SEO-016).
+
+  A related copy constraint, recorded so nobody trips on it: sentence regeneration shipped server-side with
+  **no customer-facing UI**. Do not write page copy, metadata, or structured data implying a customer can
+  edit or regenerate an individual sentence today.
+
+- **H-7 — Give the three private surfaces a top-level heading. New, DESIGN/COPY-owned.** `/signin`,
+  `/history` and `/checkout/success` render zero `<h1>`; each opens with an `<h2>` inside `<main>` (finding
+  F3). Section 6 requires one clear H1 per page, and a screen-reader user navigating by heading level finds
+  no top-level heading on any of them. The fix is a one-element change per page, but the heading is visible
+  copy and those files are DESIGN's, so SEO did not make it. Note that the metadata gate in
+  `tests/metadata-contract.test.mjs` enforces exactly-one-H1 only for **sitemap** URLs; if these pages get
+  an H1, consider extending the private-surface test to hold them to it too.
+
+### 11.4 Owner actions index
+
+`O-*` IDs are referenced throughout Section 11. None of them can be closed by an agent: each needs a browser
+against the live host, a console login, or a Cloudflare dashboard. They are listed here so the references
+resolve, and so nobody mistakes one for engineering work that is merely unstarted.
+
+| ID | Owner action | Closes | Check that closes it |
+|---|---|---|---|
+| O-1 | Fetch `https://ownword.pro/robots.txt` and `https://ownword.pro/sitemap.xml` from a browser | Live half of SEO-002, SEO-004 | robots.txt shows `Allow: /` and the `Sitemap:` line; the sitemap lists exactly the three apex URLs, with `<lastmod>` on `/privacy` and `/terms` |
+| O-2 | Create and DNS-verify the Google Search Console **Domain** property, submit `sitemap.xml` | SEO-009 steps 2-4 | **Owner-reported done 2026-08-25.** Record the console's own words: *Success*, and the discovered-URL count |
+| O-3 | Live URL Inspection on `/`, `/privacy`, `/terms` | SEO-009 step 5 | *Indexing allowed = Yes*, user-declared canonical `https://ownword.pro`, JSON-LD present in the rendered HTML |
+| O-4 | Google Rich Results Test against `https://ownword.pro/` | Live half of SEO-006 | Zero errors for `Organization`, `WebSite`, `SoftwareApplication` |
+| O-5 | Bing Webmaster Tools property + sitemap submission | SEO-009 step 7 | **Owner-reported done 2026-08-25.** Record the property type and the discovered-URL count |
+| O-6 | Confirm host and protocol redirects on the live host | Live half of SEO-003 | `https://www.ownword.pro/privacy?x=1` returns **one** hop, `308`, `Location: https://ownword.pro/privacy?x=1`; `http://ownword.pro/` reaches `https://ownword.pro/` in one hop |
+| O-7 | Confirm one purchase completes end to end on production | H-5, and every conversion KPI in Section 9 | Sign-in against the real mailer, Checkout, paid rewrite, and the funnel events observed for all three |
+| O-8 | Lighthouse or field data against the live host | SEO-008 | p75 mobile LCP <= 2.5 s, INP <= 200 ms, CLS <= 0.1, or a dated exception with an owner |
+
+Record outcomes in Section 11.1 step 8 with the numbers the tool reported. "Submitted" is not "Success, 3
+URLs discovered", and only the second tells you a route did not regress.
 
 ## 12. Operating cadence and decision rules
 
@@ -609,8 +736,8 @@ Pause publishing and investigate when any of these occurs:
 
 | Risk / decision | Why it matters | V1 response |
 |---|---|---|
-| Sign-in exists but is unproven in production (updated 2026-08-25) | Magic-link sign-in shipped and the dead `/signin-with-chatgpt` links are gone, but no sign-in has completed against a real mailer on the production host, and checkout readiness is still failing there | Treat organic conversion targets as unmeasurable until one real purchase completes end to end. Do not publish page copy, ads, or measurement claims that assume a purchase can complete today |
-| `www.ownword.pro` is a bound custom domain with no redirect | It serves the whole application under `Disallow: /` and `noindex`, so it cannot be indexed (good) but also consolidates nothing (bad): any link earned on a `www` URL is wasted | One-hop 301/308 `www` -> apex (handoff H-3). Until then, never link to, advertise, or build links to a `www` URL |
+| No purchase has been evidenced end to end (updated 2026-08-25) | Magic-link sign-in shipped, `/signin` renders correctly, the dead `/signin-with-chatgpt` links are gone, and the owner reports the flow works in production. What no agent can evidence from this repository is a completed purchase: sign-in against a real mailer, then Checkout, then a paid rewrite | Treat organic conversion targets as unmeasurable until the owner confirms one real purchase completed end to end. Do not publish page copy, ads, or measurement claims that assume a measured conversion rate exists (handoff H-5) |
+| The `www` -> apex 308 is in the repository but its live state is unverified | `www.ownword.pro` is a bound custom domain. Until the deploy carrying `redirectWwwToApex()` runs, `www` still serves the whole application under `Disallow: /` and `noindex`: not indexable (good), but consolidating nothing (bad), so any link earned on a `www` URL stays wasted | Owner action O-6: confirm one 308 hop to the apex on the live host (Section 11.1, step 6). Until that is confirmed, still never link to, advertise, or build links to a `www` URL |
 | Competitive query space is spam-heavy | Pressure toward bypass claims and manufactured backlinks | Differentiate with meaning protection, original benchmark evidence, and strict claim/link rules |
 | “Academic humanizer” can imply misconduct | Legal, trust, institution, and reputation exposure | Frame as revision support; visible integrity language; exclude evasion keywords |
 | Benchmark may not yet support public claims | Weak evidence can damage trust and invite misleading marketing | Publish methods/limitations first; no performance superlatives until data is reproducible |
@@ -618,7 +745,7 @@ Pause publishing and investigate when any of these occurs:
 | Indexable user results can leak sensitive writing | Severe privacy and security harm | Private-by-default result architecture, noindex, access controls, and automated crawl tests |
 | Mass content is tempting for this category | Doorway/scaled-content penalties and brand dilution | Enforce query-to-page rule, velocity caps, and pruning cadence |
 | AI referral reporting is incomplete across platforms | GEO performance can be overclaimed | Use Search Console's available reporting, referrer data, third-party citation logs, and clearly label inference |
-| `billingEnabled` is `true` and paid schema is emitted while sign-in is broken | The markup truthfully reflects the configured catalog and the visible price, but a crawler-visible `Offer` implies a purchase path a customer cannot currently walk to the end | Keep checkout readiness fail-closed; re-validate the live catalog, Stripe binding, and visible price the moment auth lands, and before any acquisition spend |
+| `billingEnabled` is `true` and a priced `Offer` is emitted before any purchase has been evidenced | The markup truthfully reflects the configured catalog and the visible price, but a crawler-visible `Offer` implies a purchase path nobody has yet watched a customer walk to the end. The `SoftwareApplication` block carrying it is also emitted on non-canonical hosts (finding F4), where those pages are `noindex` | Keep checkout readiness fail-closed; re-validate the live catalog, Stripe binding, and visible price before any acquisition spend; host-gate the block when H-1 unblocks it |
 | `/privacy` and `/terms` contain substantive terms but are explicitly not counsel-approved | Complete-looking draft language can be mistaken for legal release approval | Treat M4-03 as a release blocker; LEGAL must approve processor, retention/deletion, subscription, cancellation/refund, and prohibited-claim disclosures before real customer charges |
 
 ## 14. Reference policy baseline
