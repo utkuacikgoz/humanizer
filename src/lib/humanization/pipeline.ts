@@ -2,6 +2,7 @@ import { analyzeWriting } from "./analysis";
 import { DeterministicHumanizationProvider } from "./deterministic-provider";
 import { DeterministicEvaluationProvider } from "./evaluation";
 import { extractProtectedContent } from "./protected-content";
+import { ProviderError } from "./provider-error";
 import { countWords } from "./text";
 import type {
   EvaluationProvider,
@@ -10,6 +11,7 @@ import type {
   HumanizationProvider,
   HumanizationResult,
   HumanizeInput,
+  ProviderUsage,
   UsageMetrics,
   VerificationIssue,
   VerificationProvider,
@@ -34,6 +36,26 @@ function awaitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<
       },
     );
   });
+}
+
+/**
+ * Combines the caller's signal with a per-attempt deadline.
+ *
+ * The caller's signal bounds the whole request. Without this, a provider that
+ * hangs on attempt one consumes the entire budget and the retries the config
+ * paid for never happen.
+ */
+/**
+ * The pipeline awaits on this signal rather than the caller's, so a provider
+ * that never looks at the signal it was handed still cannot outlive the
+ * deadline. When no deadline is configured this IS the caller's signal, which
+ * is the deterministic provider's situation and the historical behaviour.
+ */
+function attemptSignal(signal: AbortSignal | undefined, timeoutMs: number | undefined): AbortSignal | undefined {
+  if (!timeoutMs) return signal;
+  const deadline = AbortSignal.timeout(timeoutMs);
+  if (!signal) return deadline;
+  return typeof AbortSignal.any === "function" ? AbortSignal.any([signal, deadline]) : signal;
 }
 
 /**
@@ -64,6 +86,23 @@ export interface HumanizationPipelineDependencies {
   config?: Partial<Omit<HumanizationConfig, "thresholds">> & {
     thresholds?: Partial<HumanizationConfig["thresholds"]>;
   };
+}
+
+interface UsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  providerCostUsd: number;
+  models: Set<string>;
+}
+
+function accumulate(totals: UsageTotals, usage: ProviderUsage | undefined): void {
+  if (!usage) return;
+  totals.inputTokens += usage.inputTokens ?? 0;
+  totals.outputTokens += usage.outputTokens ?? 0;
+  totals.cachedInputTokens += usage.cachedInputTokens ?? 0;
+  totals.providerCostUsd += usage.costUsd ?? 0;
+  if (usage.model) totals.models.add(usage.model);
 }
 
 export class HumanizationFailedError extends Error {
@@ -119,6 +158,7 @@ export class HumanizationPipeline {
     let attemptedWords = 0;
     let estimatedTokens = 0;
     let estimatedCostUsd = 0;
+    const totals: UsageTotals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, providerCostUsd: 0, models: new Set() };
     let previousFailures: VerificationIssue[] = [];
     let lastVerification: VerificationResult | undefined;
     let lastEvaluation: EvaluationResult | undefined;
@@ -126,6 +166,7 @@ export class HumanizationPipeline {
     for (let attempt = 1; attempt <= this.config.maxRetries + 1; attempt += 1) {
       attemptedWords += wordCount;
       try {
+        const callSignal = attemptSignal(input.signal, this.config.providerTimeoutMs);
         const rewrite = await awaitWithSignal(this.humanizationProvider.rewrite({
           text: original,
           mode,
@@ -133,21 +174,24 @@ export class HumanizationPipeline {
           analysis,
           attempt,
           previousFailures,
-          signal: input.signal,
-        }), input.signal);
+          signal: callSignal,
+        }), callSignal);
         input.signal?.throwIfAborted();
         estimatedTokens += rewrite.estimatedTokens ?? 0;
         estimatedCostUsd += rewrite.estimatedCostUsd ?? 0;
+        accumulate(totals, rewrite.usage);
         lastVerification = await awaitWithSignal(
-          this.verificationProvider.verify({ original, candidate: rewrite.text, protectedContent, signal: input.signal }),
-          input.signal,
+          this.verificationProvider.verify({ original, candidate: rewrite.text, protectedContent, signal: callSignal }),
+          callSignal,
         );
         input.signal?.throwIfAborted();
+        accumulate(totals, lastVerification.usage);
         const candidateAnalysis = analyzeWriting(rewrite.text);
         lastEvaluation = await awaitWithSignal(this.evaluationProvider.evaluate(
-          { original, candidate: rewrite.text, mode, originalAnalysis: analysis, candidateAnalysis, verification: lastVerification, signal: input.signal },
+          { original, candidate: rewrite.text, mode, originalAnalysis: analysis, candidateAnalysis, verification: lastVerification, signal: callSignal },
           this.config.thresholds,
-        ), input.signal);
+        ), callSignal);
+        accumulate(totals, lastEvaluation.usage);
 
         if (lastVerification.passed && lastEvaluation.passed) {
           return {
@@ -166,8 +210,18 @@ export class HumanizationPipeline {
               latencyMs: Number((performance.now() - startedAt).toFixed(2)),
               estimatedTokens,
               estimatedCostUsd: Number(estimatedCostUsd.toFixed(8)),
+              inputTokens: totals.inputTokens,
+              outputTokens: totals.outputTokens,
+              cachedInputTokens: totals.cachedInputTokens,
+              providerCostUsd: Number(totals.providerCostUsd.toFixed(8)),
             },
             improvements: Math.max(0, analysis.issues.length - candidateAnalysis.issues.length),
+            providers: {
+              humanization: this.humanizationProvider.name,
+              verification: this.verificationProvider.name,
+              evaluation: this.evaluationProvider.name,
+              models: [...totals.models],
+            },
           };
         }
         previousFailures = lastVerification.issues.length
@@ -175,6 +229,19 @@ export class HumanizationPipeline {
           : lastEvaluation.failedThresholds.map((threshold) => ({ kind: "changed-meaning" as const, message: `Candidate missed the ${threshold} quality threshold.` }));
       } catch (error) {
         if (input.signal?.aborted) throw error;
+        // A candidate that failed verification is worth another sample. A
+        // provider that rejected the request outright is not: retrying a 400
+        // or a refusal buys the same answer at the same price. Only a
+        // ProviderError can say which it is, so anything else keeps the
+        // historical retry behaviour.
+        if (error instanceof ProviderError && !error.retryable) {
+          throw new HumanizationFailedError(
+            `The ${this.humanizationProvider.name} provider rejected the request (${error.kind}).`,
+            this.usageMetrics(attemptedWords, attempt, startedAt, estimatedTokens, estimatedCostUsd, totals),
+            lastVerification,
+            lastEvaluation,
+          );
+        }
         previousFailures = [{ kind: "changed-meaning", message: error instanceof Error ? error.message : "Rewrite provider failed." }];
       }
     }
@@ -182,18 +249,33 @@ export class HumanizationPipeline {
     const attempts = this.config.maxRetries + 1;
     throw new HumanizationFailedError(
       "No candidate passed semantic verification and the configured quality thresholds.",
-      {
-        attemptedWords,
-        successfulWords: 0,
-        attempts,
-        retries: Math.max(0, attempts - 1),
-        latencyMs: Number((performance.now() - startedAt).toFixed(2)),
-        estimatedTokens,
-        estimatedCostUsd: Number(estimatedCostUsd.toFixed(8)),
-      },
+      this.usageMetrics(attemptedWords, attempts, startedAt, estimatedTokens, estimatedCostUsd, totals),
       lastVerification,
       lastEvaluation,
     );
+  }
+
+  private usageMetrics(
+    attemptedWords: number,
+    attempts: number,
+    startedAt: number,
+    estimatedTokens: number,
+    estimatedCostUsd: number,
+    totals: UsageTotals,
+  ): UsageMetrics {
+    return {
+      attemptedWords,
+      successfulWords: 0,
+      attempts,
+      retries: Math.max(0, attempts - 1),
+      latencyMs: Number((performance.now() - startedAt).toFixed(2)),
+      estimatedTokens,
+      estimatedCostUsd: Number(estimatedCostUsd.toFixed(8)),
+      inputTokens: totals.inputTokens,
+      outputTokens: totals.outputTokens,
+      cachedInputTokens: totals.cachedInputTokens,
+      providerCostUsd: Number(totals.providerCostUsd.toFixed(8)),
+    };
   }
 }
 
