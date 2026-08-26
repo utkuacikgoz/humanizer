@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import { POST as humanize } from "../app/api/humanize/route";
 import { SAMPLE_TEXT } from "../src/config/sample";
-import { resolveBillingReadiness } from "../src/lib/billing-readiness";
+import {
+  BILLING_READINESS_FAILURE_TTL_MS,
+  BILLING_READINESS_TTL_MS,
+  resetBillingReadinessCacheForTests,
+  resolveBillingReadiness,
+  resolveCachedBillingReadiness,
+} from "../src/lib/billing-readiness";
 
 test("ACT-06: the shipped sample demonstrates real edits and protected facts", async () => {
   const response = await humanize(new Request("http://localhost/api/humanize", {
@@ -55,4 +62,64 @@ test("ACT-12 and ACT-16: landing source encodes one-click sample and separates a
   assert.match(source, /submissionInFlight\.current/);
   assert.match(source, /track\("repeat_preview", \{ source: "anonymous_preview" \}\)/);
   assert.doesNotMatch(source, /track\("second_humanization"\)/);
+});
+
+// ---------------------------------------------------------------------
+// SEC-18 — the readiness probe was an unauthenticated Stripe amplifier
+// ---------------------------------------------------------------------
+
+test("SEC-18: a flood of anonymous requests drives one probe, not one each", async () => {
+  resetBillingReadinessCacheForTests();
+  let probes = 0;
+  let clock = 1_000;
+  const probe = async () => { probes += 1; };
+
+  // The proven ratio was 1:1 — one Stripe read per configured plan per
+  // anonymous request, which makes exhausting Stripe's read limit a one-line
+  // loop and the resulting outage a customer-visible "checkout unavailable".
+  for (let call = 0; call < 50; call += 1) {
+    const verdict = await resolveCachedBillingReadiness(probe, () => clock);
+    assert.equal(verdict.available, true);
+  }
+  assert.equal(probes, 1, `50 requests must not be 50 Stripe reads, got ${probes}`);
+
+  // A concurrent burst collapses onto one probe too, not one per miss.
+  resetBillingReadinessCacheForTests();
+  probes = 0;
+  await Promise.all(Array.from({ length: 20 }, () => resolveCachedBillingReadiness(probe, () => clock)));
+  assert.equal(probes, 1, `a concurrent burst must not fan out, got ${probes}`);
+
+  // And the memo expires, so this is a bound rather than a permanent answer.
+  clock += BILLING_READINESS_TTL_MS + 1;
+  await resolveCachedBillingReadiness(probe, () => clock);
+  assert.equal(probes, 2);
+  resetBillingReadinessCacheForTests();
+});
+
+test("SEC-18: a closed verdict is held briefly, so a fixed misconfiguration recovers", async () => {
+  resetBillingReadinessCacheForTests();
+  let clock = 1_000;
+  let broken = true;
+  const probe = async () => { if (broken) throw new Error("price mismatch"); };
+
+  assert.equal((await resolveCachedBillingReadiness(probe, () => clock)).available, false);
+  broken = false;
+  // Still closed inside the short failure window.
+  assert.equal((await resolveCachedBillingReadiness(probe, () => clock)).available, false);
+  // A closed verdict must not be cached for the long TTL: that would turn an
+  // operator's fix into a wait, which is the same outage this finding is about.
+  assert.ok(BILLING_READINESS_FAILURE_TTL_MS < BILLING_READINESS_TTL_MS);
+
+  clock += BILLING_READINESS_FAILURE_TTL_MS + 1;
+  assert.equal((await resolveCachedBillingReadiness(probe, () => clock)).available, true);
+  resetBillingReadinessCacheForTests();
+});
+
+test("SEC-18: the temporary Stripe diagnostic block is gone", async () => {
+  const route = await readFile(new URL("../app/api/billing/readiness/route.ts", import.meta.url), "utf8");
+  const code = route.replace(/^\s*\/\/.*$/gm, ""); // the removal is described in a comment; the code must not do it
+  assert.doesNotMatch(code, /stripe-diagnostic/, "the per-stage logging was also a log-volume amplifier");
+  assert.doesNotMatch(code, /console\.log/);
+  assert.doesNotMatch(code, /describeKey|resolveStripeConfig/, "key and config shape must not be reported at all");
+  assert.match(code, /resolveCachedBillingReadiness/, "the route must use the memoized probe");
 });

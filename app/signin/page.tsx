@@ -13,10 +13,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { productConfig } from "@/src/config/product";
+import { safeRelativeReturnPath } from "@/src/lib/identity";
+import { useSessionState } from "@/src/components/account-indicator";
 
 type Status = "idle" | "working" | "sent" | "error";
-/** Unknown until /api/auth/session answers; the cookie is HttpOnly, so the page has to ask. */
-type SessionState = { kind: "unknown" } | { kind: "signed-out" } | { kind: "signed-in"; email: string };
 
 // The query string is read through useSyncExternalStore rather than an effect,
 // the same way app/checkout/success/page.tsx reads its job id: the server
@@ -29,13 +29,21 @@ const readReturnTo = () => readQuery("return_to");
 const readLinkError = () => readQuery("error");
 
 /**
- * Convenience only. The server re-checks this with the same
- * safeRelativeReturnPath every other path uses (src/lib/identity.ts), so a
- * hostile value here cannot become a redirect off this site.
+ * SEC-21. This used to be a local `startsWith("/") && !startsWith("//")`
+ * re-implementation, described as convenience because the server re-checks
+ * the value. The server does — but this result is also rendered directly as
+ * `<Link href={returnTo}>Continue</Link>`, which the server never sees, and
+ * the local copy was strictly weaker than the real one: `/\evil.test`,
+ * `/\t/evil.test`, `/\n/evil.test` and `/\\evil.test` all survived it, and
+ * the WHATWG URL parser normalizes every one of them to
+ * `https://evil.test` — a one-click phishing hop wearing this site's name.
+ *
+ * There is exactly one copy of this check now, and it is the server's.
+ * `src/lib/identity.ts` is free of `next/*` and `cloudflare:workers` imports
+ * specifically so client code can call it, which is what its own doc comment
+ * always claimed.
  */
-function safeReturnTo(value: string | null): string {
-  return value && value.startsWith("/") && !value.startsWith("//") ? value : "/";
-}
+const safeReturnTo = (value: string | null): string => safeRelativeReturnPath(value ?? "/");
 
 export default function SignInPage() {
   const [email, setEmail] = useState("");
@@ -47,31 +55,16 @@ export default function SignInPage() {
   const serviceUnavailable = linkError === "unavailable";
   const [dismissedLinkError, setDismissedLinkError] = useState(false);
   const linkFailed = linkErrored && !dismissedLinkError;
-  const [session, setSession] = useState<SessionState>({ kind: "unknown" });
+  // One implementation of "who is signed in", shared with the header
+  // indicator every other surface now carries. Two copies of this fetch is
+  // how the two states drift.
+  const session = useSessionState();
   // Re-entrancy guard. The submit control stays focusable and uses
   // aria-disabled, so this ref is the only thing stopping a second submit; a
   // button that disables itself on click strands keyboard users mid-flow.
   const busy = useRef(false);
 
   useEffect(() => { document.documentElement.classList.add("motion-ready"); }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function readSession() {
-      try {
-        const response = await fetch("/api/auth/session", { cache: "no-store" });
-        const body = (await response.json().catch(() => ({}))) as { signedIn?: boolean; email?: string };
-        if (cancelled) return;
-        // A failed lookup leaves the state unknown rather than claiming
-        // signed-out, which would offer to mail a link to someone who is
-        // already signed in.
-        if (!response.ok) return;
-        setSession(body.signedIn && body.email ? { kind: "signed-in", email: body.email } : { kind: "signed-out" });
-      } catch { /* leave the state unknown */ }
-    }
-    void readSession();
-    return () => { cancelled = true; };
-  }, []);
 
   async function requestLink(event: React.FormEvent) {
     event.preventDefault();

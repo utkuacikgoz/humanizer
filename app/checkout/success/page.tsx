@@ -9,6 +9,7 @@ import { ManageBilling } from "@/src/components/manage-billing";
 import { MarkedText, describeMarks, diffRewrite, selectDisplayFacts } from "@/src/components/rewrite-marks";
 import { improvementLabel } from "@/src/lib/preview-projection";
 import { track } from "@/src/lib/analytics";
+import { AccountIndicator } from "@/src/components/account-indicator";
 
 type UnlockedResult = {
   original: string;
@@ -120,6 +121,12 @@ export default function CheckoutSuccessPage() {
         <Link className="brand" href="/" aria-label={`${productConfig.productName} home`}>
           <span>{productConfig.productName}</span>
         </Link>
+        {/* SEC-17: this page had no nav at all, so the surface a customer
+            reaches straight after paying said nothing about which account was
+            charged or which account the rewrite was saved to. */}
+        <nav aria-label="Primary navigation">
+          <AccountIndicator />
+        </nav>
       </header>
 
       <div className="stage stage-single">
