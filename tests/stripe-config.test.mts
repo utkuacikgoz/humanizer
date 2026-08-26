@@ -12,18 +12,26 @@ import {
   stripeModeFromSecretKey,
   validateStripeConfig,
 } from "../src/lib/stripe-config";
+import { STRIPE_PRICE_ENV_KEYS } from "../src/config/stripe";
 
+// Price keys are derived from the catalog rather than listed, so adding a
+// purchasable plan cannot leave this fixture describing an environment that
+// validateStripeConfig would reject.
+const PRICE_ENV_KEYS = Object.values(STRIPE_PRICE_ENV_KEYS);
 const VALID = {
   STRIPE_SECRET_KEY: "sk_test_51AbCdEf",
   STRIPE_WEBHOOK_SECRET: "whsec_abc123",
-  STRIPE_PRICE_STARTER: "price_123",
+  ...Object.fromEntries(PRICE_ENV_KEYS.map((key, index) => [key, `price_12${index}`])),
 };
 
 test("accepts a fully configured test environment and reports its mode", () => {
   const config = validateStripeConfig({ ...VALID });
   assert.equal(config.mode, "test");
   assert.equal(config.livemode, false);
-  assert.equal(config.priceIds.starter, "price_123");
+  assert.equal(config.priceIds.starter, "price_120");
+  for (const planId of Object.keys(STRIPE_PRICE_ENV_KEYS)) {
+    assert.ok(config.priceIds[planId as keyof typeof config.priceIds], `${planId} must resolve a price id`);
+  }
 });
 
 test("reports live mode for a live secret key", () => {
@@ -42,7 +50,7 @@ test("fails closed when nothing is configured, naming every missing key", () => 
     () => validateStripeConfig({}),
     (error: unknown) => {
       assert.ok(error instanceof StripeNotConfiguredError);
-      for (const key of ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_STARTER"]) {
+      for (const key of ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", ...PRICE_ENV_KEYS]) {
         assert.match(error.message, new RegExp(key));
       }
       return true;
