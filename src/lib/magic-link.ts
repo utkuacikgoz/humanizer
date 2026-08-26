@@ -98,6 +98,35 @@ export const MAGIC_LINK_LIMITS = {
   perClientVerify: 30,
 } as const;
 
+// SEC-23, recorded rather than fixed, deliberately.
+//
+// The finding: the per-address bound is an activity oracle. A stranger who
+// spends five requests on one address and watches where the 429 lands can
+// distinguish an address someone else has recently signed in with from a
+// quiet one. It leaks recent activity, not registration — requesting a link
+// still never reads the users table — and it costs the prober five pieces of
+// mail into the victim's inbox to learn it.
+//
+// It did not fall out of the SEC-19 work, and the obvious fix is worse than
+// the finding. Making the address bound indistinguishable means answering a
+// throttled request with the same 200 and the same LINK_SENT_MESSAGE as an
+// accepted one, for mail that was not sent. That is precisely the behaviour
+// this module's header calls out as the failure mode it exists to prevent:
+// "It never returns 'check your inbox' for mail that was never sent." Trading
+// a Low-severity activity oracle for a documented lie to the customer about
+// whether their link is coming is not a good trade, and the customer affected
+// by the lie is the one being mail-bombed.
+//
+// Worth stating honestly: SEC-19's inbox bucket slightly widens this. An
+// alias now shares a budget with the base address, so the oracle answers for
+// an inbox rather than for one spelling of it. That is the cost of closing a
+// 3x mail-bomb hole, and it is the right way round.
+//
+// If it is ever fixed, the shape is a per-CLIENT probe budget that refuses
+// before the address bucket is consulted at all, so a stranger cannot spend
+// enough requests to read the pattern. That is a real piece of work, not a
+// line, and it belongs with SEC-19's follow-up rather than here.
+
 const NO_STORE = { "cache-control": "no-store" } as const;
 
 /**
