@@ -55,7 +55,7 @@ const TOUCH_INTERVAL_MS = 15 * 60 * 1000;
 
 export async function insertMagicLinkToken(
   db: AppDatabase,
-  input: { tokenDigest: string; email: string; issuedAt: Date; expiresAt: Date },
+  input: { tokenDigest: string; email: string; issuedAt: Date; expiresAt: Date; browserNonceDigest?: string | null },
 ): Promise<void> {
   await db.insert(authMagicLinkTokens).values({
     id: crypto.randomUUID(),
@@ -63,7 +63,93 @@ export async function insertMagicLinkToken(
     email: input.email,
     createdAt: input.issuedAt,
     expiresAt: input.expiresAt,
+    // SEC-17: the digest of the nonce cookie set on the requesting browser,
+    // never the nonce. Null when the request could not carry one (plain http
+    // on a non-dev host), which makes one-click redemption impossible for
+    // that link rather than making it unauthenticated.
+    browserNonceDigest: input.browserNonceDigest ?? null,
   });
+}
+
+/**
+ * SEC-17. Single-use redemption that ALSO requires the presented nonce to
+ * match the one stored against the row — that is, requires this to be the
+ * browser that asked for the link.
+ *
+ * One guarded UPDATE, decided by rows-affected, exactly like
+ * `consumeMagicLinkToken`: the nonce test lives in the WHERE clause rather
+ * than in a read followed by a write, so two concurrent redemptions cannot
+ * both observe an unconsumed row, and a stored digest is never read back out
+ * and string-compared against anything.
+ *
+ * It records no failed attempt. A nonce mismatch is not evidence of
+ * link-guessing — it is the ordinary case of opening the link on a phone —
+ * and the caller answers it with a confirmation step, not a refusal.
+ */
+export async function consumeMagicLinkTokenForBrowser(
+  db: AppDatabase,
+  input: { tokenDigest: string; nonceDigest: string; now: Date },
+): Promise<{ email: string } | null> {
+  const consumed = await db
+    .update(authMagicLinkTokens)
+    .set({ consumedAt: input.now, attemptCount: sql`${authMagicLinkTokens.attemptCount} + 1` })
+    .where(and(
+      eq(authMagicLinkTokens.tokenDigest, input.tokenDigest),
+      isNull(authMagicLinkTokens.consumedAt),
+      gt(authMagicLinkTokens.expiresAt, input.now),
+      eq(authMagicLinkTokens.browserNonceDigest, input.nonceDigest),
+    ));
+  if (rowsChanged(consumed) !== 1) return null;
+
+  const [row] = await db
+    .select({ email: authMagicLinkTokens.email })
+    .from(authMagicLinkTokens)
+    .where(eq(authMagicLinkTokens.tokenDigest, input.tokenDigest))
+    .limit(1);
+  return row ? { email: row.email } : null;
+}
+
+/**
+ * Records a redemption attempt against a digest that did not redeem.
+ *
+ * Split out of `consumeMagicLinkToken`'s fallback so the GET path can count an
+ * attempt exactly once, on the branch where it knows the link is dead. It is
+ * deliberately a no-op for a digest that was never issued: it creates no row
+ * an attacker can probe for, and it changes nothing the caller is told.
+ */
+export async function recordMagicLinkAttempt(db: AppDatabase, tokenDigest: string): Promise<void> {
+  await db
+    .update(authMagicLinkTokens)
+    .set({ attemptCount: sql`${authMagicLinkTokens.attemptCount} + 1` })
+    .where(eq(authMagicLinkTokens.tokenDigest, tokenDigest));
+}
+
+/**
+ * The address a still-live link would sign someone in as, or null.
+ *
+ * Read-only and deliberately so: it decides which PAGE to render, never
+ * whether a session is created. The single-use decision stays where it has
+ * always been — one guarded write, either `consumeMagicLinkTokenForBrowser`
+ * on the one-click path or `consumeMagicLinkToken` on the confirmed POST — so
+ * this is not the read half of a read-then-write.
+ *
+ * Expired, spent, and never-issued all return null, so the failure the caller
+ * renders stays the single indistinguishable one.
+ */
+export async function findRedeemableMagicLinkToken(
+  db: AppDatabase,
+  input: { tokenDigest: string; now: Date },
+): Promise<{ email: string } | null> {
+  const [row] = await db
+    .select({ email: authMagicLinkTokens.email })
+    .from(authMagicLinkTokens)
+    .where(and(
+      eq(authMagicLinkTokens.tokenDigest, input.tokenDigest),
+      isNull(authMagicLinkTokens.consumedAt),
+      gt(authMagicLinkTokens.expiresAt, input.now),
+    ))
+    .limit(1);
+  return row ? { email: row.email } : null;
 }
 
 /**

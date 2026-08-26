@@ -1,0 +1,1 @@
+ALTER TABLE `auth_magic_link_tokens` ADD `browser_nonce_digest` text;

@@ -52,6 +52,31 @@ const DEV_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 export const SESSION_COOKIE = "__Host-ownword_session";
 export const DEV_SESSION_COOKIE = "ownword_session";
 
+/**
+ * SEC-17. The link nonce: what binds a sign-in link to the browser that
+ * asked for it.
+ *
+ * `SameSite=Lax` is what makes the session cookie a login-CSRF problem in the
+ * first place — it deliberately permits top-level GET navigation, which is
+ * exactly what opening an emailed link is — and it is also, unavoidably, what
+ * this cookie needs. A `Strict` cookie is withheld on a navigation that
+ * originates outside the site, and every click from a mail client is one, so
+ * `Strict` here would mean the nonce never arrives and NOBODY ever redeems in
+ * one click.
+ *
+ * `Lax` does not weaken the binding. An attacker's forged navigation carries
+ * the VICTIM's nonce cookie, and the victim's nonce does not match the digest
+ * stored against the attacker's token row. What the cookie proves is not
+ * "this navigation was same-site" but "this browser is the one that asked",
+ * and that is the property the attack needs to be missing.
+ *
+ * Two names for the same reason the session cookie has two: `__Host-` requires
+ * Secure, and Secure cookies are not set over plain http, so a http://localhost
+ * dev server would never receive one.
+ */
+export const LINK_NONCE_COOKIE = "__Host-ownword_link";
+export const DEV_LINK_NONCE_COOKIE = "ownword_link";
+
 /** 30 days. Long enough not to nag a paying customer, short enough that a stolen cookie is not forever. */
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -245,6 +270,45 @@ export function clearedSessionCookies(request: Request): string[] {
   return cookies;
 }
 
+/**
+ * Reads the link nonce this browser presented, or null.
+ *
+ * Same host gate and same two-name rule as the session cookie, so there is no
+ * path that reads a nonce on a host this app does not claim.
+ */
+export function readLinkNonceCookie(source: Request | Headers): string | null {
+  if (!isTrustedIdentityHost(source)) return null;
+  const headers = source instanceof Headers ? source : source.headers;
+  const jar = parseCookieHeader(headers.get("cookie"));
+  const prefixed = jar.get(LINK_NONCE_COOKIE);
+  if (prefixed) return prefixed;
+  return isDevHost(source) ? jar.get(DEV_LINK_NONCE_COOKIE) ?? null : null;
+}
+
+/**
+ * Builds the nonce Set-Cookie, or null when this request cannot carry one
+ * safely. Null is never "set it without Secure": the caller mails the link
+ * anyway and the redemption falls through to the confirmation step, which is
+ * the safe outcome rather than the broken one.
+ */
+export function buildLinkNonceCookie(request: Request, rawNonce: string, maxAgeSeconds: number): string | null {
+  if (isSecureRequest(request)) {
+    return `${LINK_NONCE_COOKIE}=${rawNonce}; ${BASE_FLAGS}; Secure; Max-Age=${maxAgeSeconds}`;
+  }
+  if (isDevHost(request)) {
+    return `${DEV_LINK_NONCE_COOKIE}=${rawNonce}; ${BASE_FLAGS}; Max-Age=${maxAgeSeconds}`;
+  }
+  return null;
+}
+
+/** Cleared on every completed sign-in: a nonce outliving the link it bound is a credential with no purpose. */
+export function clearedLinkNonceCookies(request: Request): string[] {
+  const expired = "Max-Age=0";
+  const cookies = [`${LINK_NONCE_COOKIE}=; ${BASE_FLAGS}; Secure; ${expired}`];
+  if (isDevHost(request)) cookies.push(`${DEV_LINK_NONCE_COOKIE}=; ${BASE_FLAGS}; ${expired}`);
+  return cookies;
+}
+
 // ---------------------------------------------------------------------------
 // Tokens
 // ---------------------------------------------------------------------------
@@ -328,6 +392,29 @@ export function isCrossSiteRequest(request: Request): boolean {
     return new URL(origin).host.toLowerCase() !== new URL(request.url).host.toLowerCase();
   } catch {
     return true;
+  }
+}
+
+/**
+ * The strict form of the check above: the Origin must be present AND name
+ * this site. `isCrossSiteRequest` lets a missing Origin through, because
+ * non-browser callers send none and the session cookie's `SameSite=Lax` is
+ * the primary control on those routes.
+ *
+ * The sign-in confirmation POST cannot borrow that reasoning. It carries no
+ * session cookie by construction — it is the request that CREATES one — so
+ * `SameSite` protects nothing there and the Origin is the only control left.
+ * A missing Origin is therefore refused rather than allowed: every browser
+ * sends one on a form POST, so the only callers this turns away are the ones
+ * that have no business redeeming a sign-in link.
+ */
+export function isSameOriginRequest(request: Request): boolean {
+  const origin = request.headers.get("origin");
+  if (!origin || origin === "null") return false;
+  try {
+    return new URL(origin).host.toLowerCase() === new URL(request.url).host.toLowerCase();
+  } catch {
+    return false;
   }
 }
 

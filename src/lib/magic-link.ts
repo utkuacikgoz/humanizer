@@ -29,16 +29,20 @@ import { productConfig } from "@/src/config/product";
 import type { EmailSender } from "@/src/lib/email-sender";
 import { EmailDeliveryError } from "@/src/lib/email-sender";
 import {
+  buildLinkNonceCookie,
   buildSessionCookie,
+  clearedLinkNonceCookies,
   clearedSessionCookies,
   digestToken,
   emailSubject,
   isCrossSiteRequest,
   isDevHost,
+  isSameOriginRequest,
   isSecureRequest,
   isTrustedIdentityHost,
   normalizeEmail,
   randomToken,
+  readLinkNonceCookie,
   readSessionCookie,
   safeRelativeReturnPath,
   SESSION_TTL_MS,
@@ -70,8 +74,11 @@ export const LINK_SENT_MESSAGE = "If that address can receive mail, a sign-in li
 
 export interface AuthPort {
   findSessionIdentity(db: AppDatabase, input: { sessionDigest: string; now: Date }): Promise<SessionIdentity | null>;
-  insertMagicLinkToken(db: AppDatabase, input: { tokenDigest: string; email: string; issuedAt: Date; expiresAt: Date }): Promise<void>;
+  insertMagicLinkToken(db: AppDatabase, input: { tokenDigest: string; email: string; issuedAt: Date; expiresAt: Date; browserNonceDigest?: string | null }): Promise<void>;
   consumeMagicLinkToken(db: AppDatabase, input: { tokenDigest: string; now: Date }): Promise<{ email: string } | null>;
+  consumeMagicLinkTokenForBrowser(db: AppDatabase, input: { tokenDigest: string; nonceDigest: string; now: Date }): Promise<{ email: string } | null>;
+  findRedeemableMagicLinkToken(db: AppDatabase, input: { tokenDigest: string; now: Date }): Promise<{ email: string } | null>;
+  recordMagicLinkAttempt(db: AppDatabase, tokenDigest: string): Promise<void>;
   consumeOutstandingLinksForEmail(db: AppDatabase, input: { email: string; now: Date }): Promise<void>;
   createSession(db: AppDatabase, input: { sessionDigest: string; userId: string; issuedAt: Date; expiresAt: Date }): Promise<void>;
   deleteSession(db: AppDatabase, sessionDigest: string): Promise<void>;
@@ -229,11 +236,24 @@ export async function buildSignInRequestResponse(
 
   const token = randomToken();
   const expiresAt = new Date(now.getTime() + MAGIC_LINK_TTL_MS);
+
+  // SEC-17. The nonce is minted here and lives in two places that must both
+  // be present for a one-click sign-in: a cookie on this browser, and its
+  // digest on the token row. Neither alone is a credential — the cookie
+  // names no token and the digest cannot be presented — and an attacker who
+  // mails their own link to a victim controls the row but not the victim's
+  // cookie jar, which is the whole of the fix.
+  const nonce = randomToken();
+  const nonceCookie = buildLinkNonceCookie(request, nonce, Math.ceil(MAGIC_LINK_TTL_MS / 1000));
+
   await deps.auth.insertMagicLinkToken(deps.db, {
     tokenDigest: await digestToken(token),
     email,
     issuedAt: now,
     expiresAt,
+    // Null when this request cannot carry a cookie safely. That link is still
+    // mailed and still works; it just takes the confirmation step.
+    browserNonceDigest: nonceCookie ? await digestToken(nonce) : null,
   });
 
   const link = `${originOf(request)}${VERIFY_PATH}?token=${encodeURIComponent(token)}&return_to=${encodeURIComponent(safeReturnTo)}`;
@@ -253,7 +273,12 @@ export async function buildSignInRequestResponse(
     await deps.auth.purgeExpiredAuthRows(deps.db, now, windowStart - MAGIC_LINK_LIMITS.windowMs * 2);
   } catch { /* cleanup is opportunistic */ }
 
-  return json({ ok: true, message: LINK_SENT_MESSAGE }, 200);
+  // The nonce rides back on the success response and on nothing else, so it
+  // is set for a registered and an unregistered address alike — the
+  // enumeration property is untouched.
+  const headers = new Headers(NO_STORE);
+  if (nonceCookie) headers.append("set-cookie", nonceCookie);
+  return Response.json({ ok: true, message: LINK_SENT_MESSAGE }, { status: 200, headers });
 }
 
 function rateLimited(now: Date, windowStart: number) {
@@ -298,8 +323,41 @@ function escapeHtml(value: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/auth/verify
+// GET /api/auth/verify  — redeem, or offer confirmation
+// POST /api/auth/verify — the confirmed redemption
 // ---------------------------------------------------------------------------
+//
+// SEC-17, and the shape of the fix, because it is easy to undo by accident.
+//
+// The vulnerability was login CSRF: redemption was a bare GET with no
+// cross-site control at all, and `SameSite=Lax` deliberately permits the
+// top-level GET navigation that opening an emailed link is. An attacker
+// requested a link for their OWN address, mailed it on, and the victim's
+// click silently made their browser the attacker's account — after which the
+// victim's drafts were written to the attacker's history.
+//
+// Adding `isCrossSiteRequest` here would not have fixed it. A link opened
+// from a mail client arrives with no Origin at all, so that check cannot
+// distinguish the honest case from the hostile one on this route.
+//
+// What actually distinguishes them is WHICH BROWSER ASKED. So:
+//
+//   * One click, no interruption, when the browser presents the nonce cookie
+//     it was given at request time. That is the overwhelmingly common case —
+//     request a link, click it in the same browser — and it is settled by one
+//     guarded UPDATE carrying the nonce digest in its WHERE clause.
+//   * Otherwise: no session, and no failure either. Opening a link on a
+//     different device is a real and ordinary thing to do, and refusing it
+//     would trade a security bug for a support queue. Instead the link lands
+//     on a page that NAMES the address it is about to sign in as and asks for
+//     a POST.
+//
+// The POST is what closes the attack. A top-level navigation cannot issue
+// one, a cross-site form POST carries an Origin naming the attacker's site,
+// and this route refuses any POST that does not carry a same-site Origin. So
+// the attacker's mailed link can, at absolute best, show the victim a page
+// saying "You are about to sign in as attacker@example.com" — which is not an
+// attack, it is a warning.
 
 /** Every failed redemption lands here. One destination for expired, unknown, tampered, and already-used. */
 function failedVerification(returnTo: string) {
@@ -327,19 +385,101 @@ export async function buildVerifyResponse(
   // message.
   if (!deps) return redirect(`${SIGN_IN_PATH}?error=unavailable&return_to=${encodeURIComponent(safeReturnTo)}`);
   const now = (deps.now ?? (() => new Date()))();
+  const tokenDigest = await digestToken(token);
 
+  const nonce = readLinkNonceCookie(request);
+  if (nonce && TOKEN_SHAPE.test(nonce)) {
+    const consumed = await deps.auth.consumeMagicLinkTokenForBrowser(deps.db, {
+      tokenDigest,
+      nonceDigest: await digestToken(nonce),
+      now,
+    });
+    // Matched: this is the browser that asked. One click, nothing in the way.
+    if (consumed) return completeSignIn(request, deps, consumed.email, now, safeReturnTo);
+  }
+
+  // No nonce, or one that binds a different link. Not a failure and not a
+  // sign-in: a question. Read-only, and it decides only which page to render.
+  const pending = await deps.auth.findRedeemableMagicLinkToken(deps.db, { tokenDigest, now });
+  // A dead link answers exactly as it always did, so expired, spent, unknown
+  // and tampered remain one indistinguishable outcome. The attempt is counted
+  // here and only here on this path: a nonce that does not match a LIVE link
+  // is an ordinary second device, not evidence of anything, and counting it
+  // would turn the column into noise.
+  if (!pending) {
+    try { await deps.auth.recordMagicLinkAttempt(deps.db, tokenDigest); } catch { /* evidence, not a control */ }
+    return failedVerification(safeReturnTo);
+  }
+
+  return confirmationPage(pending.email, token, safeReturnTo);
+}
+
+export async function buildVerifyConfirmationResponse(
+  request: Request,
+  loadDeps: () => Promise<MagicLinkDeps>,
+): Promise<Response> {
+  if (!isTrustedIdentityHost(request)) return failedVerification("/");
+  if (!isSecureRequest(request) && !isDevHost(request)) return failedVerification("/");
+
+  // The control the whole confirmation step exists to apply, and it runs
+  // before anything is read or written. `isSameOriginRequest`, not
+  // `isCrossSiteRequest`: this request carries no session cookie by
+  // construction, so `SameSite=Lax` protects nothing here and a missing
+  // Origin cannot be given the benefit of the doubt.
+  if (!isSameOriginRequest(request)) return refusedConfirmation();
+
+  if (!request.headers.get("content-type")?.toLowerCase().includes("application/x-www-form-urlencoded")) {
+    return refusedConfirmation();
+  }
+
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return failedVerification("/");
+  }
+
+  const rawReturnTo = form.get("return_to");
+  const safeReturnTo = safeRelativeReturnPath(typeof rawReturnTo === "string" ? rawReturnTo : "/");
+  const rawToken = form.get("token");
+  const token = typeof rawToken === "string" ? rawToken : "";
+  if (!TOKEN_SHAPE.test(token)) return failedVerification(safeReturnTo);
+
+  const deps = await tryLoadDeps(loadDeps, "verify-confirm");
+  if (!deps) return redirect(`${SIGN_IN_PATH}?error=unavailable&return_to=${encodeURIComponent(safeReturnTo)}`);
+  const now = (deps.now ?? (() => new Date()))();
+
+  // Single use is still one guarded write. The nonce is deliberately not
+  // required here — that is the point of this path — so the Origin check
+  // above is the only thing standing in for it, and it stands alone.
   const consumed = await deps.auth.consumeMagicLinkToken(deps.db, {
     tokenDigest: await digestToken(token),
     now,
   });
   if (!consumed) return failedVerification(safeReturnTo);
 
+  return completeSignIn(request, deps, consumed.email, now, safeReturnTo);
+}
+
+/**
+ * Everything that happens once a token has been consumed, shared by the
+ * one-click and the confirmed path so the two cannot drift. Both arrive here
+ * having ALREADY spent the token on one guarded write; nothing below re-opens
+ * that decision.
+ */
+async function completeSignIn(
+  request: Request,
+  deps: MagicLinkDeps,
+  email: string,
+  now: Date,
+  safeReturnTo: string,
+): Promise<Response> {
   // First successful sign-in is what creates the account. The subject is
   // namespaced so an address identity can never collide with the ChatGPT
   // subjects already in this column.
   const { userId } = await getOrCreateUserByExternalSubject(deps.db, {
-    externalSubject: emailSubject(consumed.email),
-    email: consumed.email,
+    externalSubject: emailSubject(email),
+    email,
   });
 
   const sessionId = randomToken();
@@ -366,9 +506,11 @@ export async function buildVerifyResponse(
   });
 
   // Any other link already sitting in that inbox is dead now.
-  try { await deps.auth.consumeOutstandingLinksForEmail(deps.db, { email: consumed.email, now }); } catch { /* best effort */ }
+  try { await deps.auth.consumeOutstandingLinksForEmail(deps.db, { email, now }); } catch { /* best effort */ }
 
-  return redirect(safeReturnTo, [cookie]);
+  // The nonce has done its one job. It is cleared alongside the session being
+  // issued so it cannot bind a later link it was never minted for.
+  return redirect(safeReturnTo, [cookie, ...clearedLinkNonceCookies(request)]);
 }
 
 // ---------------------------------------------------------------------------
@@ -433,4 +575,117 @@ export async function buildSignOutResponse(
   }
 
   return redirect("/", clearedSessionCookies(request));
+}
+
+// ---------------------------------------------------------------------------
+// The confirmation step
+// ---------------------------------------------------------------------------
+//
+// Plain server-rendered HTML rather than a React page, for one reason: the
+// token must not travel any further than it already has. A Next page would
+// have to be reached by a redirect carrying the token in its URL, putting it
+// in a second address bar entry and a second history record. Answering here,
+// at the URL the mail client already opened, keeps the token in a hidden
+// field that leaves only as a POST body.
+//
+// No script and no external asset: the page's whole job is to be a form, and
+// the site's CSP (`form-action 'self'`) is a third control on where that form
+// can go.
+
+const CONFIRM_HEADERS = {
+  "content-type": "text/html; charset=utf-8",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+  // Nothing here is for a search engine, and an indexed page carrying a
+  // spent token is a support ticket at best.
+  "x-robots-tag": "noindex, nofollow",
+} as const;
+
+const CONFIRM_STYLE = [
+  ":root{color-scheme:light dark}",
+  "*{box-sizing:border-box}",
+  "body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;",
+  "font:16px/1.55 ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;",
+  "background:#faf9f6;color:#14171a}",
+  "main{width:100%;max-width:34rem;background:#fff;border:1px solid #e4e2dc;border-radius:16px;padding:32px 28px}",
+  "h1{margin:0 0 4px;font-size:1.35rem;letter-spacing:-.02em}",
+  ".brand{margin:0 0 20px;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;color:#6b7076}",
+  "p{margin:0 0 16px;color:#41474d}",
+  ".address{display:block;margin:0 0 16px;padding:12px 14px;border:1px solid #e4e2dc;border-radius:10px;",
+  "background:#faf9f6;font-weight:600;color:#14171a;overflow-wrap:anywhere}",
+  "button{appearance:none;border:1px solid #14171a;background:#14171a;color:#fff;border-radius:999px;",
+  "padding:12px 22px;font:inherit;font-weight:550;cursor:pointer}",
+  "button:hover{background:#000}",
+  "a{color:#41474d}",
+  ".note{margin:20px 0 0;font-size:.85rem;color:#6b7076}",
+  "@media (prefers-color-scheme:dark){",
+  "body{background:#111315;color:#f2f1ee}",
+  "main{background:#191c1e;border-color:#2c3033}",
+  "p{color:#c3c7cb}.address{background:#111315;border-color:#2c3033;color:#f2f1ee}",
+  ".brand,.note{color:#8d9298}",
+  "button{background:#f2f1ee;border-color:#f2f1ee;color:#14171a}button:hover{background:#fff}",
+  "a{color:#c3c7cb}}",
+].join("");
+
+function confirmPageShell(title: string, body: string, status: number): Response {
+  const product = escapeHtml(productConfig.productName);
+  return new Response(
+    [
+      "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+      "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+      "<meta name=\"robots\" content=\"noindex, nofollow\">",
+      `<title>${escapeHtml(title)} | ${product}</title>`,
+      `<style>${CONFIRM_STYLE}</style></head><body><main>`,
+      `<p class="brand">${product}</p>`,
+      body,
+      "</main></body></html>",
+    ].join(""),
+    { status, headers: CONFIRM_HEADERS },
+  );
+}
+
+/**
+ * The page a link opened in a different browser lands on.
+ *
+ * Naming the address is the security control, not a courtesy. The attack this
+ * whole path exists to stop ends with a victim signed into someone else's
+ * account without knowing it; a page that states, before anything happens,
+ * exactly whose account this is turns that from a silent compromise into an
+ * obvious "that is not my address".
+ */
+function confirmationPage(email: string, token: string, safeReturnTo: string): Response {
+  const body = [
+    "<h1>Confirm this sign-in</h1>",
+    "<p>This link will sign this browser in as:</p>",
+    `<span class="address">${escapeHtml(email)}</span>`,
+    "<p>If that is not your address, close this page. Someone else&#39;s sign-in link ",
+    "will sign you into <em>their</em> account, and anything you write here would be saved to it.</p>",
+    "<form method=\"post\" action=\"",
+    escapeHtml(VERIFY_PATH),
+    "\">",
+    `<input type="hidden" name="token" value="${escapeHtml(token)}">`,
+    `<input type="hidden" name="return_to" value="${escapeHtml(safeReturnTo)}">`,
+    "<button type=\"submit\">Yes, sign me in</button>",
+    "</form>",
+    "<p class=\"note\">This step appears because the link was opened in a different browser ",
+    "from the one that asked for it, which is normal when you open it on another device. ",
+    "The link still works once and still expires 15 minutes after it was sent.</p>",
+  ].join("");
+  return confirmPageShell("Confirm this sign-in", body, 200);
+}
+
+/**
+ * A POST that did not come from this site. This is the attack landing, so it
+ * says what happened plainly and offers only a route back to a sign-in the
+ * visitor starts themselves.
+ */
+function refusedConfirmation(): Response {
+  const body = [
+    "<h1>This sign-in was not completed</h1>",
+    "<p>This request did not come from ",
+    escapeHtml(productConfig.productName),
+    ", so nobody was signed in and nothing was changed.</p>",
+    `<p><a href="${escapeHtml(SIGN_IN_PATH)}">Go to sign in</a> and request a link yourself.</p>`,
+  ].join("");
+  return confirmPageShell("Sign-in not completed", body, 403);
 }

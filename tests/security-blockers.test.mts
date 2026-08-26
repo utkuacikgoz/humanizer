@@ -3,8 +3,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { MIN_HIDDEN_WORDS, projectPreview, shouldOfferUnlock } from "../src/lib/preview-projection";
-import { isTrustedIdentityHost, readSessionCookie, DEV_SESSION_COOKIE, SESSION_COOKIE } from "../src/lib/identity";
+import { isTrustedIdentityHost, readSessionCookie, safeRelativeReturnPath, DEV_SESSION_COOKIE, SESSION_COOKIE } from "../src/lib/identity";
 
 function words(count: number) {
   return Array.from({ length: count }, (_, i) => `word${i}`).join(" ");
@@ -182,4 +183,46 @@ test("KI-01: a rewrite measured at zero improvements is never sold", () => {
 
 test("KI-01: a genuine rewrite with measured improvements is still sellable", () => {
   assert.equal(shouldOfferUnlock({ preview: "a real preview", hiddenWordCount: 40, issuesImproved: 3 }), true);
+});
+
+// SEC-21 — /signin re-implemented the return_to guard, and the copy was
+// weaker than the original. The page's result is rendered directly as
+// `<Link href={returnTo}>Continue</Link>`, a hop the server never sees, so
+// "the server re-checks it" was not a defence.
+
+/** Every value proven to survive the page's old `startsWith("/") && !startsWith("//")`. */
+const PROVEN_RETURN_TO_BYPASSES = ["/\\evil.test", "/\t/evil.test", "/\n/evil.test", "/\\\\evil.test"];
+
+test("SEC-21: every proven bypass resolves to another origin, which is why the old check was wrong", () => {
+  // The premise, restated as a test so nobody "simplifies" the guard back.
+  for (const value of PROVEN_RETURN_TO_BYPASSES) {
+    assert.equal(value.startsWith("/") && !value.startsWith("//"), true, `${JSON.stringify(value)} passed the old check`);
+    assert.equal(new URL(value, "https://ownword.pro").origin, "https://evil.test", `${JSON.stringify(value)} left the origin`);
+  }
+});
+
+test("SEC-21: the one canonical guard refuses all of them", () => {
+  for (const value of PROVEN_RETURN_TO_BYPASSES) {
+    assert.equal(safeRelativeReturnPath(value), "/", `${JSON.stringify(value)} must not survive`);
+  }
+});
+
+test("SEC-21: the sign-in page uses the canonical guard rather than a second copy of it", async () => {
+  const page = await readFile(new URL("../app/signin/page.tsx", import.meta.url), "utf8");
+
+  assert.match(
+    page,
+    /import\s*\{[^}]*\bsafeRelativeReturnPath\b[^}]*\}\s*from\s*"@\/src\/lib\/identity"/,
+    "the page must call the server's guard",
+  );
+  // The specific shape of the weaker copy, in code rather than in prose.
+  const code = page.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.doesNotMatch(
+    code,
+    /startsWith\(\s*"\/\/"\s*\)/,
+    "a local protocol-relative check is the re-implementation this finding was about",
+  );
+  // And the value it renders is the guarded one, not the raw query parameter.
+  assert.match(code, /href=\{returnTo\}/);
+  assert.match(code, /safeReturnTo\s*=\s*\(value: string \| null\)/);
 });

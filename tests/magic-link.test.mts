@@ -13,6 +13,7 @@ import {
   buildSessionStateResponse,
   buildSignInRequestResponse,
   buildSignOutResponse,
+  buildVerifyConfirmationResponse,
   buildVerifyResponse,
   LINK_SENT_MESSAGE,
   MAGIC_LINK_LIMITS,
@@ -24,6 +25,8 @@ import {
   safeRelativeReturnPath,
   SESSION_COOKIE,
   DEV_SESSION_COOKIE,
+  LINK_NONCE_COOKIE,
+  DEV_LINK_NONCE_COOKIE,
 } from "../src/lib/identity";
 import type { EmailMessage, EmailSender } from "../src/lib/email-sender";
 import { EmailDeliveryError } from "../src/lib/email-sender";
@@ -38,18 +41,49 @@ function recordingSender() {
   return { sender, sent };
 }
 
+/**
+ * SEC-17. `nonce` is the raw link nonce this browser presents at redemption.
+ *
+ *   * omitted  — the browser that asked for the link, which is the ordinary
+ *                case: the harness replays the nonce the request-link
+ *                response set, so redemption is one click.
+ *   * `null`   — a DIFFERENT browser. No nonce cookie at all. This is both an
+ *                honest phone-opens-desktop-link and the attacker's victim,
+ *                and neither may be signed in by the navigation itself.
+ *   * a string — a browser holding some other nonce.
+ */
+type VerifyOptions = { cookie?: string; nonce?: string | null; origin?: string };
+
 type Harness = {
   db: AppDatabase;
   sent: EmailMessage[];
   statements: string[];
+  /** The raw nonce the most recent accepted link request set as a cookie, or null. */
+  lastNonce: () => string | null;
   request(email: string, options?: { returnTo?: string; origin?: string; host?: string; headers?: Record<string, string> }): Promise<Response>;
-  verify(link: string, options?: { cookie?: string }): Promise<Response>;
+  verify(link: string, options?: VerifyOptions): Promise<Response>;
+  /** The confirmation POST the GET's confirmation page submits. */
+  confirm(input: { token: string; returnTo?: string; host?: string; origin?: string | null; contentType?: string; cookie?: string }): Promise<Response>;
   signOut(cookie?: string, options?: { origin?: string }): Promise<Response>;
   sessionState(cookie?: string): Promise<Response>;
   linkFrom(message: EmailMessage): string;
   setNow(fn: () => Date): void;
   setSender(sender: EmailSender | null): void;
 };
+
+/** Pulls the raw value of a Set-Cookie by name, or null. */
+function setCookieValue(response: Response, ...names: string[]): string | null {
+  const header = response.headers.get("set-cookie") ?? "";
+  for (const name of names) {
+    const match = header.match(new RegExp(`(?:^|,\\s*)${name}=([^;,]*)`));
+    if (match && match[1]) return match[1];
+  }
+  return null;
+}
+
+function nonceCookieHeader(host: string, nonce: string): string {
+  return `${host === "localhost" ? DEV_LINK_NONCE_COOKIE : LINK_NONCE_COOKIE}=${nonce}`;
+}
 
 async function harness(): Promise<Harness> {
   const statements: string[] = [];
@@ -59,16 +93,19 @@ async function harness(): Promise<Harness> {
   let now = () => new Date();
   const loadDeps = async () => ({ db, auth, sender, from: "Ownword <no-reply@ownword.pro>", now });
 
+  let lastNonce: string | null = null;
+
   return {
     db,
     sent: recorder.sent,
     statements,
+    lastNonce: () => lastNonce,
     setNow(fn) { now = fn; },
     setSender(next) { sender = next; },
-    request(email, options = {}) {
+    async request(email, options = {}) {
       const host = options.host ?? "localhost";
       const scheme = host === "localhost" ? "http" : "https";
-      return buildSignInRequestResponse(
+      const response = await buildSignInRequestResponse(
         new Request(`${scheme}://${host}/api/auth/request-link`, {
           method: "POST",
           headers: {
@@ -82,12 +119,44 @@ async function harness(): Promise<Harness> {
         }),
         loadDeps,
       );
+      const issued = setCookieValue(response, LINK_NONCE_COOKIE, DEV_LINK_NONCE_COOKIE);
+      if (issued) lastNonce = issued;
+      return response;
     },
     verify(link, options = {}) {
       const url = new URL(link);
+      // Default: the browser that asked. `nonce: null` is a different one.
+      const nonce = options.nonce === undefined ? lastNonce : options.nonce;
+      const jar = [
+        ...(options.cookie ? [options.cookie] : []),
+        ...(nonce ? [nonceCookieHeader(url.hostname, nonce)] : []),
+      ];
       return buildVerifyResponse(
         new Request(link, {
-          headers: { host: url.host, ...(options.cookie ? { cookie: options.cookie } : {}) },
+          headers: {
+            host: url.host,
+            ...(jar.length ? { cookie: jar.join("; ") } : {}),
+            ...(options.origin ? { origin: options.origin } : {}),
+          },
+        }),
+        loadDeps,
+      );
+    },
+    confirm(input) {
+      const host = input.host ?? "localhost";
+      const scheme = host === "localhost" ? "http" : "https";
+      const origin = input.origin === undefined ? `${scheme}://${host}` : input.origin;
+      const body = new URLSearchParams({ token: input.token, return_to: input.returnTo ?? "/" });
+      return buildVerifyConfirmationResponse(
+        new Request(`${scheme}://${host}/api/auth/verify`, {
+          method: "POST",
+          headers: {
+            host,
+            "content-type": input.contentType ?? "application/x-www-form-urlencoded",
+            ...(origin ? { origin } : {}),
+            ...(input.cookie ? { cookie: input.cookie } : {}),
+          },
+          body: body.toString(),
         }),
         loadDeps,
       );
@@ -325,13 +394,21 @@ test("a session belonging to a deleted account resolves to nobody", async () => 
   assert.equal(await identityFor(h.db, session), null);
 });
 
+/** Isolates one Set-Cookie from the joined header, so a sibling cookie cannot satisfy an assertion. */
+function cookieNamed(response: Response, name: string): string {
+  const header = response.headers.get("set-cookie") ?? "";
+  const found = header.split(/,\s*(?=[A-Za-z0-9_-]+=)/).find((part) => part.trimStart().startsWith(`${name}=`));
+  assert.ok(found, `expected a ${name} cookie in: ${header}`);
+  return found.trim();
+}
+
 test("the session cookie carries the flags that make it safe", async () => {
   const h = await harness();
   // On the production host over https: the strong form.
   const link = await issuedLink(h, "person@example.com", { returnTo: "/history" });
   const secureLink = link.replace("http://localhost", "https://ownword.pro");
   const response = await h.verify(secureLink);
-  const cookie = response.headers.get("set-cookie") ?? "";
+  const cookie = cookieNamed(response, SESSION_COOKIE);
 
   assert.match(cookie, /^__Host-ownword_session=/, "the __Host- prefix pins the cookie to this exact origin");
   assert.match(cookie, /;\s*HttpOnly/i, "script must never be able to read the session");
@@ -344,7 +421,7 @@ test("the session cookie carries the flags that make it safe", async () => {
 
 test("a plain-http dev host gets a working cookie without silently dropping Secure in production", async () => {
   const h = await harness();
-  const cookie = (await h.verify(await issuedLink(h, "person@example.com"))).headers.get("set-cookie") ?? "";
+  const cookie = cookieNamed(await h.verify(await issuedLink(h, "person@example.com")), DEV_SESSION_COOKIE);
   assert.match(cookie, /^ownword_session=/, "http cannot carry a __Host- cookie, so dev uses the plain name");
   assert.doesNotMatch(cookie, /Secure/i);
   assert.match(cookie, /HttpOnly/i);
@@ -619,4 +696,303 @@ test("a session row points at a real user and is removed with the sweep once exp
   await h.db.update(schema.authSessions).set({ expiresAt: new Date(Date.now() - 1_000) });
   await auth.purgeExpiredAuthRows(h.db, new Date(), 0);
   assert.equal((await h.db.select().from(schema.authSessions)).length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// SEC-17 — login CSRF: an emailed link may not sign a browser that did not
+// ask for it into someone else's account.
+//
+// The proven attack, end to end: the attacker requests a link for their OWN
+// address, mails it to a victim, and the victim's click makes their browser
+// the attacker's account. Every test below drives the real functions the
+// route delegates to, against the real schema.
+// ---------------------------------------------------------------------------
+
+/** The exact shape of the confirmation step, so a test cannot pass on a redirect that happens to be 200. */
+async function confirmationBody(response: Response): Promise<string> {
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /text\/html/);
+  assert.equal(response.headers.get("set-cookie"), null, "a confirmation page must never issue a session");
+  return response.text();
+}
+
+/** The hidden token the confirmation form would post. */
+function tokenFromForm(html: string): string {
+  const match = html.match(/name="token"\s+value="([^"]+)"/);
+  assert.ok(match, "the confirmation form must carry the token as a hidden field");
+  return match[1];
+}
+
+test("SEC-17: an attacker's link opened in another browser creates no session", async () => {
+  const h = await harness();
+  // The attacker asks for a link to their own address, in their own browser.
+  const attackerLink = await issuedLink(h, "attacker@example.com");
+
+  // The victim's browser has never seen this flow, so it holds no nonce. This
+  // is exactly the request the proven probe made, including the forged Origin.
+  const opened = await h.verify(attackerLink, { nonce: null, origin: "https://evil.test" });
+
+  assert.equal(cookieValue(opened), null, "the navigation itself must not mint a session");
+  assert.equal((await h.db.select().from(schema.authSessions)).length, 0, "no session row may exist");
+  assert.equal((await h.db.select().from(schema.users)).length, 0, "no account may be created by a navigation");
+
+  // Still redeemable — this is a pause, not a refusal — and the page says
+  // whose account it is. That naming is the control, not a courtesy.
+  const html = await confirmationBody(opened);
+  assert.match(html, /attacker@example\.com/, "the confirmation must name the address being signed in");
+  const [token] = await h.db.select().from(schema.authMagicLinkTokens);
+  assert.equal(token.consumedAt, null, "a confirmation must not spend the link");
+});
+
+test("SEC-17: a victim holding their own nonce is still not signed into the attacker's account", async () => {
+  const h = await harness();
+  const attackerLink = await issuedLink(h, "attacker@example.com");
+  const attackerNonce = h.lastNonce();
+  assert.ok(attackerNonce);
+
+  // The victim has their own live sign-in flow, so their browser DOES hold a
+  // nonce cookie — just not the one bound to the attacker's token.
+  await issuedLink(h, "victim@example.com");
+  const victimNonce = h.lastNonce();
+  assert.ok(victimNonce);
+  assert.notEqual(victimNonce, attackerNonce);
+
+  const opened = await h.verify(attackerLink, { nonce: victimNonce });
+  assert.equal(cookieValue(opened), null);
+  assert.match(await confirmationBody(opened), /attacker@example\.com/);
+  assert.equal((await h.db.select().from(schema.authSessions)).length, 0);
+});
+
+test("SEC-17: the confirmation step is refused from a third-party page", async () => {
+  const h = await harness();
+  const attackerLink = await issuedLink(h, "attacker@example.com");
+  const token = tokenFromForm(await confirmationBody(await h.verify(attackerLink, { nonce: null })));
+
+  // An attacker page can auto-submit a form. Browsers send an Origin on every
+  // form POST, and this is the request that carries no session cookie for
+  // SameSite to protect, so the Origin is the whole control.
+  const forged = await h.confirm({ token, origin: "https://evil.test" });
+  assert.equal(forged.status, 403);
+  assert.equal(cookieValue(forged), null);
+  assert.equal((await h.db.select().from(schema.authSessions)).length, 0);
+
+  // A stripped Origin is refused too. Nothing legitimate posts here without
+  // one, and this request has no second control to fall back on.
+  const anonymous = await h.confirm({ token, origin: null });
+  assert.equal(anonymous.status, 403);
+  assert.equal(cookieValue(anonymous), null);
+  assert.equal((await h.db.select().from(schema.authSessions)).length, 0);
+
+  // The link survives both: nothing was spent defending it.
+  const [row] = await h.db.select().from(schema.authMagicLinkTokens);
+  assert.equal(row.consumedAt, null);
+
+  // And from this site it works, which is the case that has to keep working:
+  // a link opened on a phone, confirmed by the person holding the phone.
+  const confirmed = await h.confirm({ token });
+  assert.equal(confirmed.status, 303);
+  const session = cookieValue(confirmed);
+  assert.ok(session, "a same-site confirmation must sign the visitor in");
+  assert.equal((await identityFor(h.db, session))?.email, "attacker@example.com");
+});
+
+test("SEC-17: only a POST can complete a confirmation", async () => {
+  const h = await harness();
+  const link = await issuedLink(h, "person@example.com");
+  const html = await confirmationBody(await h.verify(link, { nonce: null }));
+
+  // The form is a POST to the verify path, with the token in the body rather
+  // than in a URL a navigation could carry.
+  assert.match(html, /<form[^>]+method="post"/i);
+  assert.match(html, /action="\/api\/auth\/verify"/);
+  assert.doesNotMatch(html, /<script/i, "the confirmation page runs no script");
+
+  // Re-opening by navigation, any number of times, still signs nobody in.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const again = await h.verify(link, { nonce: null });
+    assert.equal(cookieValue(again), null);
+  }
+  assert.equal((await h.db.select().from(schema.authSessions)).length, 0);
+});
+
+test("SEC-17: the browser that asked still signs in with one click and no confirmation", async () => {
+  const h = await harness();
+  const link = await issuedLink(h, "person@example.com", { returnTo: "/history" });
+
+  // No options: the harness replays the nonce the request set, which is what a
+  // browser does.
+  const response = await h.verify(link);
+  assert.equal(response.status, 303, "one click, straight through");
+  assert.equal(response.headers.get("location"), "/history");
+  const session = cookieValue(response);
+  assert.ok(session);
+  assert.equal((await identityFor(h.db, session))?.email, "person@example.com");
+
+  // The nonce is cleared on the way out: it has done its one job.
+  const cleared = response.headers.get("set-cookie") ?? "";
+  assert.match(cleared, /ownword_link=;/, "the spent nonce must be cleared");
+  assert.match(cleared, /ownword_link=;[^,]*Max-Age=0/);
+});
+
+test("SEC-17: the nonce reaches storage only as a digest", async () => {
+  const h = await harness();
+  await issuedLink(h, "person@example.com");
+  const nonce = h.lastNonce();
+  assert.ok(nonce);
+
+  const rows = [
+    ...(await h.db.select().from(schema.authMagicLinkTokens)),
+    ...(await h.db.select().from(schema.authSessions)),
+    ...(await h.db.select().from(schema.authRateLimits)),
+  ];
+  assert.ok(!JSON.stringify(rows).includes(nonce), "the raw nonce must never reach a column");
+
+  const [token] = await h.db.select().from(schema.authMagicLinkTokens);
+  assert.equal(token.browserNonceDigest, await digestToken(nonce));
+  assert.match(token.browserNonceDigest ?? "", /^[0-9a-f]{64}$/);
+  assert.notEqual(token.browserNonceDigest, token.tokenDigest);
+});
+
+test("SEC-17: the nonce cookie carries the same flags the session cookie does", async () => {
+  const h = await harness();
+  const secure = await h.request("person@example.com", { host: "ownword.pro" });
+  const cookie = cookieNamed(secure, LINK_NONCE_COOKIE);
+  assert.match(cookie, /;\s*HttpOnly/i, "script must never be able to read the nonce");
+  assert.match(cookie, /;\s*Secure/i);
+  // Lax, not Strict, and deliberately: Strict is withheld on a navigation that
+  // starts outside the site, which every click from a mail client is. Lax does
+  // not weaken the binding — the attacker controls the token row, never the
+  // victim's cookie jar.
+  assert.match(cookie, /;\s*SameSite=Lax/i);
+  assert.match(cookie, /;\s*Path=\//);
+  assert.doesNotMatch(cookie, /Domain=/i);
+  // Short-lived: it outlives the link it binds by nothing.
+  const maxAge = Number(cookie.match(/Max-Age=(\d+)/)?.[1]);
+  assert.ok(maxAge > 0 && maxAge <= 15 * 60, `nonce lifetime should not exceed the link's, got ${maxAge}`);
+});
+
+// ---------------------------------------------------------------------------
+// The properties that already held must still hold on the NEW path. Re-run,
+// not assumed: the confirmed POST is a second way into session creation and
+// nothing above proves it inherited any of this.
+// ---------------------------------------------------------------------------
+
+test("SEC-17: a confirmed link is still single-use", async () => {
+  const h = await harness();
+  const link = await issuedLink(h, "person@example.com");
+  const token = tokenFromForm(await confirmationBody(await h.verify(link, { nonce: null })));
+
+  const first = await h.confirm({ token });
+  assert.equal(first.status, 303);
+  assert.ok(cookieValue(first));
+
+  const second = await h.confirm({ token });
+  assert.equal(second.status, 303);
+  assert.equal(second.headers.get("location"), "/signin?error=link&return_to=%2F");
+  assert.equal(cookieValue(second), null, "a spent link must not mint a second session");
+  assert.equal((await h.db.select().from(schema.authSessions)).length, 1);
+
+  // And the one-click path cannot revive it either.
+  assert.equal(cookieValue(await h.verify(link)), null);
+  assert.equal((await h.db.select().from(schema.authSessions)).length, 1);
+});
+
+test("SEC-17: an expired link is refused on the confirmed path too, and looks like any other failure", async () => {
+  const h = await harness();
+  const issuedAt = new Date("2026-08-25T10:00:00Z");
+  h.setNow(() => issuedAt);
+  const link = await issuedLink(h, "person@example.com");
+  const token = tokenFromForm(await confirmationBody(await h.verify(link, { nonce: null })));
+
+  h.setNow(() => new Date(issuedAt.getTime() + 16 * 60 * 1000));
+
+  // Expired, and a token that was never issued, are one answer.
+  const expired = await h.confirm({ token });
+  const unknown = await h.confirm({ token: "z".repeat(43) });
+  for (const response of [expired, unknown]) {
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get("location"), "/signin?error=link&return_to=%2F");
+    assert.equal(cookieValue(response), null);
+  }
+  assert.equal((await h.db.select().from(schema.authSessions)).length, 0);
+
+  // The GET side of an expired link is the same single failure it always was,
+  // not a confirmation page: a dead link must not be made to look alive.
+  const opened = await h.verify(link, { nonce: null });
+  assert.equal(opened.status, 303);
+  assert.equal(opened.headers.get("location"), "/signin?error=link&return_to=%2F");
+});
+
+test("SEC-17: the confirmed path rotates the session it was handed", async () => {
+  const h = await harness();
+  const first = cookieValue(await h.verify(await issuedLink(h, "person@example.com")));
+  assert.ok(first);
+
+  const link = await issuedLink(h, "person@example.com");
+  const token = tokenFromForm(await confirmationBody(await h.verify(link, { nonce: null })));
+  const second = cookieValue(await h.confirm({ token, cookie: `${DEV_SESSION_COOKIE}=${first}` }));
+  assert.ok(second);
+  assert.notEqual(second, first);
+  assert.equal(await identityFor(h.db, first), null, "the session presented at sign-in must not survive it");
+  assert.ok(await identityFor(h.db, second));
+});
+
+test("SEC-17: the nonce does not leak whether an address has an account", async () => {
+  const h = await harness();
+  await h.verify(await issuedLink(h, "registered@example.com"));
+
+  h.statements.length = 0;
+  const known = await h.request("registered@example.com");
+  const knownStatements = [...h.statements];
+  h.statements.length = 0;
+  const unknown = await h.request("nobody@example.com");
+  const unknownStatements = [...h.statements];
+
+  assert.equal(known.status, unknown.status);
+  assert.deepEqual(await known.json(), await unknown.json());
+  assert.deepEqual(knownStatements, unknownStatements, "the two requests must ask the database the same questions");
+  assert.ok(!knownStatements.some((sql) => /\busers\b/i.test(sql)), "requesting a link must still never read the users table");
+
+  // Both get a nonce, and the cookies differ only in their random value.
+  const shape = (response: Response) =>
+    cookieNamed(response, DEV_LINK_NONCE_COOKIE).replace(/=[^;]*/, "=<value>");
+  assert.equal(shape(known), shape(unknown));
+});
+
+test("SEC-17: a hostile return_to cannot survive the confirmation form either", async () => {
+  const h = await harness();
+  const link = await issuedLink(h, "person@example.com");
+  const html = await confirmationBody(await h.verify(link, { nonce: null }));
+  const token = tokenFromForm(html);
+  assert.match(html, /name="return_to" value="\/"/, "the form must carry the already-safe path");
+
+  // The form is a client-supplied body like any other, so the POST re-checks.
+  for (const hostile of ["https://evil.test/steal", "//evil.test", "/\\evil.test", "/api/auth/verify?token=x"]) {
+    const response = await buildVerifyConfirmationResponse(
+      new Request("http://localhost/api/auth/verify", {
+        method: "POST",
+        headers: { host: "localhost", origin: "http://localhost", "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token: "z".repeat(43), return_to: hostile }).toString(),
+      }),
+      async () => { throw new Error("unreachable"); },
+    );
+    assert.equal(response.headers.get("location"), "/signin?error=unavailable&return_to=%2F", `${hostile} must not survive`);
+  }
+
+  // A genuine destination is preserved through the confirmation.
+  const good = await h.confirm({ token, returnTo: "/history?open=1" });
+  assert.equal(good.headers.get("location"), "/history?open=1");
+});
+
+test("SEC-17: the confirmation page escapes the address it names", async () => {
+  // The address is shape-checked before storage, so this is defence in depth
+  // against a future path that stores something looser: nothing rendered on
+  // this page may become markup.
+  const h = await harness();
+  const link = await issuedLink(h, "person@example.com");
+  await h.db.update(schema.authMagicLinkTokens).set({ email: '"><script>alert(1)</script>' });
+
+  const html = await confirmationBody(await h.verify(link, { nonce: null }));
+  assert.doesNotMatch(html, /<script>alert/);
+  assert.match(html, /&lt;script&gt;/);
 });
