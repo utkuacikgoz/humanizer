@@ -9,6 +9,7 @@ import Link from "next/link";
 import { productConfig } from "@/src/config/product";
 import { MarkedText, describeMarks, diffRewrite, selectDisplayFacts } from "@/src/components/rewrite-marks";
 import { improvementLabel } from "@/src/lib/preview-projection";
+import { AccountIndicator } from "@/src/components/account-indicator";
 
 type HistoryItem = {
   jobId: string;
@@ -188,8 +189,11 @@ export default function HistoryPage() {
         <Link className="brand" href="/" aria-label={`${productConfig.productName} home`}>
           <span>{productConfig.productName}</span>
         </Link>
-        <nav>
+        <nav aria-label="Primary navigation">
           <Link className="sign-in" href="/">Rewrite another draft</Link>
+          {/* SEC-17: history is the account's own writing, so the account it
+              belongs to has to be named on it. */}
+          <AccountIndicator />
         </nav>
       </header>
 

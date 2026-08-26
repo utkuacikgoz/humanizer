@@ -226,3 +226,56 @@ test("SEC-21: the sign-in page uses the canonical guard rather than a second cop
   assert.match(code, /href=\{returnTo\}/);
   assert.match(code, /safeReturnTo\s*=\s*\(value: string \| null\)/);
 });
+
+// SEC-17, aggravating factor — no surface outside /signin showed which
+// account was signed in, so a victim pushed into someone else's session had
+// no signal anywhere they actually work, and return_to let the attacker
+// choose which page they landed on.
+
+const SIGNED_IN_SURFACES = ["../app/page.tsx", "../app/history/page.tsx", "../app/checkout/success/page.tsx"];
+
+test("SEC-17: every signed-in surface names the account and offers a way out", async () => {
+  for (const path of SIGNED_IN_SURFACES) {
+    const page = await readFile(new URL(path, import.meta.url), "utf8");
+    assert.match(page, /<AccountIndicator\b/, `${path} must show which account is signed in`);
+    assert.match(
+      page,
+      /import\s*\{[^}]*\bAccountIndicator\b[^}]*\}\s*from\s*"@\/src\/components\/account-indicator"/,
+      `${path} must import the shared indicator rather than roll its own`,
+    );
+  }
+});
+
+test("SEC-17: the indicator shows the address itself, not a label that is true in any session", async () => {
+  const component = await readFile(new URL("../src/components/account-indicator.tsx", import.meta.url), "utf8");
+  const code = component.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  // The address, because "Account" reads identically in the attacker's
+  // session and the customer's. This is the documented deviation from
+  // docs/SIGNED-IN.md's open decision O-1.
+  assert.match(code, /\{session\.email\}/, "the indicator must render the address");
+  // A route out, in the same glance, as a POST that a third-party page cannot
+  // trigger.
+  assert.match(code, /action="\/api\/auth\/signout"\s+method="post"/);
+  assert.doesNotMatch(code, /\bdisabled(?![A-Za-z])/, "no focusable control may take the native disabled attribute");
+  // It must not claim an identity before the server has confirmed one.
+  assert.match(code, /session\.kind !== "signed-in"/);
+});
+
+test("SEC-17: the indicator survives the mobile header, where an emailed link is opened", async () => {
+  const [component, css] = await Promise.all([
+    readFile(new URL("../src/components/account-indicator.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  // `nav a:not(.sign-in) { display: none }` at 760px is still in force, so
+  // the indicator must not be a nav link.
+  const mobile = css.slice(css.indexOf("@media (max-width: 760px)"));
+  assert.match(mobile, /nav a:not\(\.sign-in\)\s*\{\s*display:\s*none/, "the rule this has to survive is still there");
+  assert.match(component, /<div className="account-indicator">/, "the indicator must not be a nav link");
+  assert.match(mobile, /\.account-indicator\s*\{/, "the mobile header must lay the indicator out explicitly");
+
+  // And it is never cut short: a truncated address answers the question badly.
+  assert.match(css, /\.account-address\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  assert.doesNotMatch(css, /\.account-address\s*\{[^}]*text-overflow:\s*ellipsis/);
+});

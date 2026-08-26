@@ -10,6 +10,7 @@ import type { BillingReadiness } from "@/src/lib/billing-readiness";
 import { improvementLabel, MIN_PAYWALLABLE_INPUT_WORDS, shouldOfferUnlock } from "@/src/lib/preview-projection";
 import { subscriptionDisclosure } from "@/src/lib/subscription-disclosure";
 import { MarkedText, describeMarks, diffRewrite, selectDisplayFacts } from "@/src/components/rewrite-marks";
+import { AccountIndicator } from "@/src/components/account-indicator";
 
 type Mode = (typeof MODES)[number]["id"];
 type UsageQuota = { consumed: number; allowance: number; remaining: number; periodEnd: string };
@@ -339,7 +340,10 @@ export default function Home() {
         <nav aria-label="Primary navigation">
           <a href="#how-it-works">How it works</a>
           <a href="#pricing">Pricing</a>
-          <Link className="sign-in" href="/signin?return_to=%2F">Sign in</Link>
+          {/* SEC-17. A page that does not say whose account it is cannot show
+              an identity swap, and this is the surface a hijacked session
+              lands on. Signed out, this is the Sign in control it always was. */}
+          <AccountIndicator signedOut={<Link className="sign-in" href="/signin?return_to=%2F">Sign in</Link>} />
         </nav>
       </header>
 
