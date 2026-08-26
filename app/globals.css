@@ -950,8 +950,13 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .pricing {
   position: relative;
   padding: var(--s8) max(var(--gutter), calc((100vw - var(--container)) / 2));
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--s8);
-  align-items: center;
+  /* Intro above, plans beside each other below. Two plans exist to be
+     compared, and the previous side-by-side band stacked them into one narrow
+     column, so reaching Pro meant scrolling a full screen past Starter and
+     holding it in your head. Columns put the two allowances on the same line
+     of sight, which is the only question this section has to answer. */
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s7);
+  align-items: start;
   background: linear-gradient(168deg, var(--band-2), var(--band));
   color: var(--band-ink);
   overflow: clip;
@@ -960,15 +965,18 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .pricing .eyebrow { color: var(--band-accent); }
 .pricing .eyebrow > span:first-child { background: var(--clay-bright); }
 .pricing-intro h2 { color: var(--band-ink); }
-.pricing-intro p { margin: var(--s5) 0 0; max-width: 38ch; color: var(--band-ink-2); font-size: var(--t-base); line-height: 1.6; }
+.pricing-intro p { margin: var(--s5) 0 0; max-width: 54ch; color: var(--band-ink-2); font-size: var(--t-base); line-height: 1.6; }
 
-/* The section is a two-column band: intro left, plans right. A second
-   <article> as a direct child would have wrapped into the intro's column,
-   so the cards share one cell and stack inside it. */
-.pricing-plans { display: grid; gap: var(--s5); min-width: 0; }
+/* Equal columns, equal height: a taller card reads as the better deal, and
+   the difference between these two is the allowance, not the amount of card. */
+.pricing-plans {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s5); min-width: 0; align-items: stretch;
+}
 .pricing article {
   padding: var(--s6);
-  display: grid; grid-template-columns: 1fr auto; gap: var(--s5);
+  display: grid; grid-template-columns: 1fr auto; gap: var(--s4);
+  align-content: start;
   border: 1px solid rgba(255, 255, 255, .22); border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, .055);
   transition: translate var(--dur-base) var(--ease-out), background var(--dur-base) var(--ease-out);
@@ -986,7 +994,7 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 }
 .pricing ul {
   grid-column: 1 / -1; margin: 0; padding: var(--s5) 0;
-  display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3) var(--s5);
+  display: grid; grid-template-columns: 1fr; gap: var(--s3);
   border-top: 1px solid rgba(255, 255, 255, .16); border-bottom: 1px solid rgba(255, 255, 255, .16);
   list-style: none; color: var(--band-ink); font-size: var(--t-sm);
 }
@@ -1003,7 +1011,8 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 }
 .pricing .plan-roadmap b { color: var(--band-ink); font-weight: 650; }
 .pricing article > a {
-  grid-column: 1 / -1; padding: 15px; border-radius: var(--radius-sm);
+  grid-column: 1 / -1; align-self: end; margin-top: var(--s2);
+  padding: 15px; border-radius: var(--radius-sm);
   background: var(--band-cta); color: var(--band);
   font-size: var(--t-base); font-weight: 650; letter-spacing: -.015em;
   text-align: center; text-decoration: none;
@@ -1199,6 +1208,7 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   .how-grid article { padding: var(--s5) 0; gap: var(--s2) var(--s4); }
   .how-grid article:hover { translate: 0; }
   .pricing { padding: var(--s8) var(--gutter); gap: var(--s6); }
+  .pricing-plans { grid-template-columns: minmax(0, 1fr); }
   .pricing article { padding: var(--s5); grid-template-columns: 1fr; gap: var(--s4); }
   .pricing article > strong { justify-self: start; }
   .pricing ul { grid-template-columns: 1fr; }
