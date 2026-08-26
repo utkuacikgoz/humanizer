@@ -454,9 +454,9 @@ unmeasured.
 With a key in the environment:
 
 ```
-npm run benchmark -- --provider=claude --model=claude-opus-5   --effort=medium
-npm run benchmark -- --provider=claude --model=claude-sonnet-5 --effort=medium
-npm run benchmark -- --provider=claude --model=claude-haiku-4-5 --effort=medium
+npm run benchmark -- --provider=claude --model=claude-opus-5   --effort=low
+npm run benchmark -- --provider=claude --model=claude-sonnet-5 --effort=low
+npm run benchmark -- --provider=claude --model=claude-haiku-4-5 --effort=low
 npm run benchmark -- --provider=claude-routed --ladder=claude-sonnet-5,claude-opus-5
 ```
 
@@ -478,8 +478,13 @@ answering from the output rather than from intuition:
   more expensive than never routing at all. The benchmark prints the
   escalation rate and the reason breakdown; if blended cost exceeds Opus-only,
   the correct outcome is to leave `HUMANIZATION_MODEL_ROUTING` off and say so.
-- **Effort.** `medium` is a starting point chosen for latency, not a swept
-  optimum. Sweep low/medium/high before fixing it.
+- **Effort.** The engine defaults to `low`, not the API's `high`. The
+  reasoning is in `ClaudeProviderOptions.effort`: humanizing a draft is
+  constrained rewriting, and a thinner candidate is safe here specifically
+  because the pipeline verifies every one of them before a customer sees it.
+  That makes effort a cost/rejection-rate tradeoff rather than a cost/quality
+  one, and the figure that settles it is the verification rejection rate —
+  measured, alongside cost, by `npm run measure:cost`.
 
 ### Fixture length: a gap this work did not close
 
@@ -526,3 +531,46 @@ Two caveats on the table. It assumes prompt caching is working — if
 full on every request and the input side roughly triples. And it says nothing
 about retries: a rewrite that fails verification and is resampled costs twice,
 and an escalated routed rewrite costs both rungs.
+
+### `npm run measure:cost` — replacing the model with a measurement
+
+Added 2026-08-26. Sweeps every effort level against real API calls and prints,
+per level: mean and p95 thinking / input / output / cached tokens from
+provider-reported usage, measured cost per rewrite, the verification rejection
+rate, mean attempts, cached-input share, and both plan allowances priced
+beside what they earn.
+
+```
+ANTHROPIC_API_KEY=... npm run measure:cost
+ANTHROPIC_API_KEY=... npm run measure:cost -- --model=claude-sonnet-5 --efforts=low,medium
+npm run measure:cost -- --dry-run    # shows the corpus and call count, no key, no calls
+```
+
+**Without a key it refuses** and exits 2. It does not fall back to the
+deterministic provider and it does not reprint the modelled table above; a
+modelled number under a measured heading is the failure the whole exercise is
+correcting. `tests/cost-guard.test.mts` asserts that refusal as a subprocess,
+so the suite proves it without a key and without a call.
+
+**On the corpus, honestly.** The release set's median passage is 20 words
+against the 200-300 the route accepts. Per-rewrite cost is dominated by fixed
+overhead — the cached system prefix and however much the model thinks,
+neither of which shrinks with the document — so a 20-word passage pays close
+to a full rewrite's price for a twelfth of the words, and cost per 1,000 words
+extrapolated from the raw set is several times worse than reality. So the
+script's default corpus is **composed**: same-category passages joined into
+documents of 200-300 words (10 documents, median 202, range 183-241), which is
+what the product actually processes. They are the same project-owned,
+purpose-written text; joining changes nothing about provenance. They are used
+**only** for cost measurement and never as a quality gate — the release set
+stays frozen and unjoined. `--corpus=raw` measures the unjoined passages and
+prints a warning saying not to project a plan's economics from them.
+
+The projection is a **floor**, and says so: a rewrite that fails verification
+costs money and delivers no billable words, and a routed rewrite that
+escalates pays for both rungs.
+
+`thinking_tokens` may come back unreported on some responses. The script says
+so explicitly rather than recording zero — "no thinking happened" and "nobody
+said" are different claims — and suggests
+`--betas=thinking-token-count-2026-05-13`.

@@ -99,7 +99,7 @@ test("the request uses the exact model id, adaptive thinking, and effort inside 
 
   assert.equal(params.model, "claude-opus-5", "the model id must be exact, never a dated suffix");
   assert.deepEqual(params.thinking, { type: "adaptive" }, "budget_tokens is removed on this model and returns a 400");
-  assert.equal(params.output_config?.effort, "medium", "effort belongs inside output_config, not at the top level");
+  assert.equal(params.output_config?.effort, "low", "effort belongs inside output_config, not at the top level");
   assert.equal(params.output_config?.format?.type, "json_schema", "structured output replaces the removed assistant prefill");
   assert.equal((params as { output_format?: unknown }).output_format, undefined, "top-level output_format is gone");
   assert.equal(params.messages.at(-1)?.role, "user", "an assistant prefill turn returns a 400 on this model");
@@ -440,4 +440,19 @@ test("a current-generation cheap model keeps the full request shape", async () =
 
   assert.deepEqual(params.thinking, { type: "adaptive" });
   assert.equal(params.output_config?.effort, "low");
+});
+
+test("effort defaults to low, because verification is what makes a thinner candidate safe", async () => {
+  // Not a quality concession: a candidate that comes back thin still has to
+  // clear protected-content, semantic and threshold gates, and is resampled
+  // if it does not. Thinking tokens bill as output tokens, so the API default
+  // of `high` is the difference between a viable plan and an unprofitable one
+  // (docs/BENCHMARKS.md). The figure that decides whether `low` is right is
+  // the verification rejection rate, which `npm run measure:cost` measures.
+  const client = fakeClient([reply(), reply()]);
+  await new ClaudeHumanizationProvider({ client }).rewrite(request());
+  assert.equal(client.calls[0].output_config?.effort, "low");
+
+  await new ClaudeHumanizationProvider({ client, effort: "max" }).rewrite(request());
+  assert.equal(client.calls[1].output_config?.effort, "max", "the sweep has to be able to move it");
 });

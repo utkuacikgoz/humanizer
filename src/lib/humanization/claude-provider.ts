@@ -48,12 +48,28 @@ export interface ClaudeProviderOptions {
   /** Exact model id. Never a dated suffix. */
   model?: ClaudeModelId;
   /**
-   * Depth control. `high` is the API default.
+   * Depth control. `high` is the API default; this engine defaults to `low`.
    *
-   * `medium` is chosen here because a 200-300 word rewrite is not a reasoning
-   * problem and the request path has a hard latency budget. This has NOT been
-   * swept against the benchmark — no API key was available when the provider
-   * was written — so treat it as a starting point, not a measured optimum.
+   * Two reasons, and the second is the one that matters.
+   *
+   * Humanizing a draft is constrained rewriting, not open-ended reasoning.
+   * The instructions are explicit, the input is bounded, the output shape is
+   * fixed by a schema, and there is nothing to plan or search. That is the
+   * shape of work `low` exists for.
+   *
+   * And a lower effort is SAFE HERE specifically because the pipeline
+   * verifies every candidate before the customer sees it. Effort is not a
+   * quality guarantee we are trading away — protected content, semantics and
+   * the quality thresholds are all still gates, and a thinner candidate that
+   * fails them is rejected and resampled rather than sold. That makes effort
+   * a cost/rejection-rate tradeoff rather than a cost/quality one.
+   *
+   * So the number to watch when changing this is the VERIFICATION REJECTION
+   * RATE, not a subjective read of the prose. A cheaper effort that gets
+   * rejected more often is resampled more often, and a rewrite that costs two
+   * calls at `low` is more expensive than one call at `medium`. Both figures
+   * come out of `npm run measure:cost`, which sweeps every level and prints
+   * them side by side. Set this from that output, not from taste.
    */
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
   /**
@@ -64,9 +80,20 @@ export interface ClaudeProviderOptions {
   maxTokens?: number;
   /** Overrides the provider's reported `name`, so a router can attribute rungs. */
   name?: string;
+  /**
+   * Extra beta flags, appended after the refusal-fallback one.
+   *
+   * Exists for the cost measurement, which may need to opt into reporting it
+   * does not want on the production request path. A beta flag changes what
+   * the server does; adding one here is a deliberate act by a caller that
+   * knows why, never a default.
+   */
+  extraBetas?: string[];
 }
 
 const DEFAULT_MODEL: ClaudeModelId = "claude-opus-5";
+/** See ClaudeProviderOptions.effort for why this is `low` and not the API's `high`. */
+const DEFAULT_EFFORT: NonNullable<ClaudeProviderOptions["effort"]> = "low";
 const DEFAULT_MAX_TOKENS = 16_000;
 
 /**
@@ -203,13 +230,15 @@ export class ClaudeHumanizationProvider implements HumanizationProvider {
   private readonly model: ClaudeModelId;
   private readonly effort: NonNullable<ClaudeProviderOptions["effort"]>;
   private readonly maxTokens: number;
+  private readonly betas: string[];
 
   constructor(options: ClaudeProviderOptions) {
     this.client = options.client;
     this.model = options.model ?? DEFAULT_MODEL;
-    this.effort = options.effort ?? "medium";
+    this.effort = options.effort ?? DEFAULT_EFFORT;
     this.maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
     this.name = options.name ?? `claude-${this.model}`;
+    this.betas = [FALLBACK_BETA, ...(options.extraBetas ?? [])];
   }
 
   /**
@@ -243,7 +272,7 @@ export class ClaudeHumanizationProvider implements HumanizationProvider {
             // we are about to sell.
             format: { type: "json_schema" as const, schema: REWRITE_OUTPUT_SCHEMA },
           },
-          betas: [FALLBACK_BETA],
+          betas: this.betas,
           fallbacks: "default",
           // Order is tools -> system -> messages. Both system blocks are
           // byte-stable, so the breakpoints land on a prefix that repeats
@@ -273,11 +302,17 @@ export class ClaudeHumanizationProvider implements HumanizationProvider {
     }
 
     const text = parseRewrite(message);
+    // `thinking_tokens` may be absent — an older model, or a response that
+    // simply did not report the breakdown. Undefined is recorded as unknown
+    // rather than as zero: "no thinking happened" and "nobody said" are
+    // different claims, and the whole cost question turns on this number.
+    const thinkingTokens = message.usage.output_tokens_details?.thinking_tokens;
     const usage = toProviderUsage(message.model ?? this.model, this.model, {
       inputTokens: message.usage.input_tokens ?? 0,
       outputTokens: message.usage.output_tokens ?? 0,
       cacheReadTokens: message.usage.cache_read_input_tokens ?? 0,
       cacheWriteTokens: message.usage.cache_creation_input_tokens ?? 0,
+      ...(typeof thinkingTokens === "number" ? { thinkingTokens } : {}),
     });
 
     return {

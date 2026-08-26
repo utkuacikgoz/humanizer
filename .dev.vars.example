@@ -53,7 +53,11 @@ RESEND_API_KEY=re_replace_me
 #
 # ANTHROPIC_API_KEY: https://console.anthropic.com -> API keys.
 # HUMANIZATION_EFFORT is optional (low | medium | high | xhigh | max) and
-# defaults to medium; it trades latency and cost against depth.
+# defaults to `low`, not the API's `high`. Thinking tokens bill at the
+# output rate, and a lower effort is safe here because the pipeline
+# verifies every candidate before a customer sees it. Raise it only from
+# what `npm run measure:cost` shows — the figure that matters is the
+# verification rejection rate, not a read of the prose.
 # HUMANIZATION_PROVIDER=claude
 # ANTHROPIC_API_KEY=sk-ant-replace_me
 # HUMANIZATION_EFFORT=medium

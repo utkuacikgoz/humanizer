@@ -85,6 +85,17 @@ export interface ProviderUsage {
   outputTokens?: number;
   /** Input tokens served from a provider-side cache, when the provider reports them. */
   cachedInputTokens?: number;
+  /**
+   * Output tokens the model spent on internal reasoning, when the provider
+   * reports them.
+   *
+   * Included in `outputTokens`, never additive to it — this says how much of
+   * that total was thinking. It is broken out because it is the single
+   * largest swing factor in what a rewrite costs: thinking bills at the
+   * output rate, adaptive thinking is on by default on the current models,
+   * and docs/BENCHMARKS.md's arithmetic turns entirely on this number.
+   */
+  thinkingTokens?: number;
   costUsd?: number;
   /** The model that served the call, for provenance on a stored job. */
   model?: string;
@@ -221,6 +232,8 @@ export interface UsageMetrics {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
+  /** The reasoning share of `outputTokens`. Zero when no provider reported it. */
+  thinkingTokens: number;
   /** Provider-reported cost, as distinct from the estimate above. */
   providerCostUsd: number;
 }

@@ -325,13 +325,33 @@ export async function POST(request: Request) {
 
           const result = await runtime.pipeline.humanize({ text, mode: mode as WritingMode, signal: controller.signal });
 
+          const unchanged = isMateriallyUnchanged(result.original, result.text) || result.improvements === 0;
+
+          // Unit economics, recorded for every rewrite the pipeline RETURNED
+          // — including the no-op below, which cost real money and delivers
+          // zero billable words. Counting its cost against zero words is not
+          // a distortion; it is the arithmetic that makes a provider quietly
+          // producing no-ops show up as an economic problem rather than a
+          // quality one. Numbers only; the guard never sees the text.
+          runtime.costGuard?.record({
+            costUsd: result.metrics.providerCostUsd,
+            words: unchanged ? 0 : result.metrics.successfulWords,
+            inputTokens: result.metrics.inputTokens,
+            outputTokens: result.metrics.outputTokens,
+            cachedInputTokens: result.metrics.cachedInputTokens,
+            thinkingTokens: result.metrics.thinkingTokens,
+            attempts: result.metrics.attempts,
+            providerName: result.providers.humanization,
+            ...(result.providers.resultModel ? { resultModel: result.providers.resultModel } : {}),
+          });
+
           // ACT-01: never truncate, price, or persist a rewrite that did
           // not rewrite anything. Derived from the normalized full
           // rewrite versus the normalized original — not from
           // `improvements` — and returned before any preview projection,
           // persistence, or capability minting happens, so no unlock CTA
           // can exist for this outcome anywhere downstream.
-          if (isMateriallyUnchanged(result.original, result.text) || result.improvements === 0) {
+          if (unchanged) {
             if (paidDb && paidReservation) await releasePaidUsage(paidDb, paidReservation);
             return { original: result.original, unchanged: true } satisfies UnchangedPayload;
           }

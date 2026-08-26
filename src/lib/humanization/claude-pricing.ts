@@ -58,6 +58,12 @@ export interface TokenCounts {
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  /**
+   * The reasoning share of `outputTokens`. Reported, not priced separately:
+   * it is already inside outputTokens and bills at the output rate. Carried
+   * so the measurement can see it.
+   */
+  thinkingTokens?: number;
 }
 
 /**
@@ -95,6 +101,7 @@ export function toProviderUsage(model: string, fallbackModel: string, counts: To
     inputTokens: counts.inputTokens + counts.cacheReadTokens + counts.cacheWriteTokens,
     outputTokens: counts.outputTokens,
     cachedInputTokens: counts.cacheReadTokens,
+    ...(counts.thinkingTokens === undefined ? {} : { thinkingTokens: counts.thinkingTokens }),
     costUsd: claudeCostUsd(model, fallbackModel, counts),
     model,
   };

@@ -228,3 +228,116 @@ Dark-pattern blockers:
 ## Required operational views
 
 Provide privacy-safe observability for checkout creation/success, webhook delay/failure/replay, entitlement projection drift, reservations older than threshold, quota invariant violations, payment-failure state, cancellations, and checkout-to-unlock completion. Operators can reconcile by opaque account/subscription/job ID without reading document contents.
+
+## Unit economics: what the measurement can show, and whose decision each outcome is
+
+Added 2026-08-26 by the Humanization Engine Agent (M4-01). **This section
+decides nothing.** It sets out the arithmetic, names the four things the
+measurement could show, and says what each would imply. Price and allowance
+are the owner's, and nothing in the engine changes either.
+
+### The structural fact, before any measurement
+
+Starter sells 50,000 words for $9.99. Pro sells 200,000 words for $19.00.
+
+- Starter earns **$0.000200 per word**.
+- Pro earns **$0.000095 per word** — 47% of Starter's rate.
+
+**Pro sells four times the allowance for less than twice the price, so it is
+strictly worse per word than Starter.** That is true today, with a free
+engine, and no measurement can change it. It means Pro is the plan that goes
+underwater first, and any inference cost is felt there at roughly twice the
+severity. It also means a heavy Starter user is the customer we would most
+like to move to Pro and the one we make the least money from when we do.
+
+Whether that ratio is deliberate — a volume discount, a land-grab, a
+simplification — is a commercial decision and it is the owner's. It is
+recorded here because every number below depends on it and because it was not
+visible anywhere in this document before.
+
+`src/lib/humanization/cost-guard.ts` derives its alarm from the **worst** plan
+for exactly this reason: averaging the two would hide Pro behind Starter.
+
+### What a rewrite costs, and why the number moves
+
+Cost per rewrite is dominated by two things that do not scale with document
+length: a roughly 1,500-token system prefix (cached, so cheap after the first
+call in a five-minute window) and however many **thinking tokens** the model
+spends. Thinking bills at the output rate, and on the current models adaptive
+thinking is on by default.
+
+docs/BENCHMARKS.md carries the modelled table. Its shape, for a 250-word
+rewrite on Claude Opus 5: about $0.011 with no thinking, about $0.049 at 1,500
+thinking tokens, about $0.086 at 3,000. Against a full Starter allowance that
+is $2.25, $9.75 and $17.25 of inference against $9.99 of revenue. Against a
+full Pro allowance it is $9.00, $39.00 and $69.00 against $19.00.
+
+**Those are modelled figures, not measurements.** `npm run measure:cost`
+replaces them with real ones: mean and p95 thinking, input, output and cached
+tokens from provider-reported usage, measured cost per rewrite, the
+verification rejection rate at each effort level, and both allowances priced
+beside what they earn. It refuses to run without a key rather than printing a
+model under a measured heading.
+
+Two things about the projection are worth stating plainly. It assumes a
+customer consumes the allowance in documents of the length the product
+actually accepts, because per-rewrite fixed overhead means the same allowance
+spent as 20-word fragments costs many times more. And it is a **floor**: a
+rewrite that fails verification costs money and delivers no billable words,
+and a routed rewrite that escalates pays for both models.
+
+### The four outcomes, and what each implies
+
+**1. Prices hold.** Measured cost per rewrite lands near the bottom of the
+modelled range — low effort, modest thinking, caching working. Starter keeps a
+comfortable margin and Pro keeps a workable one. Nothing changes; the cost
+guard stays on to catch drift. This is the outcome the default of
+`effort: "low"` is aiming at.
+
+**2. Effort must drop, or the model must.** Cost is viable at `low` and not at
+`high`. This is an engineering decision, not a pricing one, and it is already
+configurable (`HUMANIZATION_EFFORT`). The measurement has to be read as a
+pair: a cheaper effort that fails verification more often is resampled more
+often, and two calls at `low` cost more than one at `medium`. If no effort
+level is viable on Opus, the next lever is the model — Sonnet 5 at 40% of
+Opus's rate, or the cheap-first router — and that is a quality decision that
+needs the benchmark, not just the cost sweep.
+
+**3. Allowances must shrink.** Cost is irreducible and the allowances are
+simply too generous for the prices. Shrinking an allowance is a **price
+change in substance**: this document already requires that price or quota
+changes carry an explicit migration and grandfathering decision, and the
+dark-pattern list makes hidden material limits a blocker. Existing subscribers
+would need grandfathering or notice. Owner's decision, and the one with the
+most customer-facing consequence.
+
+**4. The plan structure itself is wrong.** The per-word inversion above is the
+strongest candidate here. If inference cost is material, a plan that earns
+half as much per word as the cheaper plan is the one that loses money, and
+raising Starter's price does not fix Pro. Options exist — a Pro price that
+restores the per-word rate, a smaller Pro allowance, usage-based overage above
+a floor, or accepting Pro as a deliberate loss leader — and **choosing among
+them is the owner's decision, not the engine's.** The engine's job is to make
+sure the number is known before the choice is made.
+
+### What is in place regardless of which outcome
+
+- **Per-rewrite ceiling.** One rewrite above $0.10 raises an operational alarm.
+  That is a runaway — maximum-effort thinking, a retry storm, a router paying
+  for both rungs — not a pricing signal.
+- **Sustained per-word ceiling.** Derived from the worst active plan and a 50%
+  target margin, so it moves automatically when a price or allowance changes.
+  This is the alarm that catches the failure a per-request ceiling cannot see:
+  every rewrite individually cheap, and the business losing money on all of
+  them. It is what makes it impossible for a plan to run underwater for a
+  month unnoticed.
+- **Durable record.** `job_attempts` carries a row per succeeded rewrite with
+  provider, model, tokens, cost and latency. Reconciliation is by opaque job
+  ID and never reads document contents.
+- **A live snapshot.** `humanizationCostSnapshot()` exposes mean cost per
+  rewrite, cost per word, mean thinking tokens, the cached-input share and
+  both breach flags, for the operational views this document requires. A
+  cached-input share near zero is a bug — the prompt prefix stopped matching
+  and the input bill roughly tripled — not a price.
+
+None of these change a price. They make sure a price is never wrong silently.
