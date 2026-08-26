@@ -5,10 +5,13 @@ import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../db/schema";
 import { runScheduledPurge } from "../src/lib/purge-worker";
 import { canonicalOrigin, normalizeHost } from "../src/lib/public-pages";
+import { recordRuntimeEnvironment } from "../src/lib/runtime-environment";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
+  /** `production` on a deployed build; see vite.config.ts's workerBindingConfig. */
+  ENVIRONMENT?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -70,6 +73,12 @@ function redirectWwwToApex(request: Request, url: URL): Response | null {
 
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // SEC-22. This is the only place the runtime bindings are in scope before
+    // a route runs, so it is where the deployment identity is recorded for
+    // the pure modules that must not import `cloudflare:workers`. Cheap and
+    // idempotent: it writes one module-level string per isolate.
+    recordRuntimeEnvironment(env.ENVIRONMENT);
+
     const url = new URL(request.url);
 
     const wwwRedirect = redirectWwwToApex(request, url);

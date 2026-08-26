@@ -32,6 +32,7 @@ import {
   identityBlocker,
   liveSessionCount,
   mintSignInLink,
+  signInBrowser,
   ownedJobIds,
   purgeTestAccount,
   storedPayload,
@@ -91,7 +92,7 @@ test("a customer signs in by link, rewrites, reads it in history, deletes it, an
 
   // --- Redeem the link ------------------------------------------------------
   const link = await mintSignInLink(BASE_URL, email, "/");
-  await page.goto(link.url, { waitUntil: "domcontentloaded" });
+  await signInBrowser(page, link);
   assert.equal(
     new URL(page.url()).pathname,
     "/",

@@ -56,6 +56,7 @@ import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pricingConfig } from "../../../src/config/pricing";
+import { DEV_LINK_NONCE_COOKIE } from "../../../src/lib/identity";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 const D1_DIR = path.join(REPO_ROOT, ".wrangler/state/v3/d1/miniflare-D1DatabaseObject");
@@ -160,6 +161,8 @@ export function testEmail(label: string): string {
 }
 
 export interface MintedLink {
+  /** The raw browser nonce this link was bound to, absent for a deliberately unbound link. */
+  nonce?: string;
   /**
    * The absolute verify URL, exactly as `src/lib/magic-link.ts` composes it
    * into the email body. Carries a live credential: navigate to it, never
@@ -189,15 +192,23 @@ export async function mintSignInLink(
   const issuedAt = options.issuedAt ?? Date.now();
   const expiresAt = options.expiresAt ?? issuedAt + MAGIC_LINK_TTL_MS;
 
+  // The browser nonce is what binds a link to the browser that asked for it
+  // (SEC-17). Minting it here mirrors what buildSignInRequestResponse does:
+  // the digest goes in the row, the raw value goes in the requesting browser's
+  // cookie jar. A link minted without one is exactly the attacker's link, and
+  // the suite exercises that case deliberately in the cross-browser test.
+  const nonce = randomToken();
+  const nonceDigest = await digestToken(nonce);
+
   withDb((db) => {
     db.prepare(
-      `insert into auth_magic_link_tokens (id, token_digest, email, created_at, expires_at, attempt_count)
-       values (?, ?, ?, ?, ?, 0)`,
-    ).run(randomUUID(), tokenDigest, email, issuedAt, expiresAt);
+      `insert into auth_magic_link_tokens (id, token_digest, browser_nonce_digest, email, created_at, expires_at, attempt_count)
+       values (?, ?, ?, ?, ?, ?, 0)`,
+    ).run(randomUUID(), tokenDigest, nonceDigest, email, issuedAt, expiresAt);
   });
 
   const url = `${baseUrl}/api/auth/verify?token=${encodeURIComponent(token)}&return_to=${encodeURIComponent(returnTo)}`;
-  return { url, email };
+  return { url, email, nonce };
 }
 
 /**
@@ -209,9 +220,28 @@ export async function mintSignInLink(
  * instead of resolving (docs/QA.md).
  */
 export async function signInBrowser(
-  page: { goto(url: string, options?: { waitUntil?: "domcontentloaded" }): Promise<unknown>; url(): string },
+  page: {
+    goto(url: string, options?: { waitUntil?: "domcontentloaded" }): Promise<unknown>;
+    url(): string;
+    context(): { addCookies(cookies: unknown[]): Promise<unknown> };
+  },
   link: MintedLink,
 ): Promise<void> {
+  // Present the nonce this link was minted with, which is what the browser
+  // that requested it would carry. Without it the server correctly refuses to
+  // create a session silently and renders the confirmation page instead, so a
+  // suite that skipped this step would be testing the attacker's path and
+  // calling it the customer's.
+  if (link.nonce) {
+    await page.context().addCookies([{
+      name: DEV_LINK_NONCE_COOKIE,
+      value: link.nonce,
+      domain: "localhost",
+      path: "/",
+      httpOnly: true,
+      sameSite: "Lax" as const,
+    }]);
+  }
   await page.goto(link.url, { waitUntil: "domcontentloaded" });
 }
 
