@@ -5,7 +5,17 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { MIN_HIDDEN_WORDS, projectPreview, shouldOfferUnlock } from "../src/lib/preview-projection";
-import { isTrustedIdentityHost, readSessionCookie, safeRelativeReturnPath, DEV_SESSION_COOKIE, SESSION_COOKIE } from "../src/lib/identity";
+import {
+  canonicalEmailForRateLimit,
+  clientRateLimitKey,
+  isSecureRequest,
+  isTrustedIdentityHost,
+  readSessionCookie,
+  safeRelativeReturnPath,
+  DEV_SESSION_COOKIE,
+  SESSION_COOKIE,
+} from "../src/lib/identity";
+import { recordRuntimeEnvironment, resetRuntimeEnvironmentForTests } from "../src/lib/runtime-environment";
 
 function words(count: number) {
   return Array.from({ length: count }, (_, i) => `word${i}`).join(" ");
@@ -278,4 +288,64 @@ test("SEC-17: the indicator survives the mobile header, where an emailed link is
   // And it is never cut short: a truncated address answers the question badly.
   assert.match(css, /\.account-address\s*\{[^}]*overflow-wrap:\s*anywhere/);
   assert.doesNotMatch(css, /\.account-address\s*\{[^}]*text-overflow:\s*ellipsis/);
+});
+
+// SEC-22 — the plain-http cookie fallback was kept out of production by
+// `workers_dev: false` plus custom-domain routing, which is deployment
+// configuration holding a security property rather than code holding it.
+
+test("SEC-22: a production isolate claims no dev host and reads no unprefixed cookie", () => {
+  const value = "cccccccccccccccccccccccccccccccccccccccccc";
+  const localhost = new Headers({ host: "localhost", cookie: `${DEV_SESSION_COOKIE}=${value}` });
+
+  try {
+    assert.equal(readSessionCookie(localhost), value, "unset ENVIRONMENT is local development, and must keep working");
+    assert.equal(isTrustedIdentityHost(localhost), true);
+
+    recordRuntimeEnvironment("production");
+    assert.equal(readSessionCookie(localhost), null, "a production build must not honor the unprefixed name");
+    assert.equal(isTrustedIdentityHost(localhost), false, "and must not claim the dev host at all");
+    assert.equal(isTrustedIdentityHost(new Headers({ host: "ownword.pro" })), true, "the real host still resolves");
+  } finally {
+    resetRuntimeEnvironmentForTests();
+  }
+});
+
+test("SEC-22: the scheme comes from the request URL, which a client cannot forge", () => {
+  const forged = new Request("https://ownword.pro/api/auth/request-link", {
+    headers: { host: "ownword.pro", "x-forwarded-proto": "http" },
+  });
+  assert.equal(isSecureRequest(forged), true, "a genuine https request must not be talked out of it");
+
+  const plain = new Request("http://localhost/api/auth/request-link", {
+    headers: { host: "localhost", "x-forwarded-proto": "https" },
+  });
+  assert.equal(isSecureRequest(plain), false, "nor a plain-http one talked into it");
+});
+
+// SEC-19 — the bucket key, in isolation.
+
+test("SEC-19: the counter key folds what one inbox actually receives", () => {
+  const cases: Array<[string, string]> = [
+    ["target+tag@gmail.com", "target@gmail.com"],
+    ["t.a.r.g.e.t@gmail.com", "target@gmail.com"],
+    ["target@googlemail.com", "target@gmail.com"],
+    ["ta.rget+x@googlemail.com", "target@gmail.com"],
+    // Plus-tagging is an addressing convention, so it folds everywhere.
+    ["person+news@outlook.com", "person@outlook.com"],
+    // Dots are NOT folded at a provider that treats them as significant:
+    // merging those would join two different people's budgets.
+    ["a.b@outlook.com", "a.b@outlook.com"],
+    ["plain@example.com", "plain@example.com"],
+  ];
+  for (const [input, expected] of cases) {
+    assert.equal(canonicalEmailForRateLimit(input), expected, `${input} folded wrong`);
+  }
+});
+
+test("SEC-19: an IPv6 client key is its /64, and IPv4 is untouched", () => {
+  assert.equal(clientRateLimitKey("203.0.113.7"), "203.0.113.7");
+  const first = clientRateLimitKey("2001:db8:abcd:1234:0:0:0:1");
+  assert.equal(clientRateLimitKey("2001:db8:abcd:1234::feed"), first, "one /64 is one key");
+  assert.notEqual(clientRateLimitKey("2001:db8:abcd:9999::1"), first, "a different /64 is a different subscriber");
 });

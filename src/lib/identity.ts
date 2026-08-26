@@ -16,6 +16,7 @@
 // ambient-request-context variants for RSC/page code live in app/auth.ts,
 // which wraps these — keep that split.
 import { productConfig } from "@/src/config/product";
+import { isProductionEnvironment } from "@/src/lib/runtime-environment";
 import type { AppDatabase } from "../../db/repository";
 import type { SessionIdentity } from "../../db/auth-repository";
 
@@ -95,13 +96,23 @@ export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export function isTrustedIdentityHost(source: Request | Headers): boolean {
   const hostname = hostnameOf(source);
   if (!hostname) return false;
-  if (DEV_HOSTS.has(hostname)) return true;
+  // Via isDevHost, so a production isolate does not claim a dev host at all:
+  // there is one gate on the dev names, not two that can drift (SEC-22).
+  if (isDevHost(source)) return true;
   const configured = productConfig.domain.trim().toLowerCase();
   if (!configured) return false;
   return hostname === configured || hostname === `www.${configured}`;
 }
 
 export function isDevHost(source: Request | Headers): boolean {
+  // SEC-22. The unprefixed, non-`Secure` cookie name is reachable only
+  // through this predicate, and until now the only thing keeping it out of
+  // production was `workers_dev: false` plus custom-domain-only routes in
+  // vite.config.ts. That is routing configuration holding a security
+  // property. A production build declares `ENVIRONMENT: "production"`
+  // (vite.config.ts), and this makes the code hold it: on that binding the
+  // dev host set is empty, whatever Host header arrives.
+  if (isProductionEnvironment()) return false;
   return DEV_HOSTS.has(hostnameOf(source));
 }
 
@@ -120,11 +131,32 @@ function hostnameOf(source: Request | Headers): string {
   return "";
 }
 
-/** True when the connection carrying this request is TLS-protected. */
+/**
+ * True when the connection carrying this request is TLS-protected.
+ *
+ * SEC-22. This used to read `x-forwarded-proto` FIRST and fall back to the
+ * URL. On a Cloudflare Worker that is exactly backwards: the request URL is
+ * populated by the runtime and is unforgeable, while the header is neither.
+ * A genuine https sign-in request carrying `x-forwarded-proto: http` was
+ * answered "Sign-in requires a secure connection" and mailed nothing, and a
+ * request carrying both `Host: localhost` and `x-forwarded-proto: http` was
+ * issued the unprefixed, non-`Secure` cookie name.
+ *
+ * Only self-denial was reachable through it, because headers cannot be
+ * injected into someone else's request. But two security properties this
+ * module states outright — that Secure is never quietly dropped, and that the
+ * unprefixed cookie name is only ever read on a dev host — were resting on a
+ * client-controlled value. They rest on the URL now. The header is consulted
+ * only when the URL yields no scheme at all, which on a Worker does not
+ * happen.
+ */
 export function isSecureRequest(request: Request): boolean {
+  try {
+    const protocol = new URL(request.url).protocol;
+    if (protocol === "https:" || protocol === "http:") return protocol === "https:";
+  } catch { /* fall through to the header */ }
   const forwarded = request.headers.get("x-forwarded-proto")?.split(",")[0].trim().toLowerCase();
-  if (forwarded) return forwarded === "https";
-  try { return new URL(request.url).protocol === "https:"; } catch { return false; }
+  return forwarded === "https";
 }
 
 export function signInPath(returnTo: string): string {
@@ -202,6 +234,83 @@ const EMAIL_SHAPE = /^[^\s@,;:<>"'\\]{1,64}@[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z
  */
 export function isPlausibleEmail(value: string): boolean {
   return value.length <= 254 && EMAIL_SHAPE.test(value);
+}
+
+/**
+ * SEC-19. The address folded to the inbox it will actually reach, for
+ * rate-limit bucketing ONLY.
+ *
+ * `MAGIC_LINK_LIMITS.perEmail` is described as the mail-bomb bound, and it
+ * bucketed on the exact normalized string. Gmail-style `+tag` suffixes and
+ * dots in the local part produce different strings that deliver to one inbox,
+ * so ten aliases of one address were accepted from a single source and each
+ * alias got its own budget; refusal only arrived at 15, from the per-client
+ * bound. Three times the documented bound, at one victim's inbox, in
+ * genuine correctly-signed mail from a verified domain.
+ *
+ * NEVER use this for storage, for mail, or for account identity. The address
+ * a customer typed is the address that gets the link and the address the
+ * account is keyed on: `a.b@gmail.com` and `ab@gmail.com` are one inbox at
+ * Google and could be two different people at a provider that does not fold
+ * dots, and merging them would silently join two accounts. This is a counter
+ * key and nothing else, which is why it is applied IN ADDITION to the
+ * exact-string bucket rather than instead of it.
+ *
+ * Dot-folding is applied only to providers known to do it. Plus-tagging is
+ * folded everywhere: it is an addressing convention, not a provider feature,
+ * and an address that does not use it is unaffected.
+ */
+const DOT_FOLDING_DOMAINS = new Set(["gmail.com", "googlemail.com"]);
+/** Provider aliases that are the same mailbox, not merely the same company. */
+const DOMAIN_ALIASES: Record<string, string> = { "googlemail.com": "gmail.com" };
+
+export function canonicalEmailForRateLimit(normalizedEmail: string): string {
+  const at = normalizedEmail.lastIndexOf("@");
+  if (at <= 0) return normalizedEmail;
+  let local = normalizedEmail.slice(0, at);
+  const rawDomain = normalizedEmail.slice(at + 1);
+  const domain = DOMAIN_ALIASES[rawDomain] ?? rawDomain;
+
+  const tag = local.indexOf("+");
+  if (tag > 0) local = local.slice(0, tag);
+  if (DOT_FOLDING_DOMAINS.has(rawDomain)) local = local.replace(/\./g, "");
+
+  // A local part that folds away entirely (`+tag@x`, `.@gmail.com`) is not a
+  // deliverable address, but it must still bucket somewhere deterministic
+  // rather than collapsing every such attempt onto one shared counter with
+  // real addresses.
+  return `${local || normalizedEmail.slice(0, at)}@${domain}`;
+}
+
+/**
+ * SEC-19, second half. The abuse-counter identity of a client address.
+ *
+ * An IPv6 client holding a routine /64 has 2^64 source addresses, so
+ * bucketing on the literal address means the per-client bound stops bounding
+ * anything the moment an attacker is on IPv6 — which is the real ceiling the
+ * audit named. /64 is the standard allocation to a single subscriber and is
+ * the conventional unit for abuse counters. IPv4 is unchanged.
+ */
+export function clientRateLimitKey(value: string): string {
+  if (!value.includes(":")) return value;
+  let hostname: string;
+  try {
+    hostname = new URL(`http://[${value}]/`).hostname;
+  } catch {
+    return value;
+  }
+  // `new URL` normalizes to the compressed form; expand enough to take the
+  // first four groups, which is the /64.
+  const inner = hostname.replace(/^\[|\]$/g, "");
+  const [head, tail = ""] = inner.split("::");
+  const headGroups = head ? head.split(":") : [];
+  const tailGroups = tail ? tail.split(":") : [];
+  const missing = 8 - headGroups.length - tailGroups.length;
+  const groups = inner.includes("::")
+    ? [...headGroups, ...Array(Math.max(0, missing)).fill("0"), ...tailGroups]
+    : headGroups;
+  if (groups.length < 8) return value;
+  return `${groups.slice(0, 4).map((group) => group.padStart(4, "0")).join(":")}::/64`;
 }
 
 /** `email:` namespaced so an address identity can never collide with a legacy external subject. */
@@ -387,7 +496,13 @@ export async function resolveSessionUser(
  */
 export function isCrossSiteRequest(request: Request): boolean {
   const origin = request.headers.get("origin");
-  if (!origin || origin === "null") return false;
+  if (!origin) return false;
+  // `Origin: null` is an opaque origin — a sandboxed iframe, a `file://`
+  // page, some redirect chains. It is a present Origin that names no site
+  // this application serves, so it is cross-site; nothing legitimate here
+  // sends it, and treating it as "missing" gave it the benefit of the doubt
+  // reserved for callers that send no Origin at all.
+  if (origin === "null") return true;
   try {
     return new URL(origin).host.toLowerCase() !== new URL(request.url).host.toLowerCase();
   } catch {

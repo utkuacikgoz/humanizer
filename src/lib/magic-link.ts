@@ -30,6 +30,8 @@ import type { EmailSender } from "@/src/lib/email-sender";
 import { EmailDeliveryError } from "@/src/lib/email-sender";
 import {
   buildLinkNonceCookie,
+  canonicalEmailForRateLimit,
+  clientRateLimitKey,
   buildSessionCookie,
   clearedLinkNonceCookies,
   clearedSessionCookies,
@@ -57,10 +59,43 @@ export const MAGIC_LINK_TTL_MS = 15 * 60 * 1000;
 /** Fixed windows, same shape as the preview guard's. */
 export const MAGIC_LINK_LIMITS = {
   windowMs: 60 * 60 * 1000,
-  /** Links mailed to one address per hour. This is the mail-bomb bound. */
+  /**
+   * Links mailed to one address per hour, on the exact string the customer
+   * typed. Kept, but it is no longer the mail-bomb bound on its own: see
+   * `perInbox`.
+   */
   perEmail: 5,
+  /**
+   * SEC-19. Links mailed to one INBOX per hour, counted on the address folded
+   * to what the mail provider will actually deliver to
+   * (`canonicalEmailForRateLimit`). This is the mail-bomb bound.
+   *
+   * The exact-string bucket was described as that bound and was not: ten
+   * `+tag` and dot aliases of one Gmail address were accepted from a single
+   * source, each with its own budget, and refusal only arrived at 15 from the
+   * per-client bound. Three times the documented figure, delivered to one
+   * inbox as genuine correctly-signed mail from a verified domain.
+   */
+  perInbox: 5,
   /** Links requested by one client per hour, whatever addresses they name. */
   perClient: 15,
+  /**
+   * SEC-20. Redemption attempts admitted from one client per hour.
+   *
+   * Redemption was the one write path in this flow with no bound at all: 25
+   * invented tokens were answered with 25 redirects and 50 UPDATEs, no
+   * refusal at any point. The tokens are not guessable — 256 bits of CSPRNG,
+   * and the single-use guard holds — so what this closes is not credential
+   * guessing but a free unauthenticated write amplifier against the database
+   * that also serves entitlement and quota decisions.
+   *
+   * Generous on purpose. A person redeems one or two links an hour; a mail
+   * provider that prefetches links, a customer retrying a stale tab, and the
+   * confirmation POST following its own GET all spend from this budget, and
+   * refusing a real sign-in is a worse outcome than admitting a few dozen
+   * failed lookups.
+   */
+  perClientVerify: 30,
 } as const;
 
 const NO_STORE = { "cache-control": "no-store" } as const;
@@ -77,7 +112,7 @@ export interface AuthPort {
   insertMagicLinkToken(db: AppDatabase, input: { tokenDigest: string; email: string; issuedAt: Date; expiresAt: Date; browserNonceDigest?: string | null }): Promise<void>;
   consumeMagicLinkToken(db: AppDatabase, input: { tokenDigest: string; now: Date }): Promise<{ email: string } | null>;
   consumeMagicLinkTokenForBrowser(db: AppDatabase, input: { tokenDigest: string; nonceDigest: string; now: Date }): Promise<{ email: string } | null>;
-  findRedeemableMagicLinkToken(db: AppDatabase, input: { tokenDigest: string; now: Date }): Promise<{ email: string } | null>;
+  findMagicLinkTokenState(db: AppDatabase, input: { tokenDigest: string; now: Date }): Promise<{ issued: boolean; redeemable: boolean; email: string | null }>;
   recordMagicLinkAttempt(db: AppDatabase, tokenDigest: string): Promise<void>;
   consumeOutstandingLinksForEmail(db: AppDatabase, input: { email: string; now: Date }): Promise<void>;
   createSession(db: AppDatabase, input: { sessionDigest: string; userId: string; issuedAt: Date; expiresAt: Date }): Promise<void>;
@@ -151,7 +186,7 @@ function originOf(request: Request): string {
  * link in the privacy chain — but a counter table that outlives the token it
  * counted should not be the thing that says who tried to sign in and when.
  */
-async function bucketKey(kind: "email" | "client", value: string): Promise<string> {
+async function bucketKey(kind: "email" | "inbox" | "client" | "verify", value: string): Promise<string> {
   return digestToken(`auth-rate-limit\0${kind}\0${value}`);
 }
 
@@ -208,6 +243,20 @@ export async function buildSignInRequestResponse(
   // The address bound is checked first and always: it is what stops one
   // person's inbox being used as a weapon, and it applies whether or not the
   // address has an account.
+  //
+  // SEC-19: two buckets, not one. The inbox bucket is the real bound — it
+  // folds `+tag` and (at providers that do it) dots, so aliases of one
+  // address share one budget. The exact-string bucket stays alongside it
+  // because folding is a heuristic about delivery, and a heuristic must not
+  // be the only thing bounding a mail path.
+  const admittedInbox = await deps.auth.admitRateLimitedRequest(deps.db, {
+    bucketKey: await bucketKey("inbox", canonicalEmailForRateLimit(email)),
+    windowStart,
+    limit: MAGIC_LINK_LIMITS.perInbox,
+    now: now.getTime(),
+  });
+  if (!admittedInbox) return rateLimited(now, windowStart);
+
   const admittedEmail = await deps.auth.admitRateLimitedRequest(deps.db, {
     bucketKey: await bucketKey("email", email),
     windowStart,
@@ -218,7 +267,10 @@ export async function buildSignInRequestResponse(
 
   if (clientIp) {
     const admittedClient = await deps.auth.admitRateLimitedRequest(deps.db, {
-      bucketKey: await bucketKey("client", clientIp),
+      // SEC-19, second half: an IPv6 client holding a routine /64 has 2^64
+      // source addresses, so bucketing on the literal address means this
+      // bound stops bounding anything the moment an attacker is on IPv6.
+      bucketKey: await bucketKey("client", clientRateLimitKey(clientIp)),
       windowStart,
       limit: MAGIC_LINK_LIMITS.perClient,
       now: now.getTime(),
@@ -364,6 +416,45 @@ function failedVerification(returnTo: string) {
   return redirect(`${SIGN_IN_PATH}?error=link&return_to=${encodeURIComponent(returnTo)}`);
 }
 
+/**
+ * SEC-20. The bound on redemption, shared by the navigation and the confirmed
+ * POST so the two cannot be played off against each other.
+ *
+ * Returns null when the attempt is admitted, or the response to send instead.
+ * That response is the "unavailable" state, never "expired link": a customer
+ * throttled behind a shared address holds a link that is still perfectly
+ * good, and telling them it expired would send them round a loop that cannot
+ * work.
+ *
+ * No client signal and not a dev host is refused, matching the request path.
+ * It is the same `cf-connecting-ip` header, so if it were ever absent no
+ * links would have been issued to redeem in the first place.
+ */
+async function admitRedemption(
+  request: Request,
+  deps: MagicLinkDeps,
+  now: Date,
+  safeReturnTo: string,
+): Promise<Response | null> {
+  const unavailable = () => redirect(`${SIGN_IN_PATH}?error=unavailable&return_to=${encodeURIComponent(safeReturnTo)}`);
+
+  const clientIp = trustedConnectingIp(request);
+  if (!clientIp) {
+    if (isDevHost(request)) return null;
+    console.error("[auth] refusing redemption: no cf-connecting-ip, so the per-client bound cannot be enforced");
+    return unavailable();
+  }
+
+  const windowStart = Math.floor(now.getTime() / MAGIC_LINK_LIMITS.windowMs) * MAGIC_LINK_LIMITS.windowMs;
+  const admitted = await deps.auth.admitRateLimitedRequest(deps.db, {
+    bucketKey: await bucketKey("verify", clientRateLimitKey(clientIp)),
+    windowStart,
+    limit: MAGIC_LINK_LIMITS.perClientVerify,
+    now: now.getTime(),
+  });
+  return admitted ? null : unavailable();
+}
+
 export async function buildVerifyResponse(
   request: Request,
   loadDeps: () => Promise<MagicLinkDeps>,
@@ -385,6 +476,10 @@ export async function buildVerifyResponse(
   // message.
   if (!deps) return redirect(`${SIGN_IN_PATH}?error=unavailable&return_to=${encodeURIComponent(safeReturnTo)}`);
   const now = (deps.now ?? (() => new Date()))();
+
+  const throttled = await admitRedemption(request, deps, now, safeReturnTo);
+  if (throttled) return throttled;
+
   const tokenDigest = await digestToken(token);
 
   const nonce = readLinkNonceCookie(request);
@@ -400,14 +495,20 @@ export async function buildVerifyResponse(
 
   // No nonce, or one that binds a different link. Not a failure and not a
   // sign-in: a question. Read-only, and it decides only which page to render.
-  const pending = await deps.auth.findRedeemableMagicLinkToken(deps.db, { tokenDigest, now });
+  const pending = await deps.auth.findMagicLinkTokenState(deps.db, { tokenDigest, now });
   // A dead link answers exactly as it always did, so expired, spent, unknown
   // and tampered remain one indistinguishable outcome. The attempt is counted
   // here and only here on this path: a nonce that does not match a LIVE link
   // is an ordinary second device, not evidence of anything, and counting it
   // would turn the column into noise.
-  if (!pending) {
-    try { await deps.auth.recordMagicLinkAttempt(deps.db, tokenDigest); } catch { /* evidence, not a control */ }
+  //
+  // SEC-20: the counter UPDATE runs only against a digest that was actually
+  // issued. Against an invented one it matched no row and recorded nothing,
+  // so it was pure write amplification.
+  if (!pending.redeemable || !pending.email) {
+    if (pending.issued) {
+      try { await deps.auth.recordMagicLinkAttempt(deps.db, tokenDigest); } catch { /* evidence, not a control */ }
+    }
     return failedVerification(safeReturnTo);
   }
 
@@ -448,6 +549,9 @@ export async function buildVerifyConfirmationResponse(
   const deps = await tryLoadDeps(loadDeps, "verify-confirm");
   if (!deps) return redirect(`${SIGN_IN_PATH}?error=unavailable&return_to=${encodeURIComponent(safeReturnTo)}`);
   const now = (deps.now ?? (() => new Date()))();
+
+  const throttled = await admitRedemption(request, deps, now, safeReturnTo);
+  if (throttled) return throttled;
 
   // Single use is still one guarded write. The nonce is deliberately not
   // required here — that is the point of this path — so the Origin check

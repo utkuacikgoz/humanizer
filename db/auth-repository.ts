@@ -125,7 +125,8 @@ export async function recordMagicLinkAttempt(db: AppDatabase, tokenDigest: strin
 }
 
 /**
- * The address a still-live link would sign someone in as, or null.
+ * What a presented digest is: never issued, issued but dead, or still
+ * redeemable and to which address.
  *
  * Read-only and deliberately so: it decides which PAGE to render, never
  * whether a session is created. The single-use decision stays where it has
@@ -133,23 +134,31 @@ export async function recordMagicLinkAttempt(db: AppDatabase, tokenDigest: strin
  * on the one-click path or `consumeMagicLinkToken` on the confirmed POST — so
  * this is not the read half of a read-then-write.
  *
- * Expired, spent, and never-issued all return null, so the failure the caller
- * renders stays the single indistinguishable one.
+ * `issued` exists for SEC-20: an attempt against a digest that was never
+ * issued records nothing anywhere, so the caller can skip the counter UPDATE
+ * entirely rather than issuing a write that matches no row. Expired, spent
+ * and never-issued are still one indistinguishable outcome to the caller's
+ * VISITOR — `redeemable` is false for all three and the response is identical.
  */
-export async function findRedeemableMagicLinkToken(
+export async function findMagicLinkTokenState(
   db: AppDatabase,
   input: { tokenDigest: string; now: Date },
-): Promise<{ email: string } | null> {
+): Promise<{ issued: boolean; redeemable: boolean; email: string | null }> {
   const [row] = await db
-    .select({ email: authMagicLinkTokens.email })
+    .select({
+      email: authMagicLinkTokens.email,
+      consumedAt: authMagicLinkTokens.consumedAt,
+      expiresAt: authMagicLinkTokens.expiresAt,
+    })
     .from(authMagicLinkTokens)
-    .where(and(
-      eq(authMagicLinkTokens.tokenDigest, input.tokenDigest),
-      isNull(authMagicLinkTokens.consumedAt),
-      gt(authMagicLinkTokens.expiresAt, input.now),
-    ))
+    .where(eq(authMagicLinkTokens.tokenDigest, input.tokenDigest))
     .limit(1);
-  return row ? { email: row.email } : null;
+
+  if (!row) return { issued: false, redeemable: false, email: null };
+  const redeemable = row.consumedAt === null && row.expiresAt.getTime() > input.now.getTime();
+  // The address is released only for a link that could still be redeemed, so
+  // a spent token cannot be used to read back the address it was mailed to.
+  return { issued: true, redeemable, email: redeemable ? row.email : null };
 }
 
 /**

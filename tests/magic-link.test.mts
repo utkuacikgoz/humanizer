@@ -52,7 +52,7 @@ function recordingSender() {
  *                and neither may be signed in by the navigation itself.
  *   * a string — a browser holding some other nonce.
  */
-type VerifyOptions = { cookie?: string; nonce?: string | null; origin?: string };
+type VerifyOptions = { cookie?: string; nonce?: string | null; origin?: string; clientIp?: string | null };
 
 type Harness = {
   db: AppDatabase;
@@ -63,7 +63,7 @@ type Harness = {
   request(email: string, options?: { returnTo?: string; origin?: string; host?: string; headers?: Record<string, string> }): Promise<Response>;
   verify(link: string, options?: VerifyOptions): Promise<Response>;
   /** The confirmation POST the GET's confirmation page submits. */
-  confirm(input: { token: string; returnTo?: string; host?: string; origin?: string | null; contentType?: string; cookie?: string }): Promise<Response>;
+  confirm(input: { token: string; returnTo?: string; host?: string; origin?: string | null; contentType?: string; cookie?: string; clientIp?: string | null }): Promise<Response>;
   signOut(cookie?: string, options?: { origin?: string }): Promise<Response>;
   sessionState(cookie?: string): Promise<Response>;
   linkFrom(message: EmailMessage): string;
@@ -131,12 +131,17 @@ async function harness(): Promise<Harness> {
         ...(options.cookie ? [options.cookie] : []),
         ...(nonce ? [nonceCookieHeader(url.hostname, nonce)] : []),
       ];
+      // A real Worker always populates cf-connecting-ip; the redemption bound
+      // (SEC-20) is keyed on it. `clientIp: null` drops it, which is how the
+      // fail-closed posture gets exercised.
+      const clientIp = options.clientIp === undefined ? CLIENT_IP : options.clientIp;
       return buildVerifyResponse(
         new Request(link, {
           headers: {
             host: url.host,
             ...(jar.length ? { cookie: jar.join("; ") } : {}),
             ...(options.origin ? { origin: options.origin } : {}),
+            ...(clientIp ? { "cf-connecting-ip": clientIp } : {}),
           },
         }),
         loadDeps,
@@ -147,6 +152,7 @@ async function harness(): Promise<Harness> {
       const scheme = host === "localhost" ? "http" : "https";
       const origin = input.origin === undefined ? `${scheme}://${host}` : input.origin;
       const body = new URLSearchParams({ token: input.token, return_to: input.returnTo ?? "/" });
+      const clientIp = input.clientIp === undefined ? CLIENT_IP : input.clientIp;
       return buildVerifyConfirmationResponse(
         new Request(`${scheme}://${host}/api/auth/verify`, {
           method: "POST",
@@ -155,6 +161,7 @@ async function harness(): Promise<Harness> {
             "content-type": input.contentType ?? "application/x-www-form-urlencoded",
             ...(origin ? { origin } : {}),
             ...(input.cookie ? { cookie: input.cookie } : {}),
+            ...(clientIp ? { "cf-connecting-ip": clientIp } : {}),
           },
           body: body.toString(),
         }),
@@ -995,4 +1002,183 @@ test("SEC-17: the confirmation page escapes the address it names", async () => {
   const html = await confirmationBody(await h.verify(link, { nonce: null }));
   assert.doesNotMatch(html, /<script>alert/);
   assert.match(html, /&lt;script&gt;/);
+});
+
+// ---------------------------------------------------------------------------
+// SEC-19 — the per-address bound was keyed on the exact string, so provider
+// aliasing mail-bombed one inbox past it.
+// ---------------------------------------------------------------------------
+
+test("SEC-19: provider aliases of one address share one budget", async () => {
+  const h = await harness();
+  // The proven probe: ten aliases of one Gmail address, one source. All ten
+  // were accepted, and refusal came only at 15 from the per-client bound.
+  const aliases = [
+    "target@gmail.com", "t.arget@gmail.com", "ta.rget@gmail.com", "tar.get@gmail.com",
+    "target+one@gmail.com", "target+two@gmail.com", "t.a.r.g.e.t@gmail.com",
+    "target+three@gmail.com", "targ.et+four@gmail.com", "target@googlemail.com",
+  ];
+
+  let admitted = 0;
+  for (const alias of aliases) {
+    if ((await h.request(alias)).status === 200) admitted += 1;
+  }
+  assert.equal(admitted, MAGIC_LINK_LIMITS.perInbox, `ten aliases must not buy ten links, got ${admitted}`);
+  assert.equal(h.sent.length, MAGIC_LINK_LIMITS.perInbox, "the inbox bound is what stops it, not the per-client one");
+  assert.ok(MAGIC_LINK_LIMITS.perInbox < MAGIC_LINK_LIMITS.perClient, "the mail-bomb bound must bind before the client bound");
+});
+
+test("SEC-19: folding is for counting only, never for delivery or identity", async () => {
+  const h = await harness();
+  // The address that gets the link is the address that was typed. Folding
+  // `a.b+tag@gmail.com` onto `ab@gmail.com` for mail would deliver someone
+  // else's link, and for accounts would merge two people.
+  const response = await h.request("A.B+Newsletter@Gmail.com");
+  assert.equal(response.status, 200);
+  assert.equal(h.sent[0].to, "a.b+newsletter@gmail.com");
+
+  const [token] = await h.db.select().from(schema.authMagicLinkTokens);
+  assert.equal(token.email, "a.b+newsletter@gmail.com", "storage keeps the address as typed");
+
+  await h.verify(h.linkFrom(h.sent[0]));
+  const [user] = await h.db.select().from(schema.users);
+  assert.equal(user.externalSubject, emailSubject("a.b+newsletter@gmail.com"));
+});
+
+test("SEC-19: two genuinely different addresses are never merged into one budget", async () => {
+  const h = await harness();
+  // Dot folding is applied only where the provider actually does it. At a
+  // provider that does not, these are two different people.
+  for (let attempt = 0; attempt < MAGIC_LINK_LIMITS.perInbox; attempt += 1) {
+    assert.equal((await h.request("a.b@example.com")).status, 200);
+  }
+  assert.equal((await h.request("a.b@example.com")).status, 429, "the same address is bounded");
+  assert.equal((await h.request("ab@example.com")).status, 200, "a different address at a non-folding provider is not");
+});
+
+test("SEC-19: an IPv6 client is bucketed on its /64, not on one of its 2^64 addresses", async () => {
+  const h = await harness();
+  let admitted = 0;
+  for (let attempt = 0; attempt < MAGIC_LINK_LIMITS.perClient + 5; attempt += 1) {
+    // A routine subscriber allocation. Every request is a fresh source
+    // address inside one /64.
+    const response = await h.request(`person${attempt}@example.com`, {
+      headers: { "cf-connecting-ip": `2001:db8:abcd:1234::${(attempt + 1).toString(16)}` },
+    });
+    if (response.status === 200) admitted += 1;
+  }
+  assert.equal(admitted, MAGIC_LINK_LIMITS.perClient, `rotating within one /64 must not buy extra budget, got ${admitted}`);
+
+  // A different /64 is a different subscriber and gets its own budget.
+  assert.equal(
+    (await h.request("someone@example.com", { headers: { "cf-connecting-ip": "2001:db8:abcd:9999::1" } })).status,
+    200,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// SEC-20 — redemption was unbounded and wrote twice per attempt.
+// ---------------------------------------------------------------------------
+
+test("SEC-20: redemption is bounded per client", async () => {
+  const h = await harness();
+  const link = await issuedLink(h, "person@example.com");
+  const invented = (n: number) => link.replace(/token=[^&]+/, `token=${String(n).padStart(43, "z")}`);
+
+  let admitted = 0;
+  for (let attempt = 0; attempt < MAGIC_LINK_LIMITS.perClientVerify + 10; attempt += 1) {
+    const response = await h.verify(invented(attempt), { nonce: null });
+    if (response.headers.get("location")?.includes("error=link")) admitted += 1;
+  }
+  assert.equal(admitted, MAGIC_LINK_LIMITS.perClientVerify, `redemption must be bounded, got ${admitted} attempts through`);
+
+  // Refused, but never told the link expired: a throttled customer's link is
+  // still good and "expired" would send them round a loop that cannot work.
+  const refused = await h.verify(invented(999), { nonce: null });
+  assert.equal(refused.status, 303);
+  assert.match(refused.headers.get("location") ?? "", /error=unavailable/);
+  assert.equal(cookieValue(refused), null);
+});
+
+test("SEC-20: an invented token writes nothing at all", async () => {
+  const h = await harness();
+  const link = await issuedLink(h, "person@example.com");
+
+  h.statements.length = 0;
+  await h.verify(link.replace(/token=[^&]+/, `token=${"z".repeat(43)}`), { nonce: null });
+
+  // The counter UPDATE against a digest that was never issued matched no row
+  // and recorded nothing, so it was pure write amplification. The rate-limit
+  // upsert is the one write that remains, and it is the control.
+  const tokenWrites = h.statements.filter((sql) => /^\s*update\s+"?auth_magic_link_tokens/i.test(sql));
+  assert.deepEqual(tokenWrites, [], `an invented token must not write to the token table: ${tokenWrites.join(" | ")}`);
+});
+
+test("SEC-20: a real but spent link is still counted", async () => {
+  const h = await harness();
+  const link = await issuedLink(h, "person@example.com");
+  await h.verify(link);
+  await h.verify(link, { nonce: null });
+
+  const [token] = await h.db.select().from(schema.authMagicLinkTokens);
+  assert.equal(token.attemptCount, 2, "evidence against a digest that exists is still recorded");
+});
+
+test("SEC-20: without a client signal, redemption refuses rather than running unbounded", async () => {
+  const h = await harness();
+  const link = await issuedLink(h, "person@example.com");
+  const production = link.replace("http://localhost", "https://ownword.pro");
+
+  const refused = await h.verify(production, { clientIp: null });
+  assert.match(refused.headers.get("location") ?? "", /error=unavailable/);
+  assert.equal(cookieValue(refused), null);
+  assert.equal((await h.db.select().from(schema.authSessions)).length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// SEC-22 — a client-supplied header decided the scheme.
+// ---------------------------------------------------------------------------
+
+test("SEC-22: x-forwarded-proto cannot override the real scheme", async () => {
+  const h = await harness();
+
+  // The proven probe: a genuine https sign-in request was refused, and mailed
+  // nothing, because a forgeable header said http.
+  const response = await h.request("person@example.com", {
+    host: "ownword.pro",
+    headers: { "x-forwarded-proto": "http" },
+  });
+  assert.equal(response.status, 200, await response.text());
+  assert.equal(h.sent.length, 1);
+
+  // And the cookie it goes on to issue is the strong form, not the
+  // unprefixed dev name the same header used to unlock.
+  const link = h.linkFrom(h.sent[0]);
+  const verified = await buildVerifyResponse(
+    new Request(link, {
+      headers: {
+        host: "ownword.pro",
+        "x-forwarded-proto": "http",
+        "cf-connecting-ip": CLIENT_IP,
+        cookie: nonceCookieHeader("ownword.pro", h.lastNonce() ?? ""),
+      },
+    }),
+    async () => ({ db: h.db, auth, sender: null, from: "x", now: () => new Date() }),
+  );
+  assert.equal(verified.status, 303);
+  assert.match(verified.headers.get("set-cookie") ?? "", /^__Host-ownword_session=/);
+});
+
+// ---------------------------------------------------------------------------
+// SEC-24 (nit) — `Origin: null` was admitted as though it were absent.
+// ---------------------------------------------------------------------------
+
+test("SEC-24: an opaque Origin is treated as cross-site, not as a missing one", async () => {
+  const h = await harness();
+  assert.equal((await h.request("person@example.com", { origin: "null" })).status, 403);
+  assert.equal(h.sent.length, 0);
+
+  // A genuinely absent Origin is still allowed: non-browser callers send
+  // none, and that judgement is unchanged.
+  assert.equal((await h.request("person@example.com")).status, 200);
 });
