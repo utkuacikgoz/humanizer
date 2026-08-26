@@ -10,6 +10,17 @@ import {
   publicPage,
   readRequestHost,
 } from "@/src/lib/public-pages";
+// SEC-26. The AI-processing and subprocessor copy below is DERIVED from the
+// same configuration `app/api/humanize/humanization-runtime.ts` resolves the
+// pipeline from, so this page cannot claim "no third-party AI provider" while
+// the runtime is sending customer drafts to one. Setting
+// HUMANIZATION_PROVIDER=claude used to make two sentences on this page false
+// with no code change, no gate and no test.
+import {
+  humanizationDisclosure,
+  type HumanizationDisclosure,
+  type HumanizationProviderEnv,
+} from "@/src/lib/humanization/provider-config";
 
 // SEO-005. Title, description, canonical, robots, OG and Twitter come from
 // the shared registry in src/lib/public-pages.ts, which host-gates every
@@ -22,7 +33,56 @@ export async function generateMetadata(): Promise<Metadata> {
 
 const LAST_UPDATED = LEGAL_PAGES_LAST_UPDATED;
 
-export default function PrivacyPolicyPage() {
+/**
+ * The processor disclosure this deployment actually owes.
+ *
+ * Same lazy `cloudflare:workers` read, and the same fail-closed catch, that
+ * the humanization runtime uses: the module does not resolve under plain Node,
+ * and an environment with no configuration is the deterministic engine — which
+ * is the truthful answer for that environment, not a convenient default.
+ */
+async function processorDisclosure(): Promise<HumanizationDisclosure> {
+  try {
+    const { env } = await import("cloudflare:workers");
+    return humanizationDisclosure(env as unknown as HumanizationProviderEnv);
+  } catch {
+    return humanizationDisclosure(undefined);
+  }
+}
+
+/**
+ * Fixed subprocessors: the ones that are there whatever the model provider is.
+ * The AI processor, when there is one, is spliced in from the disclosure.
+ */
+const FIXED_PROCESSORS = [
+  {
+    name: "Cloudflare",
+    description: "hosts the service and stores its data. Your text lives there, on our account, under our control.",
+  },
+  {
+    name: "Stripe",
+    description:
+      "processes payments. It receives your billing details directly and we never see or store your full card number. It does not receive your drafts.",
+  },
+  {
+    name: "Resend",
+    description:
+      "delivers the sign-in email. It receives your email address and the message containing your sign-in link. It does not receive your drafts.",
+  },
+] as const;
+
+const COUNT_WORDS = ["No companies are", "One company is", "Two companies are", "Three companies are", "Four companies are", "Five companies are"];
+
+export default async function PrivacyPolicyPage() {
+  const disclosure = await processorDisclosure();
+  const processors = [
+    ...FIXED_PROCESSORS,
+    ...disclosure.processors.map((processor) => ({
+      name: processor.companyName,
+      description: `${processor.role}. It receives ${processor.receives}.`,
+    })),
+  ];
+
   return (
     <main className="legal-doc">
 
@@ -79,37 +139,30 @@ export default function PrivacyPolicyPage() {
       <section>
         <h2>AI processing</h2>
         <p>
-          We do not use your text to train our own models, and we do not permit a provider to train on it,
-          without your separate, explicit, revocable consent. No such consent flow exists today, so no
-          customer text is used for training.
+          We do not use your text to train our own models. There is no consent flow here that would let us,
+          and we will not add one without asking you separately, explicitly, and revocably. What a model
+          provider does is a separate question, answered below rather than assumed.
         </p>
-        <p>
-          Today your text is not sent to any third-party AI provider. Rewrites are produced by a deterministic
-          engine that runs on our own infrastructure, so the text you paste stays within the service. If we
-          later introduce a third-party model provider, we will name it here, state its retention and
-          training terms, and update this page before that change takes effect.
-        </p>
+        {disclosure.paragraphs.map((paragraph) => (
+          <p key={paragraph.slice(0, 48)}>{paragraph}</p>
+        ))}
       </section>
 
       <section>
         <h2>Who else handles your data</h2>
-        <p>Three companies are involved in running {productConfig.productName}, and each sees only its own part.</p>
+        <p>
+          {COUNT_WORDS[processors.length] ?? `${processors.length} companies are`} involved in running{" "}
+          {productConfig.productName}, and each sees only its own part.
+        </p>
         <ul>
-          <li>
-            <strong>Cloudflare</strong> hosts the service and stores its data. Your text lives there, on our
-            account, under our control.
-          </li>
-          <li>
-            <strong>Stripe</strong> processes payments. It receives your billing details directly and we never
-            see or store your full card number. It does not receive your drafts.
-          </li>
-          <li>
-            <strong>Resend</strong> delivers the sign-in email. It receives your email address and the message
-            containing your sign-in link. It does not receive your drafts.
-          </li>
+          {processors.map((processor) => (
+            <li key={processor.name}>
+              <strong>{processor.name}</strong> {processor.description}
+            </li>
+          ))}
         </ul>
         <p>
-          Nobody else receives your writing. We do not sell your personal information, we do not share it for
+          Nobody outside that list receives your writing. We do not sell your personal information, we do not share it for
           advertising or cross-site tracking, and there are no advertising or analytics trackers on this site
           from other companies. We may disclose data if the law compels us to; where we are permitted to tell
           you, we will.
