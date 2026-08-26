@@ -180,17 +180,38 @@ Status: code-complete or substantially complete through M2-10, including D-015 l
 
 ### M3 â€” Paid result workflow
 
-Status: partial. Copy, direct paid result rendering, post-checkout result evidence, bottom-funnel analytics, second-paid-use semantics, and M3-01's authorized history list/detail/delete are implemented. The purge worker that drains queued deletion jobs and runs the scheduled anonymous retention sweep is implemented. Still open: the edit/revision workflow, sentence restore/regeneration, protected phrases, self-service account deletion (manual by email by PO decision), the completion evidence for the published deletion window, history/deletion analytics events, and full responsive/manual QA.
+Status: partial. Implemented: copy, direct paid result rendering, post-checkout result evidence, second-paid-use semantics, M3-01's authorized history list/detail/delete with entitled rewrites persisted into it, the hourly purge worker, and M3-03's sentence restore and regeneration.
+
+**M3-03 ships server-side with no UI, so no customer can reach it.** That is the gap worth naming rather than counting as done.
+
+Still open: the edit/revision workflow, protected phrases, the completion evidence for the published deletion window, history and deletion analytics events, and full responsive and manual QA. Self-service account deletion stays manual by email by PO decision.
+
+Bottom-funnel analytics fire, but `/api/events` validates each event and then discards it: there is no destination, so no funnel data exists to read.
 
 ### M4 â€” Commercial release
 
 Status: open. Release blockers include:
 
-- email magic-link sign-in is implemented (`/signin`) and replaces the dead `/signin-with-chatgpt` path, but it has never run against a real mailer or a real database: production requires a verified Resend sending domain, the `RESEND_API_KEY` secret, and applied D1 migrations, and the deploy workflow now fails loudly without the key. No end-to-end sign-in has been performed on the production host;
-- production provider selection and frozen benchmark;
-- production D1/guard/Stripe/webhook/live-price configuration and smoke/reconciliation;
-- Legal review and approval of Terms, Privacy, retention, provider, refund, and jurisdiction language;
-- final security, dependency, accessibility, manual QA, rollback, and dark-pattern sign-offs.
+- **no purchase has ever completed end to end.** `/signin` is live and `RESEND_API_KEY` is
+  configured, but the mail provider is rejecting the send, so nobody has signed in, bought and
+  unlocked on the production host. Every commercial claim below waits on this one;
+- production provider selection and frozen benchmark. The Claude provider is implemented and
+  merged but **not active**; no real API call has ever been made from this codebase;
+- **the unit economics are unmeasured.** Modelled cost for a full Starter allowance spans $2.25 to
+  $17.25 depending on thinking tokens against $9.99 of revenue, and Pro earns $0.000095 per word to
+  Starter's $0.000200 because it sells four times the allowance for less than twice the price.
+  `npm run measure:cost` answers the first half; the second is a pricing decision;
+- an anonymous spend ceiling chosen as a safety stopgap (~$30/hour globally) that needs a real
+  product number;
+- Legal review and approval of Terms, Privacy, retention, provider, refund and jurisdiction
+  language, including the provider disclosure written on 2026-08-26 without counsel;
+- final security, dependency, accessibility, manual QA, rollback and dark-pattern sign-offs.
+  `docs/SECURITY.md`'s blocker list is empty as of 2026-08-26, but M4-02 is not closed and the
+  50-test E2E suite has not been run in a security pass.
+
+Configuration that is no longer a blocker: production D1, the preview guard secret, Stripe
+credentials, the webhook secret and both live price IDs are all configured, and the deploy gates on
+each of them.
 
 ## Definition of MVP done
 
