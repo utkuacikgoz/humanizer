@@ -32,6 +32,16 @@ jobs:
       # src/lib/magic-link.ts fails closed with a console.error rather than
       # pretending a link was sent.
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      # M4-01. The humanization engine's model provider. The Worker only
+      # calls Claude when HUMANIZATION_PROVIDER is explicitly set to
+      # "claude"; without the key that selection fails closed onto the
+      # deterministic engine (src/lib/humanization/provider-config.ts), so a
+      # deploy that loses this secret silently downgrades every rewrite
+      # rather than erroring — which is exactly why it gates below.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # Optional, and deliberately not gated: absent means "deterministic",
+      # which is a valid configuration.
+      HUMANIZATION_PROVIDER: ${{ secrets.HUMANIZATION_PROVIDER }}
       # Optional. Defaults to no-reply@<configured domain>; set it only when
       # the verified sending identity differs (e.g. a mail subdomain).
       AUTH_EMAIL_FROM: ${{ secrets.AUTH_EMAIL_FROM }}
@@ -97,7 +107,7 @@ jobs:
       # the running Worker needs must be in this one file, or the next deploy
       # silently wipes it.
       - name: Deploy via wrangler
-        if: ${{ env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != '' && env.CF_D1_ID != '' && env.STRIPE_SECRET_KEY != '' && env.STRIPE_WEBHOOK_SECRET != '' && env.STRIPE_PRICE_STARTER != '' && env.STRIPE_PRICE_PRO != '' && env.PREVIEW_GUARD_SECRET != '' && env.RESEND_API_KEY != '' }}
+        if: ${{ env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != '' && env.CF_D1_ID != '' && env.STRIPE_SECRET_KEY != '' && env.STRIPE_WEBHOOK_SECRET != '' && env.STRIPE_PRICE_STARTER != '' && env.STRIPE_PRICE_PRO != '' && env.PREVIEW_GUARD_SECRET != '' && env.RESEND_API_KEY != '' && env.ANTHROPIC_API_KEY != '' }}
         run: |
           umask 077
           secrets_file="$RUNNER_TEMP/ownword.secrets"
@@ -108,9 +118,13 @@ jobs:
             "STRIPE_PRICE_STARTER=$STRIPE_PRICE_STARTER" \
             "STRIPE_PRICE_PRO=$STRIPE_PRICE_PRO" \
             "PREVIEW_GUARD_SECRET=$PREVIEW_GUARD_SECRET" \
-            "RESEND_API_KEY=$RESEND_API_KEY" > "$secrets_file"
+            "RESEND_API_KEY=$RESEND_API_KEY" \
+            "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" > "$secrets_file"
           if [ -n "$AUTH_EMAIL_FROM" ]; then
             printf '%s\n' "AUTH_EMAIL_FROM=$AUTH_EMAIL_FROM" >> "$secrets_file"
+          fi
+          if [ -n "$HUMANIZATION_PROVIDER" ]; then
+            printf '%s\n' "HUMANIZATION_PROVIDER=$HUMANIZATION_PROVIDER" >> "$secrets_file"
           fi
           npx wrangler deploy --config dist/server/wrangler.json --secrets-file "$secrets_file"
         env:
@@ -118,7 +132,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ env.CF_ACCOUNT_ID }}
 
       - name: Not configured
-        if: ${{ env.CF_API_TOKEN == '' || env.CF_ACCOUNT_ID == '' || env.CF_D1_ID == '' || env.STRIPE_SECRET_KEY == '' || env.STRIPE_WEBHOOK_SECRET == '' || env.STRIPE_PRICE_STARTER == '' || env.STRIPE_PRICE_PRO == '' || env.PREVIEW_GUARD_SECRET == '' || env.RESEND_API_KEY == '' }}
+        if: ${{ env.CF_API_TOKEN == '' || env.CF_ACCOUNT_ID == '' || env.CF_D1_ID == '' || env.STRIPE_SECRET_KEY == '' || env.STRIPE_WEBHOOK_SECRET == '' || env.STRIPE_PRICE_STARTER == '' || env.STRIPE_PRICE_PRO == '' || env.PREVIEW_GUARD_SECRET == '' || env.RESEND_API_KEY == '' || env.ANTHROPIC_API_KEY == '' }}
         run: |
-          echo "::error::Set the Cloudflare, Stripe, PREVIEW_GUARD_SECRET, and RESEND_API_KEY repository secrets before running this workflow."
+          echo "::error::Set the Cloudflare, Stripe, PREVIEW_GUARD_SECRET, RESEND_API_KEY, and ANTHROPIC_API_KEY repository secrets before running this workflow."
           exit 1

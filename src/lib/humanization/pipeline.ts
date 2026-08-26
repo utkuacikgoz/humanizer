@@ -92,15 +92,25 @@ interface UsageTotals {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
+  thinkingTokens: number;
   providerCostUsd: number;
   models: Set<string>;
 }
 
-function accumulate(totals: UsageTotals, usage: ProviderUsage | undefined): void {
+function accumulate(totals: UsageTotals, usage: ProviderUsage | ProviderUsage[] | undefined): void {
   if (!usage) return;
+  // A rewrite that escalated from a cheap model to an expensive one reports
+  // one entry per model. Summing them is the point: the customer's rewrite
+  // consumed both, and a ledger that recorded only the winning call would
+  // under-report every escalated request.
+  if (Array.isArray(usage)) {
+    for (const entry of usage) accumulate(totals, entry);
+    return;
+  }
   totals.inputTokens += usage.inputTokens ?? 0;
   totals.outputTokens += usage.outputTokens ?? 0;
   totals.cachedInputTokens += usage.cachedInputTokens ?? 0;
+  totals.thinkingTokens += usage.thinkingTokens ?? 0;
   totals.providerCostUsd += usage.costUsd ?? 0;
   if (usage.model) totals.models.add(usage.model);
 }
@@ -158,7 +168,7 @@ export class HumanizationPipeline {
     let attemptedWords = 0;
     let estimatedTokens = 0;
     let estimatedCostUsd = 0;
-    const totals: UsageTotals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, providerCostUsd: 0, models: new Set() };
+    const totals: UsageTotals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, thinkingTokens: 0, providerCostUsd: 0, models: new Set() };
     let previousFailures: VerificationIssue[] = [];
     let lastVerification: VerificationResult | undefined;
     let lastEvaluation: EvaluationResult | undefined;
@@ -213,6 +223,7 @@ export class HumanizationPipeline {
               inputTokens: totals.inputTokens,
               outputTokens: totals.outputTokens,
               cachedInputTokens: totals.cachedInputTokens,
+              thinkingTokens: totals.thinkingTokens,
               providerCostUsd: Number(totals.providerCostUsd.toFixed(8)),
             },
             improvements: Math.max(0, analysis.issues.length - candidateAnalysis.issues.length),
@@ -221,6 +232,7 @@ export class HumanizationPipeline {
               verification: this.verificationProvider.name,
               evaluation: this.evaluationProvider.name,
               models: [...totals.models],
+              ...(rewrite.resultModel ? { resultModel: rewrite.resultModel } : {}),
             },
           };
         }
@@ -274,6 +286,7 @@ export class HumanizationPipeline {
       inputTokens: totals.inputTokens,
       outputTokens: totals.outputTokens,
       cachedInputTokens: totals.cachedInputTokens,
+      thinkingTokens: totals.thinkingTokens,
       providerCostUsd: Number(totals.providerCostUsd.toFixed(8)),
     };
   }

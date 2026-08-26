@@ -12,11 +12,13 @@
     "test": "npm run build && node --import tsx --test tests/*.test.mjs tests/*.test.mts",
     "test:e2e": "node --import tsx --test tests/e2e/*.e2e.test.mts",
     "benchmark": "node --import tsx scripts/run-benchmark.mts",
+    "measure:cost": "node --import tsx scripts/measure-cost.mts",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "node --import tsx scripts/migrate-local-d1.mts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
     "drizzle-orm": "0.45.2",
     "react": "19.2.8",
     "react-dom": "19.2.8",

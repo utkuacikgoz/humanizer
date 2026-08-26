@@ -19,7 +19,7 @@ import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "./schema";
 import type { JobState, WritingModeValue } from "./schema";
 
-const { anonymousSessions, humanizationJobs, jobPayloads, protectedItems } = schema;
+const { anonymousSessions, humanizationJobs, jobAttempts, jobPayloads, protectedItems } = schema;
 
 // The full schema generic must match what `getDb()` (db/index.ts) and the
 // sqlite-proxy test harness both construct their drizzle instance with —
@@ -49,6 +49,22 @@ export interface PersistProtectedItem {
   end: number;
 }
 
+export interface PersistJobAttribution {
+  /** The humanization provider's own name, e.g. "claude-routed(...)". */
+  providerName: string;
+  /**
+   * The model whose output was kept. For a router that escalated, this is the
+   * rung that won — not the rung that also ran and was thrown away.
+   */
+  resultModel?: string;
+  attempts: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  costUsd: number;
+  latencyMs: number;
+}
+
 export interface PersistJobInput {
   mode: WritingModeValue;
   /** Already-hashed request-guard client signal; never a raw IP/cookie. */
@@ -63,6 +79,20 @@ export interface PersistJobInput {
   result: string;
   protectedContent: PersistProtectedItem[];
   previewProjection: PreviewProjection;
+  /**
+   * Who actually produced this rewrite, and what it cost.
+   *
+   * Optional because the deterministic engine has nothing interesting to say
+   * here, and because a caller that omits it must still be able to persist a
+   * job. Present, it lands in job_attempts — the table the schema already
+   * reserved for exactly this and which nothing had ever written. Without it
+   * "which model produced this rewrite, and was it the escalated one?" is
+   * unanswerable the moment the request is over, and that is the first
+   * question a support ticket about a bad rewrite asks.
+   *
+   * Content-free by construction: names, model ids and numbers. Never text.
+   */
+  attribution?: PersistJobAttribution;
   capabilityTtlMs?: number;
   /**
    * Server-derived owner. Present only for a rewrite an entitled account
@@ -260,6 +290,25 @@ export async function persistHumanizationJob(
     previewProjection: JSON.stringify(input.previewProjection),
     createdAt: now,
   });
+
+  if (input.attribution) {
+    const attribution = input.attribution;
+    await db.insert(jobAttempts).values({
+      id: crypto.randomUUID(),
+      jobId,
+      stage: "rewrite",
+      attemptNumber: attribution.attempts,
+      status: "succeeded",
+      providerName: attribution.providerName,
+      providerModel: attribution.resultModel ?? null,
+      // Both halves of the token split, because they are priced differently
+      // and a single total cannot be reconciled against an invoice.
+      tokensUsed: attribution.inputTokens + attribution.outputTokens,
+      costUsd: attribution.costUsd,
+      latencyMs: Math.round(attribution.latencyMs),
+      createdAt: now,
+    });
+  }
 
   if (input.protectedContent.length) {
     await db.insert(protectedItems).values(

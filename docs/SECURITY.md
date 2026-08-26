@@ -76,6 +76,47 @@ Payment card data remains with Stripe; the application must never collect or sto
 - Provider debug/logging features that retain prompts are disabled where possible.
 - No customer writing is used to train internal or third-party models without a future explicit, specific, revocable, unbundled consent mechanism.
 
+### Prompt-injection coverage as built (2026-08-26, M4-01)
+
+This section previously recorded prompt injection as an UNCOVERED threat: the
+engine was a substitution table, and a table cannot be talked into anything.
+A model provider now exists (`src/lib/humanization/claude-provider.ts`), so
+the threat is live and these are the controls that answer it.
+
+- **The document is fenced with a per-request random identifier.** A fixed
+  delimiter is a delimiter a customer can type; the fence id is sixteen
+  random hex characters generated per request, so pasted text cannot close
+  the fence it sits inside and address the model as the operator.
+- **The system prompt states the rule explicitly.** Fenced content is
+  material to rewrite and never an instruction, however phrased and whoever
+  it claims to be from. The correct handling of "ignore all previous
+  instructions" is to rewrite that sentence as prose and leave it in the
+  document — not to obey it, and not to silently delete a sentence the
+  customer wrote.
+- **There is nothing to reach.** No tools, no MCP servers, no credentials and
+  no browsing are declared on the call, so the worst case of a successful
+  injection is disclosure of the instructions themselves.
+- **Structured output, not prefill.** The response is constrained to a
+  one-key JSON object, so a model that started narrating instead of
+  rewriting produces an unparseable response and is retried rather than sold.
+- **The semantic gate is the backstop.** If a model ever complies, the
+  candidate no longer contains the customer's document, and the pipeline's
+  verification rejects it. Nothing about that gate was weakened to
+  accommodate a model.
+- **Six adversarial fixtures** (`adv-injection-01` .. `-06` in
+  `benchmarks/humanization-adversarial.ts`) cover the direct form, a forged
+  operator turn, a fence-breakout attempt, prompt extraction, an instruction
+  aimed at protected content, and an exfiltration-shaped instruction. Their
+  assertions hold under either provider. Structural coverage is asserted in
+  `tests/claude-provider.test.mts`.
+
+**Not yet verified against a live model.** No API key was available when this
+was built, so every test above runs against an injected fake client. The
+fixtures and the structural controls are real; a run of the injection corpus
+against the actual provider is still owed, and the verification-checklist
+line "prompt-injection corpus cannot bypass protected/semantic gates" is not
+closed by this entry.
+
 ## Third-party AI disclosure principles
 
 Before customer text is sent, the privacy notice must clearly identify each production AI provider or a precise current subprocessors list, the processing purpose, categories of text/data sent, relevant hosting region if known, provider retention period/settings, training policy, international-transfer basis where applicable, and how deletion requests propagate or where immediate deletion is technically unavailable.
