@@ -12,6 +12,7 @@
     "test": "npm run build && node --import tsx --test tests/*.test.mjs tests/*.test.mts",
     "test:e2e": "node --import tsx --test tests/e2e/*.e2e.test.mts",
     "benchmark": "node --import tsx scripts/run-benchmark.mts",
+    "seo:crawl": "node --import tsx scripts/seo-crawl.mts",
     "measure:cost": "node --import tsx scripts/measure-cost.mts",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",

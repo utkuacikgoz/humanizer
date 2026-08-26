@@ -6,6 +6,13 @@ import {
   PreviewRequestGuard,
   previewGuardClientKey,
 } from "@/src/lib/preview-request-guard";
+import {
+  DistributedMeteredSpendBudget,
+  LocalMeteredSpendBudget,
+  MAX_COST_PER_REWRITE_USD,
+  type SpendBudget,
+  type SpendReservation,
+} from "@/src/lib/humanization/spend-budget";
 import { isMateriallyUnchanged, MIN_PAYWALLABLE_INPUT_WORDS, projectPreview } from "@/src/lib/preview-projection";
 import { once, readSessionCookie, resolveSessionUser, type SessionIdentity } from "@/src/lib/identity";
 import { releasePaidUsage, reservePaidUsage } from "@/src/lib/paid-usage";
@@ -49,6 +56,19 @@ class QuotaExceededError extends Error {
 }
 
 class PaidUsageUnavailableError extends Error {}
+
+/**
+ * SEC-25. The shared spend ceiling on the metered provider said no.
+ *
+ * A terminal, honest outcome rather than a 500: nothing was sent to the
+ * provider, nothing was charged to anybody, and the window that refused
+ * refreshes on a clock the caller is told about.
+ */
+class MeteredSpendExhaustedError extends Error {
+  constructor(readonly retryAfterSeconds: number) {
+    super("The shared rewrite budget for this window is spent.");
+  }
+}
 
 /**
  * Best-effort persistence: durably stores the succeeded job and issues an
@@ -116,10 +136,18 @@ async function tryPersist(input: {
 
 const localRequestGuard = new PreviewRequestGuard<HumanizePayload>();
 
+const localSpendBudget = new LocalMeteredSpendBudget();
+
 type RuntimeGuard = {
   guard: PreviewRequestGuard<HumanizePayload> | DistributedPreviewRequestGuard<HumanizePayload>;
   secret?: string;
   distributed: boolean;
+  /**
+   * SEC-25. The ceiling on un-ledgered spend at a metered provider. Shared
+   * across isolates in production for the same reason the request guard is:
+   * a per-isolate budget is as many budgets as Cloudflare feels like starting.
+   */
+  spendBudget: SpendBudget;
 };
 
 async function requestGuardForRuntime(): Promise<RuntimeGuard | null> {
@@ -130,15 +158,24 @@ async function requestGuardForRuntime(): Promise<RuntimeGuard | null> {
     const explicitlyNonProduction = environment === "development" || environment === "local" || environment === "test";
     const secret = runtime.PREVIEW_GUARD_SECRET?.trim();
     if (runtime.DB && secret) {
-      return { guard: new DistributedPreviewRequestGuard<HumanizePayload>(runtime.DB, secret), secret, distributed: true };
+      return {
+        guard: new DistributedPreviewRequestGuard<HumanizePayload>(runtime.DB, secret),
+        secret,
+        distributed: true,
+        spendBudget: new DistributedMeteredSpendBudget(runtime.DB),
+      };
     }
     // A real Workers runtime is production-like unless it explicitly says
     // otherwise. Missing shared storage or its HMAC/encryption secret fails
-    // closed; silently dropping to isolate memory would reopen the abuse gap.
-    return explicitlyNonProduction ? { guard: localRequestGuard, distributed: false } : null;
+    // closed; silently dropping to isolate memory would reopen the abuse gap —
+    // for the spend ceiling as much as for the rate limit, since an isolate
+    // that keeps its own budget hands a fresh one to every new isolate.
+    return explicitlyNonProduction ? { guard: localRequestGuard, distributed: false, spendBudget: localSpendBudget } : null;
   } catch {
-    // Plain Node route tests do not provide the cloudflare:workers module.
-    return { guard: localRequestGuard, distributed: false };
+    // Plain Node route tests do not provide the cloudflare:workers module,
+    // which also means they resolve the deterministic provider, which spends
+    // nothing and never reaches the budget below.
+    return { guard: localRequestGuard, distributed: false, spendBudget: localSpendBudget };
   }
 }
 
@@ -298,6 +335,7 @@ export async function POST(request: Request) {
         const timeout = setTimeout(() => controller.abort(new DOMException("Preview deadline exceeded.", "TimeoutError")), runtime.processingMs);
         let paidDb: AppDatabase | null = null;
         let paidReservation: PaidUsageReservation | null = null;
+        let spendReservation: SpendReservation | null = null;
         try {
           if (authenticatedUser) {
             try {
@@ -323,6 +361,23 @@ export async function POST(request: Request) {
             }
           }
 
+          // SEC-25. Everything above this line decides who is paying for the
+          // rewrite. A reservation means an entitled customer's word ledger
+          // is, and that ledger is the ceiling (SEC-05). Without one — an
+          // anonymous visitor, or a signed-in account with no live plan — the
+          // OPERATOR is paying, on a route that takes no authentication, and
+          // the only ceiling before this was a per-address rate limit that an
+          // attacker with many addresses simply buys more of.
+          //
+          // So: reserve this rewrite's worst case against a shared budget
+          // BEFORE the provider is called, and refuse if the window is spent.
+          // The deterministic engine costs nothing and is not metered at all.
+          if (runtime.provider !== "deterministic" && !paidReservation) {
+            const admission = await runtimeGuard.spendBudget.admit(MAX_COST_PER_REWRITE_USD);
+            if (!admission.admitted) throw new MeteredSpendExhaustedError(admission.retryAfterSeconds);
+            spendReservation = admission.reservation;
+          }
+
           const result = await runtime.pipeline.humanize({ text, mode: mode as WritingMode, signal: controller.signal });
 
           const unchanged = isMateriallyUnchanged(result.original, result.text) || result.improvements === 0;
@@ -333,7 +388,7 @@ export async function POST(request: Request) {
           // a distortion; it is the arithmetic that makes a provider quietly
           // producing no-ops show up as an economic problem rather than a
           // quality one. Numbers only; the guard never sees the text.
-          runtime.costGuard?.record({
+          const costAlarm = runtime.costGuard?.record({
             costUsd: result.metrics.providerCostUsd,
             words: unchanged ? 0 : result.metrics.successfulWords,
             inputTokens: result.metrics.inputTokens,
@@ -344,6 +399,30 @@ export async function POST(request: Request) {
             providerName: result.providers.humanization,
             ...(result.providers.resultModel ? { resultModel: result.providers.resultModel } : {}),
           });
+
+          // SEC-25. The verdict is not discarded. Discarding it is the whole
+          // finding: fifty rewrites at fifty times the ceiling produced fifty
+          // alarms and zero refusals.
+          //
+          // What is actually spent replaces what was reserved, so the budget
+          // tracks dollars rather than requests — a cheap rewrite hands most
+          // of its reservation back, an expensive one consumes what it really
+          // consumed, and a runaway can exhaust the window on its own. A
+          // SUSTAINED breach is a verdict about the regime rather than about
+          // this rewrite, so it burns the remainder outright: no further
+          // un-ledgered rewrite is admitted until the window rolls.
+          //
+          // Cost is knowable only after the call, so a verdict governs the
+          // NEXT admission, not this one. The reservation is what bounds this
+          // one. Settling is best-effort and cannot fail the request; losing
+          // it leaves the budget tighter than the truth, never looser.
+          if (spendReservation) {
+            const settling = spendReservation;
+            spendReservation = null;
+            await runtimeGuard.spendBudget.settle(settling, result.metrics.providerCostUsd, {
+              exhaust: costAlarm?.kind === "sustained-cost-per-word" || runtime.costGuard?.snapshot().sustainedBreach === true,
+            });
+          }
 
           // ACT-01: never truncate, price, or persist a rewrite that did
           // not rewrite anything. Derived from the normalized full
@@ -446,6 +525,12 @@ export async function POST(request: Request) {
           if (paidDb && paidReservation) {
             try { await releasePaidUsage(paidDb, paidReservation); } catch { /* fail closed below */ }
           }
+          // SEC-25: a spend reservation is deliberately NOT released here. The
+          // customer's word allowance is, because a failed rewrite delivered
+          // them nothing; the provider's meter is not, because a failed
+          // rewrite may still have cost real money and nothing reported how
+          // much. A provider that is failing is exactly when a brake should
+          // stay on. The reservation expires with the window either way.
           throw error;
         } finally {
           clearTimeout(timeout);
@@ -469,6 +554,20 @@ export async function POST(request: Request) {
       return Response.json(
         { error: "You have used this month's word allowance.", usage: error.usage },
         { status: 429, headers: { "cache-control": "no-store" } },
+      );
+    }
+    if (error instanceof MeteredSpendExhaustedError) {
+      // SEC-25's terminal state. 503 rather than 500 because nothing broke,
+      // rather than 429 because the caller did nothing wrong — the shared
+      // ceiling is the service's, and it clears on the clock in `retry-after`.
+      // The wording says what happened and what it cost the customer, which
+      // is nothing.
+      return Response.json(
+        { error: "Rewrites are briefly paused while we catch up with demand. No usage was charged; please try again shortly." },
+        {
+          status: 503,
+          headers: { "cache-control": "no-store", "retry-after": String(error.retryAfterSeconds) },
+        },
       );
     }
     if (error instanceof PaidUsageUnavailableError) {

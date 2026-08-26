@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 // SEO-005's CI gate, at the surface that actually ships: it crawls the
@@ -162,4 +163,42 @@ test("claims a lastmod only where the page itself tracks one", async () => {
       `${loc} claims a lastmod its page does not show`,
     );
   }
+});
+
+// SEO-005 / SEO-020 handoff H-1. The two structural facts the field gate
+// above cannot see, because both of them fail by producing *plausible* HTML.
+//
+// The root layout used to supply the homepage's title, description, canonical
+// and social card as the site-wide default. Every private surface and the 404
+// then had to remember to null all of it out, and the ones that forgot
+// unfurled as the homepage. The gate above cannot catch a regression here,
+// because a page that re-inherits the homepage canonical looks correct on `/`
+// and is only wrong everywhere else.
+//
+// And `app/page.tsx` must stay a server component. Adding "use client" back
+// does not fail the build: `generateMetadata` is silently ignored and the
+// homepage ships with an empty head. That was measured, not assumed.
+test("the homepage owns its metadata and the root layout lends none", async () => {
+  const [layout, home] = await Promise.all([
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(
+    layout,
+    /buildPublicPageMetadata|publicPage\(/,
+    "the root layout must not make one page's identity the default for every page under it",
+  );
+  assert.match(layout, /buildPrivateSurfaceMetadata/, "the root layout's metadata default must fail closed");
+
+  assert.doesNotMatch(
+    home,
+    /^\s*["']use client["']/m,
+    'app/page.tsx must stay a server component: a "use client" route drops generateMetadata silently',
+  );
+  assert.match(
+    home,
+    /buildPublicPageMetadata\(publicPage\("\/"\), readRequestHost\(await headers\(\)\)\)/,
+    "the homepage must build its metadata from the shared registry like every other public page",
+  );
 });

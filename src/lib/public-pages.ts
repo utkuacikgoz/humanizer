@@ -31,7 +31,34 @@ export type PublicPage = {
    * fabricated one, and a build-time `new Date()` would be exactly that.
    */
   lastModified?: string;
+  /**
+   * SEO-013. The one search intent this page exists to answer, in a sentence,
+   * describing the reader rather than the keyword.
+   *
+   * Required, and required to be unique: docs/SEO.md Section 6's release gate
+   * says a page has "one primary search intent and one primary conversion
+   * action", and Section 3's decision rule refuses near-duplicate pages. Two
+   * pages that cannot state different intents are one page.
+   */
+  intent: string;
+  /**
+   * SEO-013. The role accountable for the words on this page, so a claim on
+   * it has an owner. A role, not a person: this repository has no author
+   * identities to cite and inventing one is exactly the fabricated expert
+   * identity Section 1 forbids.
+   */
+  contentOwner: ContentOwner;
+  /**
+   * SEO-013. The page's one primary conversion action, as it is actually
+   * rendered. `href` for a link, omitted when the action is an in-page
+   * control. The quality gate finds it in the rendered HTML, so a page cannot
+   * declare a next step it does not offer.
+   */
+  primaryCta: { label: string; href?: string };
 };
+
+/** The roles that can be accountable for public copy. See docs/MEMORY.md. */
+export type ContentOwner = "Product" | "Copy" | "Legal" | "SEO" | "Engineering";
 
 /**
  * The brand card. Real file in `public/`, real dimensions, no claim in it that
@@ -44,7 +71,7 @@ export const SOCIAL_IMAGE = {
   alt: "Keep your meaning. Lose the machine tone.",
 } as const;
 
-export const LEGAL_PAGES_LAST_UPDATED = "2026-08-25";
+export const LEGAL_PAGES_LAST_UPDATED = "2026-08-26";
 
 /**
  * Only routes that (a) genuinely exist under `app/`, (b) return 200, and (c)
@@ -63,6 +90,9 @@ export const PUBLIC_PAGES: readonly PublicPage[] = [
     ogType: "website",
     changefreq: "weekly",
     priority: "1.0",
+    intent: "Someone holding an AI assisted draft that reads like a machine wrote it, who wants it to sound like them without the meaning, facts or citations moving.",
+    contentOwner: "Copy",
+    primaryCta: { label: "Humanize" },
   },
   {
     path: "/privacy",
@@ -72,6 +102,9 @@ export const PUBLIC_PAGES: readonly PublicPage[] = [
     changefreq: "yearly",
     priority: "0.2",
     lastModified: LEGAL_PAGES_LAST_UPDATED,
+    intent: "Someone deciding whether to paste their own writing into this service, who wants to know what happens to it, how long it is kept, and who can read it.",
+    contentOwner: "Legal",
+    primaryCta: { label: "Back to Ownword", href: "/" },
   },
   {
     path: "/terms",
@@ -81,7 +114,30 @@ export const PUBLIC_PAGES: readonly PublicPage[] = [
     changefreq: "yearly",
     priority: "0.2",
     lastModified: LEGAL_PAGES_LAST_UPDATED,
+    intent: "Someone about to pay, or already paying, who wants to know what they are agreeing to, what it costs, and how to stop it.",
+    contentOwner: "Legal",
+    primaryCta: { label: "Back to Ownword", href: "/" },
   },
+];
+
+/**
+ * SEO-013. The paths robots.txt tells crawlers not to fetch, as prefixes.
+ *
+ * Kept here rather than inside `app/robots.txt/route.ts` so the quality gate
+ * can hold the one invariant that ties the two together: an indexable page
+ * must not link to a path a crawler is forbidden to fetch. That combination -
+ * invited by a link, refused by robots.txt - is the shape Google indexes
+ * URL-only, with no snippet and no way for the page's own `noindex` to be
+ * read, because the `noindex` sits behind the `Disallow`.
+ */
+export const CRAWLER_DISALLOWED_PREFIXES: readonly string[] = [
+  "/api/",
+  "/account/",
+  "/admin/",
+  "/billing/",
+  "/checkout/",
+  "/history/",
+  "/result/",
 ];
 
 export function publicPage(path: string): PublicPage {

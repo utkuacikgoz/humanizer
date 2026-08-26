@@ -177,8 +177,26 @@ export class RewriteCostGuard {
     });
     if (this.window.length > this.thresholds.windowSize) this.window.shift();
 
+    // SEC-27. BOTH checks evaluate on EVERY observation, and the sustained
+    // one runs first so that a per-rewrite breach cannot skip it.
+    //
+    // The bug this replaces: the per-rewrite branch below used to `return`
+    // before the sustained evaluation, so `sustainedBreach` stayed false for
+    // exactly the runaway it exists to catch. Sixty rewrites at $5.00 each
+    // reported `sustainedBreach: false` while a fifty-five-times cheaper
+    // regime reported `true` — the economically worse state read clean.
+    // `humanizationCostSnapshot()` and the spend budget both read that flag,
+    // so a wrong value is a control that does not fire.
+    const sustained = this.evaluateSustained(observation);
+
     if (observation.costUsd > this.thresholds.maxCostPerRewriteUsd) {
       this.perRewriteBreaches += 1;
+      // A sustained alarm that came due on this same observation is still
+      // logged; it is a different failure with a different response, and
+      // swallowing it here would recreate the finding one level down. The
+      // per-rewrite breach is the more specific verdict, so it is the one
+      // returned to the caller.
+      if (sustained) this.raise(sustained);
       return this.raise({
         kind: "per-rewrite-ceiling",
         observedUsd: observation.costUsd,
@@ -189,6 +207,17 @@ export class RewriteCostGuard {
       });
     }
 
+    return sustained ? this.raise(sustained) : undefined;
+  }
+
+  /**
+   * Updates the sustained-breach state from the whole rolling window and
+   * returns the alarm if this observation is one that should fire.
+   *
+   * Split out of `record()` so that the state transition happens exactly once
+   * per observation regardless of which branch the caller takes afterwards.
+   */
+  private evaluateSustained(observation: RewriteCostObservation): CostAlarm | undefined {
     const snapshot = this.snapshot();
     const breaching =
       this.window.length >= this.thresholds.minimumSample &&
@@ -209,14 +238,14 @@ export class RewriteCostGuard {
     if (!entering && this.sinceLastSustainedAlarm < this.thresholds.repeatEvery) return undefined;
     this.sinceLastSustainedAlarm = 0;
 
-    return this.raise({
+    return {
       kind: "sustained-cost-per-word",
       observedUsd: snapshot.costPerWordUsd,
       ceilingUsd: this.thresholds.maxCostPerWordUsd,
       sample: this.window.length,
       providerName: observation.providerName,
       ...(observation.resultModel ? { resultModel: observation.resultModel } : {}),
-    });
+    };
   }
 
   snapshot(): CostGuardSnapshot {
