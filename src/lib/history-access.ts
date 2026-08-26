@@ -22,7 +22,7 @@
 //     before a database binding is even loaded.
 //   * A job owned by nobody, owned by someone else, or already deleted
 //     produces the identical 404 shape as a job that never existed.
-import { once, resolveSessionUser, type SessionPort } from "@/src/lib/identity";
+import { isCrossSiteRequest, once, resolveSessionUser, type SessionPort } from "@/src/lib/identity";
 import { isJobIdShape } from "@/src/lib/result-access";
 import type { AppDatabase } from "../../db/repository";
 import type { Entitlement, UnlockedResult } from "../../db/billing-repository";
@@ -181,6 +181,15 @@ export async function buildHistoryDetailResponse(
  * which is not sent on a cross-site request of any method — so between the
  * two, a third-party page holds neither the verb nor the credential.
  *
+ * SEC-16: that argument holds against a browser today and held nothing in
+ * reserve. A real DELETE carrying `Origin: https://evil.test` and a valid
+ * cookie was answered 200, while the sentence route on the same job answered
+ * 403 — this was the one state-changing route without the belt, and the
+ * destructive one. It becomes live the moment anything relaxes: a CORS header
+ * added for an SDK, a cookie moved to `SameSite=None`, or a non-browser client
+ * replaying a captured request. The guard below is the same one the other five
+ * routes use.
+ *
  * Idempotent: repeating a delete returns the same success body, and a delete
  * of something the caller does not own returns the same 404 as a delete of
  * something that never existed.
@@ -190,6 +199,9 @@ export async function buildHistoryDeleteResponse(
   jobId: string,
   loadDeps: () => Promise<HistoryAccessDeps>,
 ): Promise<Response> {
+  if (isCrossSiteRequest(request)) {
+    return Response.json({ error: "This request did not come from Ownword." }, { status: 403, headers: NO_STORE });
+  }
   if (!isJobIdShape(jobId)) return notFound();
 
   const deps = once(loadDeps);

@@ -353,6 +353,30 @@ nav a:not(.sign-in):hover::after { right: 0; }
 }
 .sign-in:hover { background: var(--ink); color: var(--paper); translate: 0 -1px; }
 
+/* SEC-17. Which account this browser is signed in as, on every signed-in
+   surface, plus the way out of it.
+
+   Built as a div rather than a nav link on purpose: the 760px rule below
+   hides `nav a:not(.sign-in)`, and an account indicator that disappears on a
+   phone disappears on exactly the device an emailed link is opened on. The
+   address is never truncated for the same reason — an ellipsised address
+   answers "whose account is this?" badly, and answering it is the whole
+   point of the element. */
+.account-indicator {
+  display: flex; align-items: center; gap: var(--s3);
+  min-width: 0; font-size: var(--t-sm); color: var(--ink-2);
+}
+.account-address { min-width: 0; overflow-wrap: anywhere; }
+.account-address b { color: var(--ink); font-weight: 600; }
+.account-signout { margin: 0; flex: none; }
+.account-signout-button {
+  appearance: none; cursor: pointer; white-space: nowrap;
+  padding: 7px 14px; border: 1px solid var(--line-strong); border-radius: 999px;
+  background: transparent; color: inherit; font: inherit; font-weight: 550;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.account-signout-button:hover { background: var(--ink); color: var(--paper); }
+
 /* ============================================================
    STAGE — the pitch and the product share the first screen.
    The workspace is the single focal point; nothing else on the
@@ -1175,8 +1199,16 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
 }
 
 @media (max-width: 760px) {
-  .site-header { height: 60px; }
+  .site-header { min-height: 60px; height: auto; padding-top: var(--s2); padding-bottom: var(--s2); }
   nav a:not(.sign-in) { display: none; }
+  /* The indicator survives here. It stacks so a long address stays whole
+     and readable rather than being cut to fit one row. */
+  nav { gap: var(--s3); }
+  .account-indicator {
+    flex-direction: column; align-items: flex-end; gap: var(--s2);
+    font-size: var(--t-xs); text-align: right; max-width: 62vw;
+  }
+  .account-signout-button { padding: 6px 12px; }
   .stage { padding: var(--s6) var(--gutter) var(--s7); gap: var(--s6); }
   .hero h1 { letter-spacing: -.04em; }
   .hero-copy { margin: var(--s4) 0 var(--s5); font-size: var(--t-base); }

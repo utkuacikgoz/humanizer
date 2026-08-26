@@ -452,3 +452,34 @@ test("deleting one rewrite leaves the account's other rewrites intact", async ()
   assert.equal(after.items.length, 1);
   assert.ok(!after.items.some((item) => item.jobId === second.jobId));
 });
+
+// ---------------------------------------------------------------------
+// SEC-16 — the one state-changing route that had no Origin check
+// ---------------------------------------------------------------------
+
+test("SEC-16: a cross-site DELETE is refused, and nothing is deleted", async () => {
+  const { db, ownerJob } = await scenario();
+
+  const response = await remove(db, ownerJob.jobId, sessionHeaders("owner", { origin: "https://evil.test" }));
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: "This request did not come from Ownword." });
+  // The proven probe got 200 and a voided payload here.
+  assert.equal((await payloadRow(db, ownerJob.jobId)).resultRef, OWNER_RESULT);
+
+  const body = await listBody(await list(db, sessionHeaders("owner")));
+  assert.deepEqual(body.items.map((item) => item.jobId), [ownerJob.jobId], "the rewrite must still be listed");
+});
+
+test("SEC-16: the delete route answers a forged Origin the same way the sentence route does", async () => {
+  const { db, ownerJob } = await scenario();
+
+  // Refused before the job id is even shape-checked, so a forged Origin
+  // cannot be used to probe which ids exist.
+  const unknown = await remove(db, "00000000-0000-4000-8000-000000000000", sessionHeaders("owner", { origin: "https://evil.test" }));
+  assert.equal(unknown.status, 403);
+
+  // A same-site Origin is the ordinary case and still works.
+  const allowed = await remove(db, ownerJob.jobId, sessionHeaders("owner", { origin: "http://localhost" }));
+  assert.equal(allowed.status, 200);
+  assert.deepEqual(await allowed.json(), { deleted: true });
+});

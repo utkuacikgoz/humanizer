@@ -552,6 +552,18 @@ export const authMagicLinkTokens = sqliteTable("auth_magic_link_tokens", {
   consumedAt: integer("consumed_at", { mode: "timestamp_ms" }),
   /** Redemption attempts seen for this digest, successful or not. Bounded evidence of link-guessing, never a token. */
   attemptCount: integer("attempt_count").notNull().default(0),
+  /**
+   * SEC-17. SHA-256 of the one-time nonce set as a cookie on the browser that
+   * requested this link, never the nonce itself — the same digest-only
+   * discipline `tokenDigest` follows, for the same reason: a read of this
+   * table must not yield anything replayable.
+   *
+   * Nullable, and a null can never match a presented nonce, so a row written
+   * before this column existed (or by any path that does not set it) falls
+   * through to the confirmation step rather than signing a browser in
+   * silently. Fail closed in the direction that matters.
+   */
+  browserNonceDigest: text("browser_nonce_digest"),
 }, (t) => [
   uniqueIndex("auth_magic_link_tokens_digest_idx").on(t.tokenDigest),
   index("auth_magic_link_tokens_email_idx").on(t.email),

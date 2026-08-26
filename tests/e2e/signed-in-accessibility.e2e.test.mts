@@ -28,6 +28,7 @@ import {
   grantEntitlement,
   identityBlocker,
   mintSignInLink,
+  signInBrowser,
   ownedJobIds,
   purgeTestAccount,
   testEmail,
@@ -135,7 +136,7 @@ async function tabTo(
 async function seedSignedInHistory(session: Awaited<ReturnType<typeof openSession>>, email: string): Promise<{ jobId: string; userId: string }> {
   const { page, context } = session;
   const link = await mintSignInLink(BASE_URL, email, "/");
-  await page.goto(link.url, { waitUntil: "domcontentloaded" });
+  await signInBrowser(page, link);
   const account = findAccount(email);
   assert.ok(account, "sign-in did not create an account");
   grantEntitlement(account.userId);
