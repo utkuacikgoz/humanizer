@@ -96,8 +96,16 @@ interface UsageTotals {
   models: Set<string>;
 }
 
-function accumulate(totals: UsageTotals, usage: ProviderUsage | undefined): void {
+function accumulate(totals: UsageTotals, usage: ProviderUsage | ProviderUsage[] | undefined): void {
   if (!usage) return;
+  // A rewrite that escalated from a cheap model to an expensive one reports
+  // one entry per model. Summing them is the point: the customer's rewrite
+  // consumed both, and a ledger that recorded only the winning call would
+  // under-report every escalated request.
+  if (Array.isArray(usage)) {
+    for (const entry of usage) accumulate(totals, entry);
+    return;
+  }
   totals.inputTokens += usage.inputTokens ?? 0;
   totals.outputTokens += usage.outputTokens ?? 0;
   totals.cachedInputTokens += usage.cachedInputTokens ?? 0;
@@ -221,6 +229,7 @@ export class HumanizationPipeline {
               verification: this.verificationProvider.name,
               evaluation: this.evaluationProvider.name,
               models: [...totals.models],
+              ...(rewrite.resultModel ? { resultModel: rewrite.resultModel } : {}),
             },
           };
         }

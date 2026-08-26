@@ -94,7 +94,24 @@ export interface RewriteResponse {
   text: string;
   estimatedTokens?: number;
   estimatedCostUsd?: number;
-  usage?: ProviderUsage;
+  /**
+   * What the call cost.
+   *
+   * An array when ONE rewrite consumed more than one model — a cheap-first
+   * router that escalated spent tokens on both rungs, and reporting only the
+   * winner would under-report the bill for every escalated rewrite. The
+   * pipeline sums whatever it is given, so a provider that makes exactly one
+   * call keeps passing a single object.
+   */
+  usage?: ProviderUsage | ProviderUsage[];
+  /**
+   * The model whose output is in `text`, when a provider used more than one.
+   *
+   * Distinct from every model that ran: an escalated rewrite burned tokens on
+   * a model whose candidate was thrown away, and "why was this rewrite worse"
+   * is a question about the one that was kept.
+   */
+  resultModel?: string;
 }
 
 export interface HumanizationProvider {
@@ -215,6 +232,11 @@ export interface ProviderAttribution {
   evaluation: string;
   /** Models reported by any stage, de-duplicated. */
   models: string[];
+  /**
+   * The model that produced the returned text, when the humanization provider
+   * ran more than one. Undefined when there was nothing to choose between.
+   */
+  resultModel?: string;
 }
 
 export interface HumanizationResult {

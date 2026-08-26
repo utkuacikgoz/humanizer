@@ -29,7 +29,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { buildUserTurn, CORE_SYSTEM_PROMPT, createFenceId, MODE_INSTRUCTIONS, REWRITE_OUTPUT_SCHEMA } from "./claude-prompt";
 import { toProviderUsage, type ClaudeModelId } from "./claude-pricing";
 import { ProviderError } from "./provider-error";
-import type { HumanizationProvider, RewriteRequest, RewriteResponse } from "./types";
+import type { HumanizationProvider, ProviderUsage, RewriteRequest, RewriteResponse } from "./types";
 
 /**
  * The one call this provider makes. An interface rather than the SDK client
@@ -212,7 +212,13 @@ export class ClaudeHumanizationProvider implements HumanizationProvider {
     this.name = options.name ?? `claude-${this.model}`;
   }
 
-  async rewrite(request: RewriteRequest): Promise<RewriteResponse> {
+  /**
+   * Returns the narrower `usage: ProviderUsage` rather than the interface's
+   * `ProviderUsage | ProviderUsage[]`: one call, one usage record. The array
+   * form exists for a provider that runs a model ladder, and a caller of this
+   * class should not have to narrow a union that can never widen.
+   */
+  async rewrite(request: RewriteRequest): Promise<RewriteResponse & { usage: ProviderUsage }> {
     request.signal?.throwIfAborted();
     const fenceId = createFenceId();
 

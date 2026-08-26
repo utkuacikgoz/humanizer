@@ -393,3 +393,101 @@ invalid-output exposure to be exactly zero, so streaming unverified text to a
 customer is excluded by the architecture rather than missing from the
 interface. A provider may stream internally as long as it resolves a complete
 candidate.
+
+## M4-01 — the Claude provider: what was built, and what was measured
+
+Last updated: 2026-08-26. Author: Humanization Engine Agent.
+
+### Status of the seven items above
+
+1. **Secrets and configuration** — done. `ANTHROPIC_API_KEY` is in the deploy
+   workflow's env block, its `printf` secrets-file list, the deploy gate and
+   the not-configured check, and in `.dev.vars.example`. Selection is explicit:
+   `HUMANIZATION_PROVIDER=claude`. A key alone changes nothing.
+2. **Backoff** — still not done. `retryAfterMs` is now populated from the
+   provider's `Retry-After` header, and nothing still sleeps on it. Unchanged
+   from the note above; called out again so it does not look closed.
+3. **Cost and latency budgets** — the machinery is done, the numbers are not.
+   Real `usage` maps into `ProviderUsage` with the input/output/cached split
+   and a computed `costUsd`, and `npm run benchmark` prints cost per rewrite,
+   cost per 1,000 words, and the implied margin against the $9.99/50,000-word
+   plan. Every figure it printed on this branch is zero, because every run was
+   the deterministic provider.
+4. **Bumping `PIPELINE_VERSION`** — NOT done. Deliberately: the deterministic
+   provider is still what runs by default, so no previously-generated job's
+   provenance changed. The bump belongs to the deploy that flips
+   `HUMANIZATION_PROVIDER`, not to the commit that adds the option.
+5. **Recalibrating thresholds** — NOT done, and not guessable. The six
+   thresholds were fitted to nothing and a model will not produce the same
+   score distribution. Recalibration needs a measured distribution, and no
+   measured distribution exists yet.
+6. **Re-running the adversarial set** — NOT done against the model. See below.
+7. **Prompt-injection coverage** — done as fixtures and structure. Six
+   passages (`adv-injection-01` .. `-06`) and the structural controls in
+   `docs/SECURITY.md`'s "Prompt-injection coverage as built". Not yet run
+   against a live model.
+
+### Measured on this branch (2026-08-26)
+
+All figures below are the DETERMINISTIC provider. No call to any model API was
+made from this branch, at any point, because no API key was reachable from the
+environment the work was done in.
+
+| Run | Release set | Adversarial |
+| --- | --- | --- |
+| Baseline (`main`, before this branch) | 100/100, 0 semantic, 0 protected-content failures, avg naturalness 0.8538, 35 no-ops | 17/25 passed, 0 hard-safety failures, 3 retry exhaustions |
+| This branch, deterministic provider | identical: 100/100, 0/0, 0.8538, 35 no-ops | 23/31 passed, 0 hard-safety failures, 3 retry exhaustions |
+
+The adversarial set grew from 25 to 31 passages: the six new prompt-injection
+fixtures pass on the deterministic engine, and the original eight failures are
+unchanged, so the comparable subset is still 17/25. The set is deliberately
+NOT easier — the injection fixtures are safety regressions, not quality
+challenges, and they are designed so a provider that starts obeying pasted
+instructions fails them.
+
+Cost per rewrite on the deterministic provider is $0.00, which is true and
+useless. The margin against $9.99 for 50,000 words is therefore still
+unmeasured.
+
+### What still has to be run before this can be judged
+
+With a key in the environment:
+
+```
+npm run benchmark -- --provider=claude --model=claude-opus-5   --effort=medium
+npm run benchmark -- --provider=claude --model=claude-sonnet-5 --effort=medium
+npm run benchmark -- --provider=claude --model=claude-haiku-4-5 --effort=medium
+npm run benchmark -- --provider=claude-routed --ladder=claude-haiku-4-5,claude-opus-5
+```
+
+The change protocol asks for repeated runs to estimate nondeterministic
+variance; one run of each is not a baseline. Three things in particular need
+answering from the output rather than from intuition:
+
+- **Does verification reject model candidates?** The deterministic verifier
+  fails a candidate whose lexical coverage of the source's content terms drops
+  below 0.72. A genuine rewrite moves a lot of words. The prompt asks the model
+  to keep the source's key nouns and terminology specifically to stay inside
+  that gate, and whether it does is an empirical question. If the model's pass
+  rate is poor, the fix is the prompt or the verifier's design — not the
+  threshold. Lowering 0.72 to make a number look better is exactly the move
+  this document forbids.
+- **Which two rungs, if any.** The router's default ladder
+  (`claude-haiku-4-5` -> `claude-opus-5`) is a placeholder, not a measurement.
+  Escalation pays for both models, so a high escalation rate makes routing
+  more expensive than never routing at all. The benchmark prints the
+  escalation rate and the reason breakdown; if blended cost exceeds Opus-only,
+  the correct outcome is to leave `HUMANIZATION_MODEL_ROUTING` off and say so.
+- **Effort.** `medium` is a starting point chosen for latency, not a swept
+  optimum. Sweep low/medium/high before fixing it.
+
+### Fixture length: a gap this work did not close
+
+The release set's 100 passages are 15 to 72 words, median 20 — well under the
+200-300 words this document specifies. That matters for economics as much as
+for quality: a model call carries a fixed prompt overhead of roughly 1,500
+cached system tokens, so cost per 1,000 words extrapolated from 20-word
+passages overstates the real per-word cost of a 250-word document by a wide
+margin. Any cost figure derived from the current release set must say which it
+is. Lengthening the fixtures is a dataset version bump and was out of scope
+here.

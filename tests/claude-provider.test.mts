@@ -393,6 +393,7 @@ test("claude is selected only when it is asked for and a key exists", () => {
   assert.deepEqual(resolveHumanizationProvider({ HUMANIZATION_PROVIDER: "Claude", ANTHROPIC_API_KEY: " sk-ant-test " }), {
     provider: "claude",
     apiKey: "sk-ant-test",
+    routing: false,
   });
   assert.deepEqual(resolveHumanizationProvider({ HUMANIZATION_PROVIDER: "openai", ANTHROPIC_API_KEY: "k" }), {
     provider: "deterministic",
@@ -406,12 +407,12 @@ test("effort is opt-in and validated", () => {
     ANTHROPIC_API_KEY: "k",
     HUMANIZATION_EFFORT: "xhigh",
   });
-  assert.deepEqual(tuned, { provider: "claude", apiKey: "k", effort: "xhigh" });
+  assert.deepEqual(tuned, { provider: "claude", apiKey: "k", routing: false, effort: "xhigh" });
 
   const nonsense = resolveHumanizationProvider({
     HUMANIZATION_PROVIDER: "claude",
     ANTHROPIC_API_KEY: "k",
     HUMANIZATION_EFFORT: "turbo",
   });
-  assert.deepEqual(nonsense, { provider: "claude", apiKey: "k" });
+  assert.deepEqual(nonsense, { provider: "claude", apiKey: "k", routing: false });
 });

@@ -12,7 +12,7 @@ import { releasePaidUsage, reservePaidUsage } from "@/src/lib/paid-usage";
 import type { PaidUsageReservation } from "@/src/lib/paid-usage";
 import { completeEntitledRewrite } from "@/src/lib/entitled-rewrite";
 import type { EntitledRewritePayload } from "@/src/lib/entitled-rewrite";
-import type { AppDatabase, PreviewProjection } from "../../../db/repository";
+import type { AppDatabase, PersistJobAttribution, PreviewProjection } from "../../../db/repository";
 
 const allowedModes = new Set<WritingMode>(["natural", "professional", "academic", "casual"]);
 const MAX_INPUT_CHARACTERS = 10_000;
@@ -82,6 +82,7 @@ async function tryPersist(input: {
   successfulWords: number;
   protectedContent: Array<{ id: string; kind: string; normalizedValue: string; start: number; end: number }>;
   projection: PreviewProjection;
+  attribution: PersistJobAttribution;
 }): Promise<{ capability: string; capabilityExpiresAt: string } | undefined> {
   try {
     const [{ getDb }, { persistHumanizationJob }] = await Promise.all([
@@ -100,6 +101,7 @@ async function tryPersist(input: {
       result: input.result,
       protectedContent: input.protectedContent,
       previewProjection: input.projection,
+      attribution: input.attribution,
     });
     return { capability: persisted.capabilityToken, capabilityExpiresAt: persisted.capabilityExpiresAt.toISOString() };
   } catch {
@@ -334,6 +336,21 @@ export async function POST(request: Request) {
             return { original: result.original, unchanged: true } satisfies UnchangedPayload;
           }
 
+          // Content-free provenance: provider name, the model that produced
+          // the returned text, and the numbers. A support question of the
+          // form "why was this rewrite worse" is answerable only if this
+          // outlives the request.
+          const attribution: PersistJobAttribution = {
+            providerName: result.providers.humanization,
+            ...(result.providers.resultModel ? { resultModel: result.providers.resultModel } : {}),
+            attempts: result.metrics.attempts,
+            inputTokens: result.metrics.inputTokens,
+            outputTokens: result.metrics.outputTokens,
+            cachedInputTokens: result.metrics.cachedInputTokens,
+            costUsd: result.metrics.providerCostUsd,
+            latencyMs: result.metrics.latencyMs,
+          };
+
           const evidence = {
             issuesImproved: result.improvements,
             naturalness: result.evaluation.scores.naturalness >= 0.7 ? "Strong" as const : "Good" as const,
@@ -359,6 +376,7 @@ export async function POST(request: Request) {
               successfulWordCount: result.metrics.successfulWords,
               protectedContent: result.protectedContent,
               evidence,
+              attribution,
             }, {
               // Content-free by construction: a reason code, never the error
               // object, which can carry bound statement parameters (the
@@ -401,6 +419,7 @@ export async function POST(request: Request) {
             successfulWords: result.metrics.successfulWords,
             protectedContent: result.protectedContent,
             projection,
+            attribution,
           });
           return { original: result.original, ...projection, ...persisted } satisfies HumanizePayload;
         } catch (error) {

@@ -29,7 +29,7 @@ import { commitPaidUsage } from "@/src/lib/paid-usage";
 import type { PaidUsageReservation } from "@/src/lib/paid-usage";
 import { claimOperationForJob } from "../../db/usage-ledger";
 import { persistHumanizationJob } from "../../db/repository";
-import type { AppDatabase, PersistJobInput, PersistProtectedItem, PersistedOwnedJob, PreviewProjection } from "../../db/repository";
+import type { AppDatabase, PersistJobAttribution, PersistJobInput, PersistProtectedItem, PersistedOwnedJob, PreviewProjection } from "../../db/repository";
 import type { WritingModeValue } from "../../db/schema";
 
 /** The already-derived, approved-for-display evidence for one rewrite. */
@@ -53,6 +53,8 @@ export interface EntitledRewriteInput {
   successfulWordCount: number;
   protectedContent: PersistProtectedItem[];
   evidence: EntitledRewriteEvidence;
+  /** Which provider and model produced this, and what it cost. Content-free. */
+  attribution?: PersistJobAttribution;
 }
 
 /** Exactly what /api/humanize returns for an entitled rewrite. */
@@ -141,6 +143,7 @@ async function recordOwnedJob(
       result: input.result,
       protectedContent: input.protectedContent,
       previewProjection: ownedPreviewProjection(input.result, input.evidence),
+      ...(input.attribution ? { attribution: input.attribution } : {}),
     });
 
     // The guarded insert refused: this owner already has a row for this

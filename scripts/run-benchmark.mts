@@ -13,6 +13,11 @@ import { countWords, createHumanizationPipeline, runAdversarialBenchmark, runHum
 const requested = (process.argv.find((argument) => argument.startsWith("--provider="))?.split("=")[1] ?? "deterministic").toLowerCase();
 const model = process.argv.find((argument) => argument.startsWith("--model="))?.split("=")[1];
 const effort = process.argv.find((argument) => argument.startsWith("--effort="))?.split("=")[1];
+const ladderArgument = process.argv.find((argument) => argument.startsWith("--ladder="))?.split("=")[1];
+const ladder = ladderArgument?.split(",").map((part) => part.trim()) as ["claude-opus-5" | "claude-sonnet-5" | "claude-haiku-4-5", "claude-opus-5" | "claude-sonnet-5" | "claude-haiku-4-5"] | undefined;
+
+// Escalation observations, collected by the router's content-free hook.
+const escalations: Array<{ resultModel: string; escalated: boolean; reason?: string }> = [];
 
 async function buildPipeline(): Promise<{ pipeline: HumanizationPipeline; label: string }> {
   if (requested === "deterministic") {
@@ -25,11 +30,20 @@ async function buildPipeline(): Promise<{ pipeline: HumanizationPipeline; label:
   }
   const { ClaudeHumanizationProvider, createAnthropicMessagesClient } = await import("../src/lib/humanization/claude-provider");
   const client = createAnthropicMessagesClient({ apiKey });
-  const provider = new ClaudeHumanizationProvider({
-    client,
-    ...(model ? { model: model as "claude-opus-5" | "claude-sonnet-5" | "claude-haiku-4-5" } : {}),
-    ...(effort ? { effort: effort as "low" | "medium" | "high" | "xhigh" | "max" } : {}),
-  });
+  const provider = requested === "claude-routed"
+    ? new (await import("../src/lib/humanization/escalating-provider")).EscalatingClaudeProvider({
+        client,
+        ...(ladder ? { ladder } : {}),
+        ...(effort ? { effort: effort as "low" | "medium" | "high" | "xhigh" | "max" } : {}),
+        onAttempt: (record) => {
+          escalations.push(record);
+        },
+      })
+    : new ClaudeHumanizationProvider({
+        client,
+        ...(model ? { model: model as "claude-opus-5" | "claude-sonnet-5" | "claude-haiku-4-5" } : {}),
+        ...(effort ? { effort: effort as "low" | "medium" | "high" | "xhigh" | "max" } : {}),
+      });
   return { pipeline: createHumanizationPipeline({ humanizationProvider: provider, config: { providerTimeoutMs: 120_000 } }), label: provider.name };
 }
 
@@ -91,6 +105,26 @@ write(JSON.stringify({
   costOf50000WordsUsd: Number((perThousandWords * 50).toFixed(2)),
   grossMarginAt9_99: release.estimatedCostUsd === 0 ? null : Number((((9.99 - perThousandWords * 50) / 9.99) * 100).toFixed(1)),
 }, null, 2));
+
+if (escalations.length) {
+  // Routing economics. An escalated rewrite pays for BOTH models, so a high
+  // escalation rate is not a saving — it is the expensive model plus a
+  // surcharge. This block is what says which of those happened.
+  const escalated = escalations.filter((record) => record.escalated);
+  const byReason = new Map<string, number>();
+  for (const record of escalated) byReason.set(record.reason ?? "unknown", (byReason.get(record.reason ?? "unknown") ?? 0) + 1);
+  const byModel = new Map<string, number>();
+  for (const record of escalations) byModel.set(record.resultModel, (byModel.get(record.resultModel) ?? 0) + 1);
+  write();
+  write("Routing");
+  write(JSON.stringify({
+    rewrites: escalations.length,
+    escalated: escalated.length,
+    escalationRate: Number((escalated.length / escalations.length).toFixed(4)),
+    escalationReasons: Object.fromEntries(byReason),
+    resultsByModel: Object.fromEntries(byModel),
+  }, null, 2));
+}
 
 write();
 write(`Adversarial set (hard cases, ${adversarial.passages} passages)`);

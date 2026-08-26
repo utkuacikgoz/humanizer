@@ -72,10 +72,19 @@ async function build(maxInputCharacters: number): Promise<HumanizationRuntime> {
 
   const { ClaudeHumanizationProvider, createAnthropicMessagesClient } = await import("@/src/lib/humanization/claude-provider");
   const client = createAnthropicMessagesClient({ apiKey: choice.apiKey, timeoutMs: MODEL_ATTEMPT_MS });
-  const humanizationProvider = new ClaudeHumanizationProvider({
-    client,
-    ...(choice.effort ? { effort: choice.effort } : {}),
-  });
+  // Routing is opt-in and there is always a single-model path: with
+  // HUMANIZATION_MODEL_ROUTING unset, one model answers every request and no
+  // escalation logic runs at all.
+  const humanizationProvider = choice.routing
+    ? new (await import("@/src/lib/humanization/escalating-provider")).EscalatingClaudeProvider({
+        client,
+        ...(choice.ladder ? { ladder: choice.ladder } : {}),
+        ...(choice.effort ? { effort: choice.effort } : {}),
+      })
+    : new ClaudeHumanizationProvider({
+        client,
+        ...(choice.effort ? { effort: choice.effort } : {}),
+      });
 
   return {
     pipeline: createHumanizationPipeline({
