@@ -11,11 +11,16 @@ import { pricingConfig } from "./pricing";
 
 export const STRIPE_CATALOG_VERSION = 1;
 
-// Only plans with availability "active" need a mapping here — "pro" is
-// "announced" (not purchasable yet per src/config/pricing.ts) and
-// deliberately has none.
+// Only plans with availability "active" need a mapping here. Both shipped
+// plans are active, so both are listed; a plan added here without a matching
+// secret in .github/workflows/deploy.yml is not "unset", it is absent from
+// the Worker after the next deploy, because `wrangler deploy --secrets-file`
+// replaces the entire secret set. src/lib/stripe-config.ts then fails closed
+// for every plan, so the omission takes checkout down rather than silently
+// selling one plan at another plan's price.
 export const STRIPE_PRICE_ENV_KEYS = {
   starter: "STRIPE_PRICE_STARTER",
+  pro: "STRIPE_PRICE_PRO",
 } as const satisfies Partial<Record<keyof typeof pricingConfig.plans, string>>;
 
 export type PlanId = keyof typeof STRIPE_PRICE_ENV_KEYS;

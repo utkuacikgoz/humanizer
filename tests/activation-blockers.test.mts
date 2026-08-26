@@ -250,8 +250,27 @@ test("ACT-10: the disclosure introduces no urgency, scarcity, or preselected ups
 
 test("ACT-10: the disclosure sits with the unlock button, not only in the pricing section", async () => {
   const home = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  const card = home.match(/<div className="unlock-card">[\s\S]*?<\/div>/);
-  assert.ok(card, "expected an unlock card in the result branch");
-  assert.match(card[0], /subscriptionDisclosure\(starterPlan\)/);
+  // Through the terms block, not to the first closing tag: the purchase
+  // controls now sit in their own wrapper, so a lazy match to the first
+  // </div> would stop before the disclosure it is looking for.
+  const card = home.match(/<div className="unlock-card">[\s\S]*?<\/small>/);
+  assert.ok(card, "expected an unlock card with a terms block in the result branch");
+  // One disclosure per purchasable plan, beside the button that buys it.
+  // A single plan's terms next to two priced buttons would leave the second
+  // plan's recurring charge and allowance undisclosed at the decision point.
+  assert.match(card[0], /purchasablePlans\.map\(\(plan\) => <span key=\{plan\.id\}>\{subscriptionDisclosure\(plan\)\}<\/span>\)/);
   assert.match(card[0], /Cancel anytime/);
+});
+
+test("ACT-10: every purchasable plan discloses its own recurring terms", () => {
+  const purchasable = Object.values(pricingConfig.plans).filter((plan) => plan.availability === "active");
+  assert.ok(purchasable.length > 0, "expected at least one purchasable plan");
+  for (const plan of purchasable) {
+    const disclosure = subscriptionDisclosure(plan);
+    assert.match(disclosure, new RegExp(`\\$${String(plan.monthlyPrice).replace(".", "\\.")}\\b`), `${plan.id} must state its amount`);
+    assert.match(disclosure, /recurring/i, `${plan.id} must state that it recurs`);
+    assert.match(disclosure, /until you cancel/i, `${plan.id} must state how it ends`);
+    assert.match(disclosure, new RegExp(plan.wordLimit.toLocaleString("en-US")), `${plan.id} must state its allowance`);
+    assert.doesNotMatch(disclosure, /limited time|hurry|only \d+ left|expires? (in|soon)|today only|free trial/i);
+  }
 });

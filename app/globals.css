@@ -794,10 +794,21 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
   margin: 0; max-width: 48ch;
   color: var(--ink-2); font-size: var(--t-sm); line-height: 1.55;
 }
-.unlock-card button {
+/* Two purchasable plans means two purchase controls, stacked in the cell
+   the single button used to occupy. Neither is badged "recommended": the
+   plans differ only by monthly allowance, so the second is quieter in
+   weight, not in the information it carries. */
+.unlock-plans {
   grid-column: 2; grid-row: 1;
+  display: grid; gap: var(--s2); min-width: 0;
+}
+.unlock-card button {
   position: relative; width: 100%; padding: 14px 16px;
   border: 0; border-radius: var(--radius-sm);
+  /* The label names the plan as well as the action, so it wraps in this
+     column at most widths. Balanced, it wraps to two even lines instead of
+     one full line and one orphaned word. */
+  text-wrap: balance;
   background: linear-gradient(158deg, #b8491d, #93380f);
   color: #fff8f3;             /* 5.1:1 → 7.2:1 across the gradient */
   font-size: var(--t-base); font-weight: 650; letter-spacing: -.015em;
@@ -809,12 +820,28 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .unlock-card button:not(:disabled):not([aria-disabled="true"]):active { translate: 0 1px; box-shadow: 0 1px 0 #6b2a0d; }
 .unlock-card button:disabled,
 .unlock-card button[aria-disabled="true"] { cursor: not-allowed; filter: saturate(.5); opacity: .7; box-shadow: none; }
+.unlock-card button.plan-alt {
+  background: transparent;
+  color: var(--clay);
+  border: 1px solid color-mix(in srgb, var(--clay) 42%, transparent);
+  box-shadow: none;
+  font-weight: 600;
+}
+.unlock-card button.plan-alt:not([aria-disabled="true"]):hover {
+  translate: 0 -2px; box-shadow: none;
+  background: color-mix(in srgb, var(--clay) 8%, transparent);
+}
+.unlock-card button.plan-alt:not([aria-disabled="true"]):active { translate: 0 1px; }
 .unlock-terms {
   grid-column: 2; grid-row: 2;
-  display: block;
+  display: grid; gap: 5px;
   color: var(--ink-3); font-size: var(--t-xs); line-height: 1.5;
   text-wrap: pretty;
 }
+/* One line per statement. The plan terms used to be a single sentence after
+   a <br>; with a sentence per plan, run-on lines would bury the second
+   plan's allowance in the first plan's paragraph. */
+.unlock-terms > span { display: block; }
 .unlock-card small[role="alert"] {
   grid-column: 1 / -1;
   display: block; margin-top: var(--s2);
@@ -935,6 +962,10 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .pricing-intro h2 { color: var(--band-ink); }
 .pricing-intro p { margin: var(--s5) 0 0; max-width: 38ch; color: var(--band-ink-2); font-size: var(--t-base); line-height: 1.6; }
 
+/* The section is a two-column band: intro left, plans right. A second
+   <article> as a direct child would have wrapped into the intro's column,
+   so the cards share one cell and stack inside it. */
+.pricing-plans { display: grid; gap: var(--s5); min-width: 0; }
 .pricing article {
   padding: var(--s6);
   display: grid; grid-template-columns: 1fr auto; gap: var(--s5);
@@ -961,6 +992,16 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 }
 .pricing li { display: flex; align-items: center; gap: var(--s2); }
 .pricing li svg { color: var(--band-accent); }
+/* The roadmap line. Deliberately not a checkmark list item: an unbuilt
+   capability must not be able to read as a bought one (docs/MONETIZATION.md
+   forbids claiming unavailable Pro features are present), so it sits outside
+   the ruled feature list, carries no tick, and opens with the words that
+   settle it. */
+.pricing .plan-roadmap {
+  grid-column: 1 / -1; margin: 0; max-width: none;
+  color: var(--band-ink-2); font-size: var(--t-xs); line-height: 1.5;
+}
+.pricing .plan-roadmap b { color: var(--band-ink); font-weight: 650; }
 .pricing article > a {
   grid-column: 1 / -1; padding: 15px; border-radius: var(--radius-sm);
   background: var(--band-cta); color: var(--band);
@@ -1118,8 +1159,8 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
 @media (max-width: 980px) {
   .unlock-card { grid-template-columns: minmax(0, 1fr); row-gap: var(--s3); }
   .unlock-card strong, .unlock-card > p,
-  .unlock-card button, .unlock-card .unlock-terms { grid-column: 1; grid-row: auto; }
-  .unlock-card button { margin-top: var(--s2); }
+  .unlock-card .unlock-plans, .unlock-card .unlock-terms { grid-column: 1; grid-row: auto; }
+  .unlock-card .unlock-plans { margin-top: var(--s2); }
 }
 
 @media (max-width: 860px) {
