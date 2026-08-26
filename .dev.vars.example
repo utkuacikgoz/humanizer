@@ -40,3 +40,24 @@ STRIPE_PRICE_PRO=price_replace_me
 # identity differs, e.g. a mail subdomain.
 RESEND_API_KEY=re_replace_me
 # AUTH_EMAIL_FROM=Ownword <no-reply@mail.ownword.pro>
+
+# Humanization engine (M4-01). The engine ships with a deterministic,
+# offline provider and uses it unless a model provider is EXPLICITLY
+# selected — an API key sitting in the environment is never enough on its
+# own (src/lib/humanization/provider-config.ts).
+#
+# Uncomment both lines to run rewrites through Claude locally. Leave them
+# commented and the app behaves exactly as it does today, with no network
+# call and no spend. `npm test` never reads either one: the provider takes
+# an injected client, so the whole suite runs with no key at all.
+#
+# ANTHROPIC_API_KEY: https://console.anthropic.com -> API keys.
+# HUMANIZATION_EFFORT is optional (low | medium | high | xhigh | max) and
+# defaults to `low`, not the API's `high`. Thinking tokens bill at the
+# output rate, and a lower effort is safe here because the pipeline
+# verifies every candidate before a customer sees it. Raise it only from
+# what `npm run measure:cost` shows — the figure that matters is the
+# verification rejection rate, not a read of the prose.
+# HUMANIZATION_PROVIDER=claude
+# ANTHROPIC_API_KEY=sk-ant-replace_me
+# HUMANIZATION_EFFORT=medium

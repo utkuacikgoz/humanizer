@@ -85,6 +85,17 @@ export interface ProviderUsage {
   outputTokens?: number;
   /** Input tokens served from a provider-side cache, when the provider reports them. */
   cachedInputTokens?: number;
+  /**
+   * Output tokens the model spent on internal reasoning, when the provider
+   * reports them.
+   *
+   * Included in `outputTokens`, never additive to it — this says how much of
+   * that total was thinking. It is broken out because it is the single
+   * largest swing factor in what a rewrite costs: thinking bills at the
+   * output rate, adaptive thinking is on by default on the current models,
+   * and docs/BENCHMARKS.md's arithmetic turns entirely on this number.
+   */
+  thinkingTokens?: number;
   costUsd?: number;
   /** The model that served the call, for provenance on a stored job. */
   model?: string;
@@ -94,7 +105,24 @@ export interface RewriteResponse {
   text: string;
   estimatedTokens?: number;
   estimatedCostUsd?: number;
-  usage?: ProviderUsage;
+  /**
+   * What the call cost.
+   *
+   * An array when ONE rewrite consumed more than one model — a cheap-first
+   * router that escalated spent tokens on both rungs, and reporting only the
+   * winner would under-report the bill for every escalated rewrite. The
+   * pipeline sums whatever it is given, so a provider that makes exactly one
+   * call keeps passing a single object.
+   */
+  usage?: ProviderUsage | ProviderUsage[];
+  /**
+   * The model whose output is in `text`, when a provider used more than one.
+   *
+   * Distinct from every model that ran: an escalated rewrite burned tokens on
+   * a model whose candidate was thrown away, and "why was this rewrite worse"
+   * is a question about the one that was kept.
+   */
+  resultModel?: string;
 }
 
 export interface HumanizationProvider {
@@ -204,6 +232,8 @@ export interface UsageMetrics {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
+  /** The reasoning share of `outputTokens`. Zero when no provider reported it. */
+  thinkingTokens: number;
   /** Provider-reported cost, as distinct from the estimate above. */
   providerCostUsd: number;
 }
@@ -215,6 +245,11 @@ export interface ProviderAttribution {
   evaluation: string;
   /** Models reported by any stage, de-duplicated. */
   models: string[];
+  /**
+   * The model that produced the returned text, when the humanization provider
+   * ran more than one. Undefined when there was nothing to choose between.
+   */
+  resultModel?: string;
 }
 
 export interface HumanizationResult {

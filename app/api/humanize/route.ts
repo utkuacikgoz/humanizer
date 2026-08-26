@@ -1,4 +1,5 @@
-import { createHumanizationPipeline, HumanizationFailedError, PIPELINE_VERSION } from "@/src/lib/humanization";
+import { HumanizationFailedError, PIPELINE_VERSION } from "@/src/lib/humanization";
+import { humanizationRuntime } from "./humanization-runtime";
 import type { WritingMode } from "@/src/lib/humanization";
 import {
   DistributedPreviewRequestGuard,
@@ -11,12 +12,11 @@ import { releasePaidUsage, reservePaidUsage } from "@/src/lib/paid-usage";
 import type { PaidUsageReservation } from "@/src/lib/paid-usage";
 import { completeEntitledRewrite } from "@/src/lib/entitled-rewrite";
 import type { EntitledRewritePayload } from "@/src/lib/entitled-rewrite";
-import type { AppDatabase, PreviewProjection } from "../../../db/repository";
+import type { AppDatabase, PersistJobAttribution, PreviewProjection } from "../../../db/repository";
 
 const allowedModes = new Set<WritingMode>(["natural", "professional", "academic", "casual"]);
-const pipeline = createHumanizationPipeline({ config: { maxInputCharacters: 10_000 } });
+const MAX_INPUT_CHARACTERS = 10_000;
 const MAX_REQUEST_BYTES = 10_000;
-const MAX_PROCESSING_MS = 5_000;
 const IDEMPOTENCY_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{7,127}$/;
 
 /**
@@ -82,6 +82,7 @@ async function tryPersist(input: {
   successfulWords: number;
   protectedContent: Array<{ id: string; kind: string; normalizedValue: string; start: number; end: number }>;
   projection: PreviewProjection;
+  attribution: PersistJobAttribution;
 }): Promise<{ capability: string; capabilityExpiresAt: string } | undefined> {
   try {
     const [{ getDb }, { persistHumanizationJob }] = await Promise.all([
@@ -100,6 +101,7 @@ async function tryPersist(input: {
       result: input.result,
       protectedContent: input.protectedContent,
       previewProjection: input.projection,
+      attribution: input.attribution,
     });
     return { capability: persisted.capabilityToken, capabilityExpiresAt: persisted.capabilityExpiresAt.toISOString() };
   } catch {
@@ -288,7 +290,12 @@ export async function POST(request: Request) {
       fingerprint: contentFingerprint,
       execute: async () => {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(new DOMException("Preview deadline exceeded.", "TimeoutError")), MAX_PROCESSING_MS);
+        // Which provider serves this deployment, and therefore how long a
+        // rewrite is allowed to take: a substitution table answers in
+        // milliseconds, a model call is a round trip. Resolved once per
+        // isolate, not once per request.
+        const runtime = await humanizationRuntime(MAX_INPUT_CHARACTERS);
+        const timeout = setTimeout(() => controller.abort(new DOMException("Preview deadline exceeded.", "TimeoutError")), runtime.processingMs);
         let paidDb: AppDatabase | null = null;
         let paidReservation: PaidUsageReservation | null = null;
         try {
@@ -316,7 +323,27 @@ export async function POST(request: Request) {
             }
           }
 
-          const result = await pipeline.humanize({ text, mode: mode as WritingMode, signal: controller.signal });
+          const result = await runtime.pipeline.humanize({ text, mode: mode as WritingMode, signal: controller.signal });
+
+          const unchanged = isMateriallyUnchanged(result.original, result.text) || result.improvements === 0;
+
+          // Unit economics, recorded for every rewrite the pipeline RETURNED
+          // — including the no-op below, which cost real money and delivers
+          // zero billable words. Counting its cost against zero words is not
+          // a distortion; it is the arithmetic that makes a provider quietly
+          // producing no-ops show up as an economic problem rather than a
+          // quality one. Numbers only; the guard never sees the text.
+          runtime.costGuard?.record({
+            costUsd: result.metrics.providerCostUsd,
+            words: unchanged ? 0 : result.metrics.successfulWords,
+            inputTokens: result.metrics.inputTokens,
+            outputTokens: result.metrics.outputTokens,
+            cachedInputTokens: result.metrics.cachedInputTokens,
+            thinkingTokens: result.metrics.thinkingTokens,
+            attempts: result.metrics.attempts,
+            providerName: result.providers.humanization,
+            ...(result.providers.resultModel ? { resultModel: result.providers.resultModel } : {}),
+          });
 
           // ACT-01: never truncate, price, or persist a rewrite that did
           // not rewrite anything. Derived from the normalized full
@@ -324,10 +351,25 @@ export async function POST(request: Request) {
           // `improvements` — and returned before any preview projection,
           // persistence, or capability minting happens, so no unlock CTA
           // can exist for this outcome anywhere downstream.
-          if (isMateriallyUnchanged(result.original, result.text) || result.improvements === 0) {
+          if (unchanged) {
             if (paidDb && paidReservation) await releasePaidUsage(paidDb, paidReservation);
             return { original: result.original, unchanged: true } satisfies UnchangedPayload;
           }
+
+          // Content-free provenance: provider name, the model that produced
+          // the returned text, and the numbers. A support question of the
+          // form "why was this rewrite worse" is answerable only if this
+          // outlives the request.
+          const attribution: PersistJobAttribution = {
+            providerName: result.providers.humanization,
+            ...(result.providers.resultModel ? { resultModel: result.providers.resultModel } : {}),
+            attempts: result.metrics.attempts,
+            inputTokens: result.metrics.inputTokens,
+            outputTokens: result.metrics.outputTokens,
+            cachedInputTokens: result.metrics.cachedInputTokens,
+            costUsd: result.metrics.providerCostUsd,
+            latencyMs: result.metrics.latencyMs,
+          };
 
           const evidence = {
             issuesImproved: result.improvements,
@@ -354,6 +396,7 @@ export async function POST(request: Request) {
               successfulWordCount: result.metrics.successfulWords,
               protectedContent: result.protectedContent,
               evidence,
+              attribution,
             }, {
               // Content-free by construction: a reason code, never the error
               // object, which can carry bound statement parameters (the
@@ -396,6 +439,7 @@ export async function POST(request: Request) {
             successfulWords: result.metrics.successfulWords,
             protectedContent: result.protectedContent,
             projection,
+            attribution,
           });
           return { original: result.original, ...projection, ...persisted } satisfies HumanizePayload;
         } catch (error) {

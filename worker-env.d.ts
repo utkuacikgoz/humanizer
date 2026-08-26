@@ -25,6 +25,18 @@ declare namespace Cloudflare {
     RESEND_API_KEY?: string;
     /** Envelope sender. Optional: defaults to no-reply@<productConfig.domain>. */
     AUTH_EMAIL_FROM?: string;
+    /**
+     * Humanization engine provider selection (M4-01). "claude" opts into the
+     * model-backed rewriter; anything else, including unset, keeps the
+     * deterministic engine. Selection is explicit: a present
+     * ANTHROPIC_API_KEY alone never switches a deployment onto a metered
+     * provider (src/lib/humanization/provider-config.ts).
+     */
+    HUMANIZATION_PROVIDER?: string;
+    /** Required only when HUMANIZATION_PROVIDER is "claude"; fails closed to deterministic otherwise. */
+    ANTHROPIC_API_KEY?: string;
+    /** Optional depth control: low | medium | high | xhigh | max. Defaults to medium. */
+    HUMANIZATION_EFFORT?: string;
     /** Set to `production`, `development`, `local`, or `test`. */
     ENVIRONMENT?: string;
   }
