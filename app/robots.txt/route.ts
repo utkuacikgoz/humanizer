@@ -1,4 +1,4 @@
-import { canonicalOrigin, isCanonicalHost, normalizeHost } from "@/src/lib/public-pages";
+import { CRAWLER_DISALLOWED_PREFIXES, canonicalOrigin, isCanonicalHost, normalizeHost } from "@/src/lib/public-pages";
 
 function requestHost(request: Request) {
   return normalizeHost(
@@ -20,6 +20,21 @@ function requestHost(request: Request) {
 // `Disallow: /history/` does not cover `/history` itself, and that is
 // intentional: the page is `noindex`, and a `noindex` a crawler is forbidden
 // to fetch is a `noindex` it never reads.
+//
+// `/signin` follows the same rule, and this is a reversal. It used to be
+// `Disallow`ed. The third SEO-020 crawl pass found what made that the wrong
+// half of the trade: `/signin` is not like `/checkout/success`, which is
+// reached only through a Stripe redirect and is linked from nowhere. It is
+// linked from the header of `/`, the site's most indexable page. A URL that a
+// crawler is told not to fetch, but is handed a link to from an indexable
+// page, is precisely the case where Google indexes it URL-only, with no
+// snippet and no way for the page to object - because the `noindex` sits
+// behind the `Disallow`. Letting the crawler read the `noindex` is the only
+// instruction that actually removes it. Nothing on `/signin` needs hiding
+// from a fetch: it is a public GET with an email field and no secret.
+//
+// The invariant this restores is asserted in tests/page-quality-gate.test.mjs:
+// no indexable page may link to a path robots.txt disallows.
 export function GET(request: Request) {
   const canonical = canonicalOrigin();
   if (!canonical || !isCanonicalHost(requestHost(request))) {
@@ -32,14 +47,7 @@ export function GET(request: Request) {
     [
       `User-agent: *`,
       `Allow: /`,
-      `Disallow: /api/`,
-      `Disallow: /account/`,
-      `Disallow: /admin/`,
-      `Disallow: /billing/`,
-      `Disallow: /checkout/`,
-      `Disallow: /history/`,
-      `Disallow: /result/`,
-      `Disallow: /signin`,
+      ...CRAWLER_DISALLOWED_PREFIXES.map((prefix) => `Disallow: ${prefix}`),
       `Sitemap: ${canonical.origin}/sitemap.xml`,
       ``,
     ].join("\n"),

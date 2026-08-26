@@ -195,7 +195,7 @@ test("ACT-09: every portal failure is an honest, actionable state rather than a 
 
 test("ACT-09: the cancellation claim leads to a real portal", async () => {
   const [home, success, terms, component] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/landing-page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/checkout/success/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/terms/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/manage-billing.tsx", import.meta.url), "utf8"),
@@ -249,7 +249,7 @@ test("ACT-10: the disclosure introduces no urgency, scarcity, or preselected ups
 });
 
 test("ACT-10: the disclosure sits with the unlock button, not only in the pricing section", async () => {
-  const home = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const home = await readFile(new URL("../app/landing-page.tsx", import.meta.url), "utf8");
   // Through the terms block, not to the first closing tag: the purchase
   // controls now sit in their own wrapper, so a lazy match to the first
   // </div> would stop before the disclosure it is looking for.

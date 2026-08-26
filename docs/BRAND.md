@@ -41,7 +41,7 @@ On 2026-08-24, `https://ownword.pro/` resolved to Hostinger's parked domain page
 ## Design system
 
 Owner: DES. Implemented in `app/globals.css` (116 custom properties) and
-consumed by `app/page.tsx`, `app/layout.tsx`, `app/checkout/success/page.tsx`,
+consumed by `app/landing-page.tsx`, `app/layout.tsx`, `app/checkout/success/page.tsx`,
 `app/privacy`, `app/terms`, and `src/components/**`.
 
 ### Tokens
