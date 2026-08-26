@@ -66,13 +66,28 @@ Status meanings:
 
 The ACT-01 through ACT-16 program is complete. The product is not commercially released. The remaining release work is tracked in `PRODUCT.md` and `AGENTS.md`:
 
-- attach the application to `ownword.pro` and verify canonical-host behavior;
-- configure and verify production D1, distributed preview guard secret, Stripe credentials, webhook secret, and live price IDs;
-- select and benchmark the production humanization provider;
-- obtain Legal approval for Terms, Privacy, retention, processor, refund, and jurisdiction language;
-- persist an entitled request's rewrite so it reaches paid history, and settle the retention rule for owned payloads that this requires;
-- implement local editing/revisions, sentence restore/regeneration, and protected phrases (the purge worker that drains queued deletion jobs and runs the anonymous retention sweep on an hourly cron is implemented; account deletion stays manual by email by PO decision);
-- complete production-like security, billing, accessibility, manual QA, smoke, reconciliation, and rollback gates.
+- **no purchase has ever completed end to end.** Sign-in reaches the mail provider and the send is
+  being rejected there, so nobody has yet signed in, bought, and unlocked on the production host.
+  This is the single item every commercial claim in this document waits on;
+- select and benchmark the production humanization provider. A Claude provider is implemented but
+  **not active**: `HUMANIZATION_PROVIDER` still selects the deterministic baseline, no real API call
+  has ever been made, and the cost of one is modelled rather than measured;
+- settle the unit economics. Modelled cost for a full Starter allowance ranges from $2.25 to $17.25
+  depending on thinking tokens, against $9.99 of revenue, and Pro earns 47% of Starter's rate per
+  word. `npm run measure:cost` exists to answer this and needs a key;
+- obtain Legal approval for Terms, Privacy, retention, processor, refund, and jurisdiction language,
+  including the provider disclosure copy written on 2026-08-26 without counsel;
+- implement local editing/revisions and protected phrases. **Sentence restore and regeneration are
+  implemented server-side with no UI**, so no customer can reach them. The purge worker runs hourly;
+  account deletion stays manual by email by PO decision;
+- complete production-like security, billing, accessibility, manual QA, smoke, reconciliation, and
+  rollback gates.
+
+Closed since this list was written: the application is attached to `ownword.pro` with canonical-host
+behavior verified in the built output; production D1, the preview guard secret, Stripe credentials,
+the webhook secret and both live price IDs are configured and the deploy gates on all of them; and
+an entitled request's rewrite is persisted to paid history under a settled retention rule (kept until
+the owner deletes it, no timed expiry).
 
 ## Rejected activation tactics
 
