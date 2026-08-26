@@ -53,7 +53,42 @@ jobs:
           node-version: "22.13.0"
           cache: npm
 
-      - run: npm ci
+      # SEC-08. `npm ci` executes third-party lifecycle scripts, and this job's
+      # environment is the application's ENTIRE production credential set —
+      # the Cloudflare deploy token, the live Stripe key, the webhook secret,
+      # the preview guard's HMAC/encryption key, the mail credential and the
+      # Anthropic key. One compromised transitive dependency reads all of them
+      # in a single `process.env` access. Two changes narrow that to nothing:
+      #
+      #   * `--ignore-scripts`, so no dependency's install script runs at all.
+      #     Seven of 654 lockfile packages declare one today — esbuild (three
+      #     copies), workerd, and fsevents (two copies, macOS-only). None is
+      #     needed: esbuild and workerd both ship their platform binary in a
+      #     separate optional package and resolve it at runtime, and the
+      #     install script only swaps the JS launcher for the native one as a
+      #     startup optimisation. Verified: a clean `npm ci --ignore-scripts`
+      #     builds and passes the full suite. If a future dependency genuinely
+      #     needs its script, rebuild THAT package by name here — do not drop
+      #     this flag and re-enable all 654.
+      #
+      #   * Every job-level credential blanked for this one step. Step `env`
+      #     overrides job `env`, so an install script that reads any of these
+      #     names gets an empty string. The names stay at job scope because the
+      #     `if:` gates on the deploy steps below are written against them.
+      - run: npm ci --ignore-scripts
+        env:
+          CF_API_TOKEN: ""
+          CF_ACCOUNT_ID: ""
+          CF_D1_ID: ""
+          STRIPE_SECRET_KEY: ""
+          STRIPE_WEBHOOK_SECRET: ""
+          STRIPE_PRICE_STARTER: ""
+          STRIPE_PRICE_PRO: ""
+          PREVIEW_GUARD_SECRET: ""
+          RESEND_API_KEY: ""
+          ANTHROPIC_API_KEY: ""
+          HUMANIZATION_PROVIDER: ""
+          AUTH_EMAIL_FROM: ""
 
       - name: Resolve the account that owns D1
         if: ${{ env.CF_API_TOKEN != '' && env.CF_D1_ID != '' }}
