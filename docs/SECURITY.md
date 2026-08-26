@@ -215,7 +215,7 @@ with the processor actually in use (SEC-26).**
 
 Reviewer: Security Agent. Scope: payment/entitlement integrity, anonymous capability model, auth boundary, secret handling, data minimization, web security surface, abuse/availability, supply chain.
 
-Supersedes the 2026-08-23 review, which was cut off mid-engagement. Every claim carried forward from it was re-verified against the current tree; several were corrected (see "Corrections to the 2026-08-23 draft"). Snapshot: `6c79614`, working tree clean apart from DES's in-flight `app/page.tsx` / `app/globals.css` edits. `npm test` 126/126 passing, lint and `tsc --noEmit` clean.
+Supersedes the 2026-08-23 review, which was cut off mid-engagement. Every claim carried forward from it was re-verified against the current tree; several were corrected (see "Corrections to the 2026-08-23 draft"). Snapshot: `6c79614`, working tree clean apart from DES's in-flight `app/landing-page.tsx` / `app/globals.css` edits. `npm test` 126/126 passing, lint and `tsc --noEmit` clean.
 
 Method:
 
@@ -253,24 +253,36 @@ closed by construction on the route it was written against (SEC-13), one **raise
 Medium→High), and three new (SEC-25, SEC-26, SEC-27). SEC-09, SEC-10, SEC-11 and SEC-15's
 residual are reproduced unchanged.
 
+**Same-day follow-up (2026-08-26):** SEC-08, SEC-25, SEC-26 and SEC-27 were all fixed after this
+pass filed them, each proven against the code it replaced rather than asserted. Their entries below
+carry the resolution and what remains.
+
 ### Blockers, as they stand today
 
-Three, and two of them are one deploy secret away from mattering rather than mattering now.
+**None open.** The three named in the 2026-08-26 re-status — SEC-26, SEC-25 and SEC-08 — were all
+fixed the same day and are marked RESOLVED below with what proved each one. The two that were
+conditional on `HUMANIZATION_PROVIDER=claude` are the reason that switch is now safe to reach for:
+the privacy disclosure derives from the same resolver the pipeline calls, and a distributed spend
+budget refuses rather than merely alarms.
 
-1. **SEC-26 (High, conditional on `HUMANIZATION_PROVIDER=claude`)** — `/privacy` states, in the
-   present tense, that no third-party AI provider receives customer text and that "nobody else
-   receives your writing." Setting one optional deploy secret makes both sentences false, with no
-   code change, no gate, and no test asserting the coupling. D-P05 is still Proposed. This
-   document's own blocker list names "undisclosed/unapproved provider use".
-2. **SEC-25 (High, same condition)** — the same switch puts a metered provider behind an
-   unauthenticated route. The cost guard alarms and never refuses; nothing in the system declines
-   a rewrite on spend.
-3. **SEC-08 (High, raised from Medium)** — every production secret the application has is now at
-   job scope in the deploy workflow, so all of them are in the environment of `npm ci`.
+What remains is not a blocker list but a set of residuals, each recorded on its own finding:
 
-The 2026-08-24 verdict's stated grounds are largely gone. Whether that changes the verdict is a
-PO decision per `docs/AGENTS.md`; nothing in this document grants one, and M4-02 is not closed
-here.
+- **SEC-09** — the CSP still permits `'unsafe-inline'` for scripts, so it is not the XSS control
+  the threat model claims it is. Reproduced in the built output, unchanged.
+- **SEC-03** — `/api/preview` still builds the isolate-local guard unconditionally in production,
+  with no distributed alternative and no fail-closed branch. Medium, down from High.
+- **SEC-04's residual, and the sharpest thing on this page.** The double-charge fix is real, but
+  `alreadySubscribed` appears exactly once in the whole repository — in the route. **No test
+  covers it.** The fix is protected by nothing.
+- **SEC-25's ceiling** is a safety number, not a product decision, and the entitled path has no
+  second ceiling beyond the word ledger.
+- **SEC-08's residual** — the build step still inherits every job secret and runs third-party code.
+- **SEC-15** — a wrong-*account* Stripe secret is still completely silent.
+- **SEC-27's residual** — `humanizationCostSnapshot()` has no caller, so nothing surfaces the cost
+  numbers operationally.
+
+The 2026-08-24 verdict's stated grounds are gone. Whether that changes the verdict is a PO decision
+per `docs/AGENTS.md`; nothing in this document grants one, and **M4-02 is not closed here**.
 
 ### Not tested in this pass
 
@@ -571,7 +583,7 @@ to checkout, result, billing, and event routes.
 >   and a second $9.99/mo charge is uncovered, and `tests/checkout.test.mts` deliberately provides
 >   no database, so it structurally cannot reach it. That is the highest-value missing test in the
 >   repository.
-> - **The client ignores the payload it is handed.** `app/page.tsx` treats any non-200 as an error
+> - **The client ignores the payload it is handed.** `app/landing-page.tsx` treats any non-200 as an error
 >   and renders `payload.error` as text; it never reads `alreadySubscribed` or
 >   `manageBillingPath`. The customer is told they are already subscribed and given no link to
 >   their billing portal or their result. Remediation item "render *You're already subscribed*
@@ -583,7 +595,7 @@ to checkout, result, billing, and event routes.
 **Original finding (2026-08-24), retained for the record:**
 
 
-**Where.** `app/api/checkout/route.ts` validates the plan, claims the capability (`:95`), reads the existing Stripe customer ID, and creates a Checkout Session (`:103`). At no point does it call `getActiveEntitlement`. `app/page.tsx` is a client component with no identity or entitlement awareness at all — `getChatGPTUser` is referenced nowhere outside its own definition in `app/chatgpt-auth.ts` — so the unlock card, its price, and its CTA render identically for a brand-new visitor and for a paying subscriber.
+**Where.** `app/api/checkout/route.ts` validates the plan, claims the capability (`:95`), reads the existing Stripe customer ID, and creates a Checkout Session (`:103`). At no point does it call `getActiveEntitlement`. `app/landing-page.tsx` is a client component with no identity or entitlement awareness at all — `getChatGPTUser` is referenced nowhere outside its own definition in `app/chatgpt-auth.ts` — so the unlock card, its price, and its CTA render identically for a brand-new visitor and for a paying subscriber.
 
 **Why this is the default journey, not an edge case.** There is no history feature. The only way a subscriber can use what they paid for is to paste new text and run another rewrite. That returns a fresh preview with a fresh capability, which renders the unlock card again: *"Unlock full rewrite for $9.99/mo."* Clicking it, while already signed in, creates a second Checkout Session against the same Stripe customer. `{ idempotencyKey: "checkout:${jobId}:${planId}" }` (`:118`) is keyed per job, so it does not deduplicate across jobs — correctly, for its own purpose, but it means nothing here. Stripe does not refuse a second subscription to the same customer for the same price. The customer is now paying $19.98/month.
 
@@ -738,7 +750,14 @@ Persistence happens for **anonymous, unauthenticated** submissions (`app/api/hum
 
 **Remediation.** Add `npx wrangler d1 migrations apply site-creator-d1 --remote` to the deploy job, point `migrations_dir` at the real directory, and add a post-deploy smoke test asserting that a preview response contains a `capability`.
 
-### SEC-08 — **High (raised from Medium)**, still open — Every production secret is exposed to `npm ci`'s lifecycle scripts
+### SEC-08 — RESOLVED 2026-08-26 — Every production secret was exposed to `npm ci`'s lifecycle scripts
+
+> **Resolution.** The install step now runs `npm ci --ignore-scripts` with every job-level credential blanked on that step. Verified empirically rather than assumed: a real clean install with scripts disabled builds and passes the whole suite. No package needs its install script — esbuild and workerd ship platform binaries in separate optional packages resolved at runtime, and fsevents is macOS-only.
+
+**Residual:** the `npm run build` step still inherits all eleven job-level secrets and runs third-party code. That is remaining exposure and was out of the fix's scope.
+
+**Original finding, retained for the record:**
+
 
 > **Re-status 2026-08-26 — reproduced, and the blast radius grew.** The structure is unchanged and
 > the exposure is now total. `.github/workflows/deploy.yml` still declares its secrets at **job**
@@ -813,7 +832,7 @@ Persistence happens for **anonymous, unauthenticated** submissions (`app/api/hum
 
 The threat table lists CSP as a required prevention for stored/reflected XSS. With `'unsafe-inline'`, CSP would not stop an injected inline script or event handler. The control that actually holds today is React's text escaping.
 
-**That escaping was re-verified and it holds.** *Observed*: a submission containing `<script>alert(1)</script>`, `"><img src=x onerror=alert(2)>` and `javascript:alert(3)` round-tripped through `/api/humanize` as inert JSON (`content-type: application/json`, `x-content-type-options: nosniff`) and is rendered as a React text child in `app/page.tsx` (`{result.original}`, `{result.preview}`) and `app/checkout/success/page.tsx` (`{result.original}`, `{result.result}`). The only `dangerouslySetInnerHTML` in the entire codebase is `app/page.tsx:170`, static JSON-LD built from server config with `<` escaped to `<`. A grep for `innerHTML` and `eval(` across `app/` and `src/` finds nothing else. There is no known injection today.
+**That escaping was re-verified and it holds.** *Observed*: a submission containing `<script>alert(1)</script>`, `"><img src=x onerror=alert(2)>` and `javascript:alert(3)` round-tripped through `/api/humanize` as inert JSON (`content-type: application/json`, `x-content-type-options: nosniff`) and is rendered as a React text child in `app/landing-page.tsx` (`{result.original}`, `{result.preview}`) and `app/checkout/success/page.tsx` (`{result.original}`, `{result.result}`). The only `dangerouslySetInnerHTML` in the entire codebase is `app/landing-page.tsx:170`, static JSON-LD built from server config with `<` escaped to `<`. A grep for `innerHTML` and `eval(` across `app/` and `src/` finds nothing else. There is no known injection today.
 
 **Remediation.** Move to nonce- or hash-based `script-src` and drop `'unsafe-inline'`. Not a blocker on its own — but CSP should not be carried on the required-controls list while it is permissive.
 
@@ -824,7 +843,7 @@ The threat table lists CSP as a required prevention for stored/reflected XSS. Wi
 > carries `"observability":{"enabled":true}`, so request URLs are captured in Workers Logs.
 >
 > Still latent for the same reason: a repository-wide search finds **no caller** of `/api/preview`
-> in any client code. `app/page.tsx` holds the capability in React state and sends it in the
+> in any client code. `app/landing-page.tsx` holds the capability in React state and sends it in the
 > `/api/checkout` POST body; the Stripe `success_url` carries a job id, never a capability. The
 > endpoint accepts the query form and nothing produces it.
 
@@ -833,7 +852,7 @@ The threat table lists CSP as a required prevention for stored/reflected XSS. Wi
 
 **Where.** `app/api/preview/route.ts:28` reads the capability from `?capability=`. The generated `dist/server/wrangler.json` sets `"observability":{"enabled":true}`, so request URLs are captured in Cloudflare Workers Logs.
 
-A capability is a bearer token: it redeems a preview and, through `/api/checkout`, permanently claims the job to whoever presents it. In a query string it lands in platform logs, browser history, and `Referer` headers. Latent today — `app/page.tsx` keeps the capability in React state and sends it in a POST body, so the query form is currently unused by the UI — but the endpoint accepts it.
+A capability is a bearer token: it redeems a preview and, through `/api/checkout`, permanently claims the job to whoever presents it. In a query string it lands in platform logs, browser history, and `Referer` headers. Latent today — `app/landing-page.tsx` keeps the capability in React state and sends it in a POST body, so the query form is currently unused by the UI — but the endpoint accepts it.
 
 **Remediation.** Accept the capability in a header or POST body. If the query form stays for refresh recovery, redact it at the log boundary and shorten its TTL.
 
@@ -1006,7 +1025,16 @@ nothing and removes the reasoning step.
 
 Numbering continues from SEC-24. All three arrived with work that landed after the review above.
 
-### SEC-25 — High on provider connect / not live today — A metered AI provider is reachable from an unauthenticated route with an alarm and no ceiling
+### SEC-25 — RESOLVED 2026-08-26 — A metered AI provider was reachable from an unauthenticated route with an alarm and no ceiling
+
+> **Resolution.** A distributed spend budget now reserves the per-rewrite ceiling **before** the provider call, atomically, in the preview guard's existing D1 table under a reserved key. No migration. Admission is decided on `result.meta.changes`; actual cost settles the reservation afterwards, and a sustained breach burns the rest of the window. Refusal is a 503 with `retry-after` and no usage charged, never a 500.
+
+**Proved against the old code** on this finding's own scenario: 50 rewrites at 50× the ceiling went from 50 served / 0 refused / ~$250 to **1 served / 49 refused / $5**. Atomicity across 40 concurrent instances, window roll, and refusal when D1 is unreachable are all covered.
+
+**Residual:** the ceiling (~$30/hour globally) is a safety number chosen to stop a bleed, not a product decision, and the entitled path still has no second ceiling beyond the word ledger.
+
+**Original finding, retained for the record:**
+
 
 **Where.** `app/api/humanize/humanization-runtime.ts` selects `ClaudeHumanizationProvider` when
 `HUMANIZATION_PROVIDER=claude` and `ANTHROPIC_API_KEY` are both set (M4-01, PR #29).
@@ -1049,7 +1077,18 @@ unauthenticated visitor should reach a metered model at all, or whether the free
 stay deterministic and the model be an entitled-only capability. The second is smaller, cheaper,
 and closes SEC-02's residual at the same time. That is a PO/Product decision, not this document's.
 
-### SEC-26 — High on provider connect / not live today — `/privacy` promises no third-party AI provider, and one optional deploy secret makes that false
+### SEC-26 — RESOLVED 2026-08-26 — `/privacy` promised no third-party AI provider, and one optional deploy secret made that false
+
+> **Resolution.** The disclosure is now derived from the same `resolveHumanizationProvider(env)` the pipeline calls, and the processor catalog is typed as a total record over the non-deterministic provider names, so **adding a provider without writing its disclosure does not compile**. No literal denial, provider name, or subprocessor count survives in the copy.
+
+Unconfirmed region, retention and training terms are marked unconfirmed and the page says they are being confirmed; zero retention is explicitly disclaimed; and a test fails if GDPR, CCPA, SOC 2, HIPAA, "compliant" or "certified" ever appears, because none has been audited.
+
+**Proved against the old code:** the tests fail on `main`'s previous page, and a third greps the built output and fails against the pre-fix build.
+
+**Residual:** this is customer-facing legal copy written without counsel. M4-03 now covers it.
+
+**Original finding, retained for the record:**
+
 
 **Where.** `app/privacy/page.tsx` states, in the present tense and without qualification:
 
@@ -1094,7 +1133,14 @@ repository already uses is `tests/security-blockers.test.mts` asserting a workfl
 agree, and the same shape works here: a test that fails if the provider catalog names a processor
 the privacy page does not.
 
-### SEC-27 — Low / Informational — The cost guard's sustained-breach flag reads clean during exactly the runaway it exists to catch
+### SEC-27 — RESOLVED 2026-08-26 — The cost guard's sustained-breach flag read clean during exactly the runaway it existed to catch
+
+> **Resolution.** `evaluateSustained()` is split out and runs before the per-rewrite branch, so both checks evaluate on every observation and both are raised when both come due. 60 rewrites at $5.00 now report `sustainedBreach: true`.
+
+**Residual:** `humanizationCostSnapshot()` still has no caller anywhere in the repository, so nothing surfaces these numbers operationally.
+
+**Original finding, retained for the record:**
+
 
 **Where.** `src/lib/humanization/cost-guard.ts:record()`. When an observation breaches the
 per-rewrite ceiling, the method raises that alarm and **returns**, so the sustained-cost-per-word
@@ -1138,7 +1184,7 @@ Verified in this review and recorded deliberately, so a later reviewer does not 
 - **Secret handling — clean.** *Observed*: a pattern scan of the entire built client output (`dist/client/**`) for `sk_test`/`sk_live`/`rk_`/`whsec_`/`price_…`/`AKIA…`/PEM headers returned **zero** matches, as did a scan for `STRIPE_*` / `CLOUDFLARE_*` / `D1_DATABASE_ID` identifiers. `.dev.vars` is gitignored (alongside `.env*`), is untracked, and appears nowhere in git history (`git log --all --diff-filter=A` finds only `.dev.vars.example`). Every Stripe value resolves from the Workers `env` binding at runtime via `db/stripe-client.ts`, the single module that imports `cloudflare:workers` for secrets.
 - **Error responses — uniformly generic.** Checkout, portal, result, and webhook all return fixed strings; no Stripe or D1 driver internals reach a client. The **only** `console.*` in any request path across `app/`, `src/`, `db/` and `worker/` is `app/api/checkout/route.ts:86`, which prints a `PriceMismatchError` message containing a plan ID and expected/actual minor units — no secrets, no customer text. `app/api/humanize/route.ts`'s `tryPersist` deliberately swallows D1 errors without logging them, with a comment explaining that driver errors can carry bound statement parameters (i.e. the customer's text).
 - **Analytics — content-free.** Server-side allowlists for both event names and property names (`app/api/events/route.ts`), string values capped at 64 characters, non-conforming payloads rejected with 400, and the route stores and forwards nothing (204). Client call sites pass only `mode`, `wordCount`, `issuesImproved`, `planId`.
-- **Preview boundary (D-004) — holds.** *Observed*: preview responses contain `preview` plus `hiddenWordCount` and never the remainder. The lock in `app/page.tsx` is a row of empty placeholder `<span>`s sized from `hiddenWordCount` — not blurred real text — so there is nothing to recover from the DOM, the RSC payload, or CSS. The full rewrite is reachable only through `/api/result` behind ownership + entitlement. (SEC-02 defeats the paywall economically, but not by leaking the remainder.)
+- **Preview boundary (D-004) — holds.** *Observed*: preview responses contain `preview` plus `hiddenWordCount` and never the remainder. The lock in `app/landing-page.tsx` is a row of empty placeholder `<span>`s sized from `hiddenWordCount` — not blurred real text — so there is nothing to recover from the DOM, the RSC payload, or CSS. The full rewrite is reachable only through `/api/result` behind ownership + entitlement. (SEC-02 defeats the paywall economically, but not by leaking the remainder.)
 - **Security headers — verified live** on the running server for both HTML and API responses: CSP, `x-frame-options: DENY`, `x-content-type-options: nosniff`, `referrer-policy: strict-origin-when-cross-origin`, `permissions-policy: camera=(), microphone=(), geolocation=(), payment=(self)`, `cross-origin-opener-policy: same-origin`, and `cache-control: no-store` on every API and authenticated response (`no-store, must-revalidate` on pages).
 - **Input bounds.** `/api/humanize` enforces content-type, a declared-length check, a streaming 10 KB body cap with cancel-on-exceed, strict UTF-8 decoding, 12–300 words, 2,400 characters, an allowlisted mode, a validated idempotency-key format, and a 5-second abort-signalled deadline. `/api/webhooks/stripe` and `/api/events` use the same streaming-cap pattern at their own sizes.
 - **Schema invariants.** Unique indexes on `users.external_subject`, `anonymous_sessions.job_id`, `anonymous_sessions.capability_digest`, `job_payloads.job_id`, `(client_fingerprint, idempotency_key)`, and `(operation_key, entry_type)`; CHECK constraints on mode, job state, protected-item kind, and verification status; full result text confined to `job_payloads` and never inlined onto a queryable row. Drizzle parameterizes every query; no dynamic SQL is built from content.
