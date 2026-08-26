@@ -16,6 +16,9 @@ import {
   type CostGuardSnapshot,
 } from "@/src/lib/humanization/cost-guard";
 import { resolveHumanizationProvider, type HumanizationProviderEnv } from "@/src/lib/humanization/provider-config";
+// SEC-25: the per-rewrite ceiling lives beside the budget that reserves it,
+// so the alarm and the refusal can never be tuned apart.
+import { MAX_COST_PER_REWRITE_USD } from "@/src/lib/humanization/spend-budget";
 import { pricingConfig } from "@/src/config/pricing";
 
 /**
@@ -37,21 +40,6 @@ const DETERMINISTIC_PROCESSING_MS = 5_000;
  */
 const MODEL_PROCESSING_MS = 45_000;
 const MODEL_ATTEMPT_MS = 20_000;
-
-/**
- * Ceiling for one rewrite.
- *
- * The route caps input at 300 words, and docs/BENCHMARKS.md's model puts a
- * 250-word Opus rewrite between $0.011 and $0.086 depending entirely on how
- * many thinking tokens it burns. Ten cents is above the top of that range, so
- * a breach means something is genuinely running away — maximum-effort
- * thinking, a retry storm, or a router paying for both rungs on every
- * attempt — rather than a normal expensive document.
- *
- * It is not a pricing threshold. The pricing threshold is the per-word one,
- * derived from the plan catalogue below.
- */
-const MAX_COST_PER_REWRITE_USD = 0.1;
 
 /**
  * How much of the cheapest-per-word plan's revenue inference may eat before
