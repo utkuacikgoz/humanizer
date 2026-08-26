@@ -87,7 +87,7 @@ A workable split from this project:
 | Agent | Owns |
 |---|---|
 | ENG | `app/api/**`, `db/**`, `src/lib/**`, `scripts/**`, `vite.config.ts` |
-| DES | `app/page.tsx`, `app/globals.css`, `app/layout.tsx`, `src/components/**` |
+| DES | `app/landing-page.tsx`, `app/globals.css`, `app/layout.tsx`, `src/components/**` |
 | COPY | the same page files as DES — so **never run them concurrently** |
 | SEO | `app/robots.txt/**`, `app/sitemap.xml/**`, `app/privacy/**`, `app/terms/**`, `docs/SEO.md` |
 | MQA | `tests/e2e/**`, `docs/QA.md` |

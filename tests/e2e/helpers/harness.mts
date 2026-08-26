@@ -194,7 +194,7 @@ export async function gotoHydrated(page: Page, path = "/"): Promise<void> {
  * Loads a page that fires no analytics beacon, and waits for React to hydrate.
  *
  * `gotoHydrated` above waits on `POST /api/events` before checking the
- * hydration class. Only app/page.tsx and app/checkout/success/page.tsx call
+ * hydration class. Only app/landing-page.tsx and app/checkout/success/page.tsx call
  * `track()` (src/lib/analytics.ts), so on /signin and /history that wait can
  * only ever end in its own 30-second timeout — a signed-in journey built out
  * of `gotoHydrated` calls spends minutes waiting for a request that is never
