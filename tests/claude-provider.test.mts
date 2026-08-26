@@ -416,3 +416,28 @@ test("effort is opt-in and validated", () => {
   });
   assert.deepEqual(nonsense, { provider: "claude", apiKey: "k", routing: false });
 });
+
+test("an older cheap model is not sent parameters it rejects", async () => {
+  // `thinking: {type:"adaptive"}` and `output_config.effort` are both
+  // current-generation parameters. Sending either to Claude Haiku 4.5 is a
+  // 400, which on a router's cheap rung means every cheap attempt fails and
+  // every request escalates — a cost optimisation that silently costs more.
+  const client = fakeClient([reply({ model: "claude-haiku-4-5" })]);
+  await new ClaudeHumanizationProvider({ client, model: "claude-haiku-4-5" }).rewrite(request());
+  const [params] = client.calls;
+
+  assert.equal(params.thinking, undefined);
+  assert.equal(params.output_config?.effort, undefined);
+  // Structured output is not generation-gated, and it is what keeps a
+  // preamble out of the document.
+  assert.equal(params.output_config?.format?.type, "json_schema");
+});
+
+test("a current-generation cheap model keeps the full request shape", async () => {
+  const client = fakeClient([reply({ model: "claude-sonnet-5" })]);
+  await new ClaudeHumanizationProvider({ client, model: "claude-sonnet-5", effort: "low" }).rewrite(request());
+  const [params] = client.calls;
+
+  assert.deepEqual(params.thinking, { type: "adaptive" });
+  assert.equal(params.output_config?.effort, "low");
+});

@@ -81,7 +81,19 @@ export interface EscalatingClaudeProviderOptions extends Omit<ClaudeProviderOpti
   onAttempt?: (record: EscalationRecord) => void;
 }
 
-const DEFAULT_LADDER: readonly [ClaudeModelId, ClaudeModelId] = ["claude-haiku-4-5", "claude-opus-5"];
+/**
+ * Both rungs are current-generation, so both take the same request shape —
+ * same thinking mode, same effort setting, same structured output. A ladder
+ * that mixes generations changes two variables at once and makes the
+ * measurement harder to read.
+ *
+ * Still a STARTING POINT, not a measured result. `claude-haiku-4-5` is a
+ * legitimate cheap rung and is cheaper still, but it takes neither adaptive
+ * thinking nor an effort setting (see CLAUDE_MODEL_CAPABILITIES), so its
+ * candidates are not produced under comparable conditions. Measure before
+ * choosing.
+ */
+const DEFAULT_LADDER: readonly [ClaudeModelId, ClaudeModelId] = ["claude-sonnet-5", "claude-opus-5"];
 
 export class EscalatingClaudeProvider implements HumanizationProvider {
   readonly name: string;

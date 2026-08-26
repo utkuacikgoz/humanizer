@@ -84,22 +84,29 @@ function request(overrides: Partial<RewriteRequest> = {}): RewriteRequest {
   };
 }
 
+test("the default ladder is two current-generation rungs, so both are measured under the same conditions", () => {
+  // A ladder that mixes model generations changes the request shape as well
+  // as the model, which makes the benchmark harder to read. Haiku 4.5 is a
+  // legitimate cheap rung and is available; it is just not the default.
+  assert.equal(new EscalatingClaudeProvider({ client: clientByModel({}) }).name, "claude-routed(claude-sonnet-5->claude-opus-5)");
+});
+
 test("a cheap candidate that clears the gates is returned, and the strong model is never called", async () => {
-  const client = clientByModel({ "claude-haiku-4-5": reply(GOOD, "claude-haiku-4-5") });
+  const client = clientByModel({ "claude-sonnet-5": reply(GOOD, "claude-sonnet-5") });
   const records: EscalationRecord[] = [];
   const provider = new EscalatingClaudeProvider({ client, onAttempt: (record) => records.push(record) });
 
   const result = await provider.rewrite(request());
 
-  assert.deepEqual(client.models, ["claude-haiku-4-5"], "the whole point is not paying for the second rung");
+  assert.deepEqual(client.models, ["claude-sonnet-5"], "the whole point is not paying for the second rung");
   assert.equal(result.text, GOOD);
-  assert.equal(result.resultModel, "claude-haiku-4-5");
-  assert.deepEqual(records, [{ resultModel: "claude-haiku-4-5", escalated: false }]);
+  assert.equal(result.resultModel, "claude-sonnet-5");
+  assert.deepEqual(records, [{ resultModel: "claude-sonnet-5", escalated: false }]);
 });
 
 test("a cheap candidate that fails verification is discarded and the strong model rewrites it", async () => {
   const client = clientByModel({
-    "claude-haiku-4-5": reply(LOSES_THE_NUMBER, "claude-haiku-4-5"),
+    "claude-sonnet-5": reply(LOSES_THE_NUMBER, "claude-sonnet-5"),
     "claude-opus-5": reply(GOOD, "claude-opus-5"),
   });
   const records: EscalationRecord[] = [];
@@ -107,7 +114,7 @@ test("a cheap candidate that fails verification is discarded and the strong mode
 
   const result = await provider.rewrite(request());
 
-  assert.deepEqual(client.models, ["claude-haiku-4-5", "claude-opus-5"]);
+  assert.deepEqual(client.models, ["claude-sonnet-5", "claude-opus-5"]);
   assert.equal(result.text, GOOD);
   assert.equal(result.resultModel, "claude-opus-5");
   assert.deepEqual(records, [{ resultModel: "claude-opus-5", escalated: true, reason: "verification-failed" }]);
@@ -118,7 +125,7 @@ test("escalation reuses the pipeline's gate rather than a second, weaker one", a
   // escalates even on a candidate the default gate would have passed. The
   // decision is the gate's, not a private approximation of it.
   const client = clientByModel({
-    "claude-haiku-4-5": reply(GOOD, "claude-haiku-4-5"),
+    "claude-sonnet-5": reply(GOOD, "claude-sonnet-5"),
     "claude-opus-5": reply(GOOD, "claude-opus-5"),
   });
   const provider = new EscalatingClaudeProvider({
@@ -131,12 +138,12 @@ test("escalation reuses the pipeline's gate rather than a second, weaker one", a
     },
   });
   await provider.rewrite(request());
-  assert.deepEqual(client.models, ["claude-haiku-4-5", "claude-opus-5"]);
+  assert.deepEqual(client.models, ["claude-sonnet-5", "claude-opus-5"]);
 });
 
 test("a cheap model that hands back the input escalates instead of selling a no-op", async () => {
   const client = clientByModel({
-    "claude-haiku-4-5": reply(ORIGINAL, "claude-haiku-4-5"),
+    "claude-sonnet-5": reply(ORIGINAL, "claude-sonnet-5"),
     "claude-opus-5": reply(GOOD, "claude-opus-5"),
   });
   const records: EscalationRecord[] = [];
@@ -151,17 +158,17 @@ test("already-good text is not escalated just because the cheap model left it al
   // The unnecessary-change defect the adversarial set exists to catch. Text
   // with nothing wrong with it should not be churned by an expensive model.
   const clean = "The pilot covered 42 clinics. Waiting times fell at every site, and the team says the trial will run for another year before anyone decides what to do next.";
-  const client = clientByModel({ "claude-haiku-4-5": reply(clean, "claude-haiku-4-5") });
+  const client = clientByModel({ "claude-sonnet-5": reply(clean, "claude-sonnet-5") });
   const provider = new EscalatingClaudeProvider({ client });
 
   const result = await provider.rewrite(request({ text: clean, protectedContent: extractProtectedContent(clean), analysis: analyzeWriting(clean) }));
-  assert.deepEqual(client.models, ["claude-haiku-4-5"]);
+  assert.deepEqual(client.models, ["claude-sonnet-5"]);
   assert.equal(result.text, clean);
 });
 
 test("an escalated rewrite bills for both models, with the cached split intact", async () => {
   const client = clientByModel({
-    "claude-haiku-4-5": reply(LOSES_THE_NUMBER, "claude-haiku-4-5", { input: 1000, output: 1000 }),
+    "claude-sonnet-5": reply(LOSES_THE_NUMBER, "claude-sonnet-5", { input: 1000, output: 1000 }),
     "claude-opus-5": reply(GOOD, "claude-opus-5", { input: 1000, output: 1000 }),
   });
   const result = await createHumanizationPipeline({
@@ -172,15 +179,15 @@ test("an escalated rewrite bills for both models, with the cached split intact",
   assert.equal(result.metrics.inputTokens, 3000);
   assert.equal(result.metrics.outputTokens, 2000);
   assert.equal(result.metrics.cachedInputTokens, 1000);
-  // haiku: 1000@$1 + 500@$0.10 + 1000@$5 = 0.00605
-  // opus:  1000@$5 + 500@$0.50 + 1000@$25 = 0.03025
-  assert.equal(result.metrics.providerCostUsd, 0.0363);
-  assert.deepEqual(result.providers.models.sort(), ["claude-haiku-4-5", "claude-opus-5"]);
+  // sonnet: 1000@$2 + 500@$0.20 + 1000@$10 = 0.0121
+  // opus:   1000@$5 + 500@$0.50 + 1000@$25 = 0.03025
+  assert.equal(result.metrics.providerCostUsd, 0.04235);
+  assert.deepEqual(result.providers.models, ["claude-sonnet-5", "claude-opus-5"]);
 });
 
 test("attribution names the model that produced the returned text, not merely the ones that ran", async () => {
   const client = clientByModel({
-    "claude-haiku-4-5": reply(LOSES_THE_NUMBER, "claude-haiku-4-5"),
+    "claude-sonnet-5": reply(LOSES_THE_NUMBER, "claude-sonnet-5"),
     "claude-opus-5": reply(GOOD, "claude-opus-5"),
   });
   const result = await createHumanizationPipeline({
@@ -188,33 +195,33 @@ test("attribution names the model that produced the returned text, not merely th
   }).humanize({ text: ORIGINAL });
 
   assert.equal(result.providers.resultModel, "claude-opus-5", "'why was this rewrite worse' is a question about the kept candidate");
-  assert.equal(result.providers.humanization, "claude-routed(claude-haiku-4-5->claude-opus-5)");
+  assert.equal(result.providers.humanization, "claude-routed(claude-sonnet-5->claude-opus-5)");
 });
 
 test("a transient cheap-rung failure escalates; a rejected request does not pay twice", async () => {
   const transient = clientByModel({
-    "claude-haiku-4-5": new Anthropic.InternalServerError(500, undefined, "boom", new Headers()),
+    "claude-sonnet-5": new Anthropic.InternalServerError(500, undefined, "boom", new Headers()),
     "claude-opus-5": reply(GOOD, "claude-opus-5"),
   });
   const escalated = await new EscalatingClaudeProvider({ client: transient }).rewrite(request());
   assert.equal(escalated.resultModel, "claude-opus-5");
 
   const rejected = clientByModel({
-    "claude-haiku-4-5": new Anthropic.BadRequestError(400, undefined, "bad", new Headers()),
+    "claude-sonnet-5": new Anthropic.BadRequestError(400, undefined, "bad", new Headers()),
     "claude-opus-5": reply(GOOD, "claude-opus-5"),
   });
   await assert.rejects(
     new EscalatingClaudeProvider({ client: rejected }).rewrite(request()),
     (error: unknown) => error instanceof ProviderError && error.kind === "invalid-request",
   );
-  assert.deepEqual(rejected.models, ["claude-haiku-4-5"], "a 400 fails the same way on the other rung");
+  assert.deepEqual(rejected.models, ["claude-sonnet-5"], "a 400 fails the same way on the other rung");
 });
 
 test("routing cannot promote a candidate past the pipeline's gate", async () => {
   // Both rungs lose the protected number. Escalation is not a way to get a
   // bad candidate accepted — the pipeline still rejects it and charges zero.
   const client = clientByModel({
-    "claude-haiku-4-5": reply(LOSES_THE_NUMBER, "claude-haiku-4-5"),
+    "claude-sonnet-5": reply(LOSES_THE_NUMBER, "claude-sonnet-5"),
     "claude-opus-5": reply(LOSES_THE_NUMBER, "claude-opus-5"),
   });
   const pipeline = createHumanizationPipeline({
@@ -231,7 +238,7 @@ test("routing cannot promote a candidate past the pipeline's gate", async () => 
 
 test("quota debits successful words once, not once per model that ran", async () => {
   const client = clientByModel({
-    "claude-haiku-4-5": reply(LOSES_THE_NUMBER, "claude-haiku-4-5"),
+    "claude-sonnet-5": reply(LOSES_THE_NUMBER, "claude-sonnet-5"),
     "claude-opus-5": reply(GOOD, "claude-opus-5"),
   });
   const result = await createHumanizationPipeline({
@@ -244,13 +251,13 @@ test("quota debits successful words once, not once per model that ran", async ()
 
 test("the ladder is configurable and the rungs are exactly what was asked for", async () => {
   const client = clientByModel({
-    "claude-sonnet-5": reply(LOSES_THE_NUMBER, "claude-sonnet-5"),
+    "claude-haiku-4-5": reply(LOSES_THE_NUMBER, "claude-haiku-4-5"),
     "claude-opus-5": reply(GOOD, "claude-opus-5"),
   });
-  const provider = new EscalatingClaudeProvider({ client, ladder: ["claude-sonnet-5", "claude-opus-5"] });
-  assert.equal(provider.name, "claude-routed(claude-sonnet-5->claude-opus-5)");
+  const provider = new EscalatingClaudeProvider({ client, ladder: ["claude-haiku-4-5", "claude-opus-5"] });
+  assert.equal(provider.name, "claude-routed(claude-haiku-4-5->claude-opus-5)");
   await provider.rewrite(request());
-  assert.deepEqual(client.models, ["claude-sonnet-5", "claude-opus-5"]);
+  assert.deepEqual(client.models, ["claude-haiku-4-5", "claude-opus-5"]);
 });
 
 test("routing is opt-in, and single-model is the path when it is not asked for", () => {

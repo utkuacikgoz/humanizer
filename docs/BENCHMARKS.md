@@ -457,7 +457,7 @@ With a key in the environment:
 npm run benchmark -- --provider=claude --model=claude-opus-5   --effort=medium
 npm run benchmark -- --provider=claude --model=claude-sonnet-5 --effort=medium
 npm run benchmark -- --provider=claude --model=claude-haiku-4-5 --effort=medium
-npm run benchmark -- --provider=claude-routed --ladder=claude-haiku-4-5,claude-opus-5
+npm run benchmark -- --provider=claude-routed --ladder=claude-sonnet-5,claude-opus-5
 ```
 
 The change protocol asks for repeated runs to estimate nondeterministic
@@ -473,7 +473,7 @@ answering from the output rather than from intuition:
   threshold. Lowering 0.72 to make a number look better is exactly the move
   this document forbids.
 - **Which two rungs, if any.** The router's default ladder
-  (`claude-haiku-4-5` -> `claude-opus-5`) is a placeholder, not a measurement.
+  (`claude-sonnet-5` -> `claude-opus-5`) is a placeholder, not a measurement.
   Escalation pays for both models, so a high escalation rate makes routing
   more expensive than never routing at all. The benchmark prints the
   escalation rate and the reason breakdown; if blended cost exceeds Opus-only,
@@ -491,3 +491,38 @@ passages overstates the real per-word cost of a 250-word document by a wide
 margin. Any cost figure derived from the current release set must say which it
 is. Lengthening the fixtures is a dataset version bump and was out of scope
 here.
+
+### Cost per rewrite: modelled, not measured, and the thinking tokens decide it
+
+No key, so no realised cost. What follows is arithmetic over the published
+rates and the request this provider actually sends, and it is labelled a model
+because that is what it is. Assumptions: a 250-word document (~330 input
+tokens, ~330 output tokens), ~120 tokens of protected-span listing, a ~1,500
+token system prefix served from cache after the first call of each five-minute
+window, cache reads at 0.1x the input rate.
+
+| Thinking tokens per rewrite | Opus 5 | Sonnet 5 | Haiku 4.5 |
+| --- | --- | --- | --- |
+| 0 | $0.0113 | $0.0045 | $0.0023 |
+| 500 | $0.0238 | $0.0095 | $0.0048 |
+| 1,500 | $0.0488 | $0.0195 | $0.0098 |
+| 3,000 | $0.0863 | $0.0345 | $0.0173 |
+
+Against the Pro plan's 50,000 words for $9.99, the same rows come to $2.25,
+$4.75, $9.75 and $17.25 of Opus-5 inference. **That is the finding.** Thinking
+tokens are billed as output tokens, adaptive thinking is ON BY DEFAULT on
+Opus 5, and at roughly 1,500 thinking tokens per rewrite the plan's entire
+price is inference cost. At 3,000 it loses money on every subscriber who uses
+their allowance.
+
+So the single most valuable number to measure first is not quality — it is
+`usage.output_tokens_details.thinking_tokens` at each effort level. If it is
+high, the response is `effort: "low"` or a cheaper rung, decided from the
+sweep. Nothing in the pricing table above is a reason to change the plan
+price; it is a reason to measure before turning the provider on.
+
+Two caveats on the table. It assumes prompt caching is working — if
+`cache_read_input_tokens` comes back zero, the system prefix is charged in
+full on every request and the input side roughly triples. And it says nothing
+about retries: a rewrite that fails verification and is resampled costs twice,
+and an escalated routed rewrite costs both rungs.

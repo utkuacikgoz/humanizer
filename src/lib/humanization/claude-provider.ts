@@ -27,7 +27,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import { buildUserTurn, CORE_SYSTEM_PROMPT, createFenceId, MODE_INSTRUCTIONS, REWRITE_OUTPUT_SCHEMA } from "./claude-prompt";
-import { toProviderUsage, type ClaudeModelId } from "./claude-pricing";
+import { CLAUDE_MODEL_CAPABILITIES, toProviderUsage, type ClaudeModelId } from "./claude-pricing";
 import { ProviderError } from "./provider-error";
 import type { HumanizationProvider, ProviderUsage, RewriteRequest, RewriteResponse } from "./types";
 
@@ -221,6 +221,7 @@ export class ClaudeHumanizationProvider implements HumanizationProvider {
   async rewrite(request: RewriteRequest): Promise<RewriteResponse & { usage: ProviderUsage }> {
     request.signal?.throwIfAborted();
     const fenceId = createFenceId();
+    const capabilities = CLAUDE_MODEL_CAPABILITIES[this.model];
 
     let message: Anthropic.Beta.Messages.BetaMessage;
     try {
@@ -228,16 +229,19 @@ export class ClaudeHumanizationProvider implements HumanizationProvider {
         {
           model: this.model,
           max_tokens: this.maxTokens,
-          // Adaptive is the only supported on-mode on Opus 5, and thinking is
-          // on there by default. `budget_tokens` is removed and returns a 400.
-          thinking: { type: "adaptive" },
+          // Adaptive is the only supported on-mode on the current generation,
+          // and thinking is on by default on Opus 5. `budget_tokens` is
+          // removed there and returns a 400. An older model on a cheap rung
+          // accepts neither this nor `effort`, so both are omitted for it
+          // rather than sent and rejected.
+          ...(capabilities.adaptiveThinking ? { thinking: { type: "adaptive" as const } } : {}),
           output_config: {
-            effort: this.effort,
+            ...(capabilities.effort ? { effort: this.effort } : {}),
             // Structured output, not an assistant prefill: prefill is removed
             // on this model family and returns a 400. This is also what keeps
             // a preamble ("Here is the rewritten text:") out of the document
             // we are about to sell.
-            format: { type: "json_schema", schema: REWRITE_OUTPUT_SCHEMA },
+            format: { type: "json_schema" as const, schema: REWRITE_OUTPUT_SCHEMA },
           },
           betas: [FALLBACK_BETA],
           fallbacks: "default",

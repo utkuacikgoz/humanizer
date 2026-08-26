@@ -25,6 +25,34 @@ export const CLAUDE_MODEL_RATES: Record<string, ModelRate> = {
 /** The model ids this engine is allowed to select. Exact ids, never dated. */
 export type ClaudeModelId = "claude-opus-5" | "claude-sonnet-5" | "claude-haiku-4-5";
 
+/**
+ * What request shape each model accepts.
+ *
+ * This is not a nicety. `thinking: {type: "adaptive"}` and
+ * `output_config.effort` are both current-generation parameters: sending
+ * either to Claude Haiku 4.5 is a 400, so a ladder with Haiku on the cheap
+ * rung would fail EVERY cheap attempt and escalate every request — the exact
+ * shape of a cost optimisation that silently costs more. Found while
+ * modelling the cost of the default ladder, before it ever ran.
+ *
+ * Haiku 4.5 predates both. Its thinking is configured with the older
+ * `budget_tokens` form, which this engine does not use: a rewrite of a few
+ * hundred words does not need a reasoning budget, and adding one would be a
+ * second unmeasured knob. So Haiku runs with neither parameter.
+ */
+export interface ModelRequestCapabilities {
+  /** `thinking: {type: "adaptive"}` — current-generation models only. */
+  adaptiveThinking: boolean;
+  /** `output_config.effort` — current-generation models only. */
+  effort: boolean;
+}
+
+export const CLAUDE_MODEL_CAPABILITIES: Record<ClaudeModelId, ModelRequestCapabilities> = {
+  "claude-opus-5": { adaptiveThinking: true, effort: true },
+  "claude-sonnet-5": { adaptiveThinking: true, effort: true },
+  "claude-haiku-4-5": { adaptiveThinking: false, effort: false },
+};
+
 export interface TokenCounts {
   inputTokens: number;
   outputTokens: number;
