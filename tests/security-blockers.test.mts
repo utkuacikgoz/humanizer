@@ -242,7 +242,9 @@ test("SEC-21: the sign-in page uses the canonical guard rather than a second cop
 // no signal anywhere they actually work, and return_to let the attacker
 // choose which page they landed on.
 
-const SIGNED_IN_SURFACES = ["../app/page.tsx", "../app/history/page.tsx", "../app/checkout/success/page.tsx"];
+// app/page.tsx is a server shell since SEO handoff H-1; the landing surface
+// that carries the header, and so the indicator, is app/landing-page.tsx.
+const SIGNED_IN_SURFACES = ["../app/landing-page.tsx", "../app/history/page.tsx", "../app/checkout/success/page.tsx"];
 
 test("SEC-17: every signed-in surface names the account and offers a way out", async () => {
   for (const path of SIGNED_IN_SURFACES) {

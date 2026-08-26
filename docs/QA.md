@@ -125,7 +125,7 @@ Rules the helper keeps, and which any change to it must keep: a raw token, a ses
 - A fresh `.wrangler/state` has no tables. Run `npm run db:migrate:local` after the first request that touches `getDb()`, or every signed-in test blocks with a message saying exactly that. Without it `/api/auth/session` answers `503` for any presented cookie and sign-in cannot work at all.
 - **A skipped test reports `ok`.** Read `# skipped` in the TAP summary, never the pass count. A run reporting "37 tests, 37 pass" with 37 skips executed nothing. Both `environmentBlocker()` (Chromium, server) and `identityBlocker()` (local D1 schema) must return `null`.
 - `waitUntil: "networkidle"` times out on polling pages; `/checkout/success` polls `/api/result`. Use `"domcontentloaded"`.
-- `gotoHydrated()` waits for a `POST /api/events` that only `app/page.tsx` and `app/checkout/success/page.tsx` ever send. On `/signin` and `/history` that wait can only end in its own 30-second timeout, so those pages use `gotoReady()` instead.
+- `gotoHydrated()` waits for a `POST /api/events` that only `app/landing-page.tsx` and `app/checkout/success/page.tsx` ever send. On `/signin` and `/history` that wait can only end in its own 30-second timeout, so those pages use `gotoReady()` instead.
 - Playwright's browser build must match its library version. The harness prefers the project's copy and falls back to a global install whose Chromium actually exists. Do not remove that fallback.
 
 #### Resolved 2026-08-25

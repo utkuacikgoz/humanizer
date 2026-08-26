@@ -33,10 +33,10 @@ these facts, and several proposals below are shaped by them.
 | `GET /api/auth/session` answers `{ signedIn, email }` for the caller's own cookie. The cookie is HttpOnly, so client code must ask. | `app/api/auth/session/route.ts` |
 | Sign-out is `POST /api/auth/signout`. Never a link, by design. | `src/lib/identity.ts` |
 | `getSessionUser()` / `requireSessionUser()` exist for server components and **are called by nothing**. No page in this repository has ever server-rendered a signed-in state. | `app/auth.ts` |
-| `app/page.tsx` is `"use client"` in its entirety, header included. | `app/page.tsx:1` |
+| The landing surface is `"use client"` in its entirety, header included — but the **route** is not. SEO handoff H-1 split it: `app/page.tsx` is a server shell that exports `generateMetadata()` and renders `app/landing-page.tsx`. Option B below is therefore cheaper than this document assumed. | `app/page.tsx`, `app/landing-page.tsx:1` |
 | Four pages each hand-roll their own `.site-header` with a different nav: `/`, `/signin`, `/history`, `/checkout/success`. `/terms` and `/privacy` have no header at all. | grep `site-header` |
 | At ≤760px, `nav a:not(.sign-in) { display: none }`. On mobile the header is the wordmark and **one pill**. | `app/globals.css:1138` |
-| A paid rewrite returns `usage: { consumed, allowance, remaining, periodEnd, paidUseCount }`. `/` already prints "N of M words remain this billing period" under a paid result. | `app/page.tsx`, `src/lib/paid-usage.ts` |
+| A paid rewrite returns `usage: { consumed, allowance, remaining, periodEnd, paidUseCount }`. `/` already prints "N of M words remain this billing period" under a paid result. | `app/landing-page.tsx`, `src/lib/paid-usage.ts` |
 | **No endpoint returns usage or entitlement without performing a rewrite.** `describePaidUsage` exists and is called only from the sentence route. | `src/lib/paid-usage.ts` |
 | `/api/billing/readiness` reports whether *checkout is configured*, not whether *this caller is subscribed*. It is not an entitlement signal. | `src/lib/billing-readiness.ts` |
 | **The entitled rewrite response carries no `jobId`.** `recordOwnedJob` computes one and `completeEntitledRewrite` discards it. | `src/lib/entitled-rewrite.ts:187` |
@@ -117,8 +117,11 @@ keeps its copy; it is correct there and costs nothing.
 
 ### How the header learns there is a session
 
-This is the one genuinely awkward part, because `app/page.tsx` is a client
-component from its first line and the cookie is HttpOnly.
+This is the one genuinely awkward part, because the landing surface
+(`app/landing-page.tsx`) is a client component from its first line and the
+cookie is HttpOnly. Since SEO handoff H-1 the *route* above it,
+`app/page.tsx`, is a server component, which removes the restructuring cost
+Option B was charged for below.
 
 **Option A — client fetch.** The header calls `/api/auth/session` on mount,
 exactly as `/signin` already does, with the same three-state
@@ -128,10 +131,11 @@ endpoint, proven pattern in this repository. Cost: a returning customer sees
 precise complaint this whole plan exists to answer, so shipping it as the
 final answer is unsatisfying — though shipping it *first* is defensible.
 
-**Option B — server-rendered.** `app/page.tsx` becomes a server component that
-calls `getSessionUser()` and renders `<SiteHeader user={…}/>`, passing the
-existing client body through as a prop (the standard RSC pattern for a server
-node inside a client tree). No flash, no round trip, no client-side session
+**Option B — server-rendered.** `app/page.tsx` is already the server component
+this option asked for; it would call `getSessionUser()` and render
+`<SiteHeader user={…}/>` above `<LandingPage/>`, passing the existing client
+body through as a prop (the standard RSC pattern for a server node inside a
+client tree). No flash, no round trip, no client-side session
 handling at all. `app/layout.tsx` is already an async server component reading
 `headers()`, so the route is already dynamic and nothing regresses there.
 
@@ -457,7 +461,7 @@ and two concurrent operations race on it.
 `/^[a-zA-Z0-9][a-zA-Z0-9._:-]{7,127}$/`. Mint one `crypto.randomUUID()` per
 *attempt*; reuse it verbatim on a retry of that same attempt — that is the
 whole point of the header — and never across sentences or actions. The
-existing `idempotency` ref in `app/page.tsx` is the precedent.
+existing `idempotency` ref in `app/landing-page.tsx` is the precedent.
 
 **Cap counts before the first click.** A response carries
 `regenerationsUsedForSentence` and `regenerationsUsedForJob`, so after one

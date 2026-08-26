@@ -26,14 +26,46 @@ test("server-renders the paid-first writing experience", async () => {
   assert.match(html, /Paste your text/);
   assert.match(html, /Humanize/);
   assert.doesNotMatch(html, /Meaning-first writing|No signup to try/);
-  assert.match(html, /application\/ld\+json/);
-  assert.match(html, /SoftwareApplication/);
+  // SEO-020 finding F4, now fixed. This request arrives on `localhost`, so
+  // the page is noindex and must publish no entity claim at all: not the
+  // site-level Organization/WebSite graph, and no longer the homepage's
+  // SoftwareApplication block with its Offer prices in it. That block used to
+  // ship on every host because it rendered from a client component that could
+  // not read the request Host. The canonical-host half of this is asserted in
+  // "publishes the product entity on the canonical host only" below.
+  assert.doesNotMatch(html, /application\/ld\+json/);
+  assert.doesNotMatch(html, /SoftwareApplication/);
   assert.match(html, /Ownword \| Natural AI Rewrites That Preserve Meaning/);
   assert.match(html, />Ownword</);
   assert.match(html, /name="robots" content="noindex, nofollow, nocache"/);
   assert.doesNotMatch(html, /rel="canonical"/);
   assert.doesNotMatch(html, /property="og:image"/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
+});
+
+// SEO-006 / SEO-020 finding F4. The product entity and its prices belong to
+// the canonical host and nowhere else.
+test("publishes the product entity on the canonical host only", async () => {
+  const canonical = await (await render("/", "ownword.pro")).text();
+  const blocks = [...canonical.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)]
+    .map((match) => JSON.parse(match[1]));
+  const software = blocks.find((block) => block["@type"] === "SoftwareApplication");
+  assert.ok(software, "the canonical homepage must describe the product");
+  assert.equal(software.name, "Ownword");
+  assert.ok(Array.isArray(software.offers) && software.offers.length > 0, "a purchasable plan must carry an Offer");
+  for (const offer of software.offers) {
+    assert.equal(offer["@type"], "Offer");
+    assert.match(offer.price, /^\d+(\.\d+)?$/);
+    assert.equal(offer.priceCurrency, "USD");
+  }
+  // The graph the root layout emits is separate and must still be there.
+  assert.ok(blocks.some((block) => Array.isArray(block["@graph"])), "the site graph must still be emitted");
+
+  for (const host of ["staging.ownword.pro", "localhost", "www.ownword.pro.example.com"]) {
+    const offHost = await (await render("/", host)).text();
+    assert.doesNotMatch(offHost, /SoftwareApplication/, `${host} must not publish the product entity`);
+    assert.doesNotMatch(offHost, /"@type":"Offer"/, `${host} must not publish a price`);
+  }
 });
 
 test("keeps every host out of search until the canonical domain is configured", async () => {
@@ -72,7 +104,13 @@ test("publishes one coherent Ownword identity on the canonical host", async () =
 });
 
 test("keeps brand and pricing copy centralized", async () => {
-  const [page, layout, privacy, terms, productConfig, pricingConfig] = await Promise.all([
+  // SEO handoff H-1 split the homepage route into a server shell
+  // (app/page.tsx) and the landing surface (app/landing-page.tsx). The copy
+  // this test guards moved with the surface, so the guard follows it. `shell`
+  // is read too, so a value that migrates back up into the route file is
+  // still caught.
+  const [page, shell, layout, privacy, terms, productConfig, pricingConfig] = await Promise.all([
+    readFile(new URL("../app/landing-page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/privacy/page.tsx", import.meta.url), "utf8"),
@@ -87,10 +125,10 @@ test("keeps brand and pricing copy centralized", async () => {
   assert.match(productConfig, /domain:\s*"ownword\.pro"/);
   assert.match(productConfig, /supportEmail:\s*"support@ownword\.pro"/);
   assert.match(productConfig, /legalCompanyName:\s*"Bosphorus Elevate LLC"/);
-  assert.doesNotMatch(`${page}\n${layout}`, /Bosphorus Elevate|support@ownword\.pro|favicon\.svg|brand-mark/);
+  assert.doesNotMatch(`${page}\n${shell}\n${layout}`, /Bosphorus Elevate|support@ownword\.pro|favicon\.svg|brand-mark/);
   assert.match(`${privacy}\n${terms}`, /productConfig\.legalCompanyName/);
   assert.match(`${privacy}\n${terms}`, /productConfig\.supportEmail/);
-  assert.doesNotMatch(page, /[—–]/, "landing copy uses sentence punctuation instead of em or en dashes");
+  assert.doesNotMatch(`${page}\n${shell}`, /[—–]/, "landing copy uses sentence punctuation instead of em or en dashes");
   // Anchored: a bare /monthlyPrice:\s*9/ also matches 9.99, so it would
   // silently keep passing across a price change (MON finding).
   assert.match(pricingConfig, /monthlyPrice:\s*9\.99,/);
@@ -167,12 +205,16 @@ test("robots.txt allows the canonical host and fails closed everywhere else", as
   assert.match(canonical, /^User-agent: \*$/m);
   assert.match(canonical, /^Allow: \/$/m);
   assert.match(canonical, /^Sitemap: https:\/\/ownword\.pro\/sitemap\.xml$/m);
-  for (const path of ["/api/", "/account/", "/admin/", "/billing/", "/checkout/", "/history/", "/result/", "/signin"]) {
+  for (const path of ["/api/", "/account/", "/admin/", "/billing/", "/checkout/", "/history/", "/result/"]) {
     assert.match(canonical, new RegExp(`^Disallow: ${path.replace(/\//g, "\\/")}$`, "m"), `${path} must stay disallowed`);
   }
-  // /history is deliberately crawlable so its noindex can be read; only the
-  // subtree below it is disallowed.
+  // /history and /signin are deliberately crawlable so their noindex can be
+  // read; only the subtree below /history is disallowed. /signin is linked
+  // from the header of the homepage, so disallowing it would have left a URL
+  // a crawler is invited to and forbidden to read - the one shape that gets
+  // indexed URL-only. See the comment in app/robots.txt/route.ts.
   assert.doesNotMatch(canonical, /^Disallow: \/history$/m);
+  assert.doesNotMatch(canonical, /^Disallow: \/signin$/m);
 
   for (const host of ["localhost", "staging.ownword.pro", "ownword.pro.example.com"]) {
     const offHost = await (await render("/robots.txt", host)).text();

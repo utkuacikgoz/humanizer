@@ -19,6 +19,7 @@
 //
 // Kept free of `next/headers` so plain-Node tests can assert the payload.
 import { productConfig } from "@/src/config/product";
+import { pricingConfig } from "@/src/config/pricing";
 import { canonicalOrigin, isCanonicalHost } from "@/src/lib/public-pages";
 
 /**
@@ -66,4 +67,52 @@ export function siteStructuredData(requestHost: string): Record<string, unknown>
 /** JSON safe to interpolate into a `<script type="application/ld+json">`. */
 export function serializeJsonLd(payload: unknown): string {
   return JSON.stringify(payload).replace(/</g, "\\u003c");
+}
+
+/**
+ * SEO-006 / SEO-020 finding F4. The homepage's `SoftwareApplication` entity,
+ * or null off the canonical host.
+ *
+ * This block used to render from the landing page while that page was a
+ * client component, so it could not read the request `Host` and shipped on
+ * staging, preview and localhost too, `Offer` prices included, on pages that
+ * are `noindex` there. Nothing was ever indexed off-host, but a page that is
+ * not the product's canonical home should not publish the product's offers.
+ * Now that `app/page.tsx` is a server shell it gates exactly like
+ * `siteStructuredData()` above, from the same host rule.
+ *
+ * Every property is still verifiable from config: the name, the category, the
+ * platform, and one `Offer` per plan the catalog marks purchasable, priced
+ * from the catalog rather than from a literal on the page.
+ */
+export function homeStructuredData(requestHost: string): Record<string, unknown> | null {
+  if (!isCanonicalHost(requestHost)) return null;
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: productConfig.productName,
+    applicationCategory: "BusinessApplication",
+    operatingSystem: "Web",
+    description: "A writing tool that puts meaning first and turns generic AI assisted drafts into natural writing.",
+    // One Offer per purchasable plan, straight from the catalog. Quoting a
+    // single price while the page sells two would publish a figure the
+    // pricing section contradicts.
+    ...(productConfig.billingEnabled
+      ? {
+          offers: purchasablePlans().map((plan) => ({
+            "@type": "Offer",
+            name: plan.name,
+            price: String(plan.monthlyPrice),
+            priceCurrency: pricingConfig.currency.toUpperCase(),
+            category: "subscription",
+          })),
+        }
+      : {}),
+  };
+}
+
+/** The plans the catalog says are buyable right now, in catalog order. */
+function purchasablePlans() {
+  return Object.values(pricingConfig.plans).filter((plan) => plan.availability === "active");
 }

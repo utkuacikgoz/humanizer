@@ -55,8 +55,10 @@ test("ACT-11: billing readiness fails closed without leaking configuration detai
 });
 
 test("ACT-12 and ACT-16: landing source encodes one-click sample and separates anonymous repeats from paid second use", async () => {
+  // H-1 moved the landing surface out of the route file; app/page.tsx is now
+  // a server shell that renders this component.
   const source = await import("node:fs/promises").then(({ readFile }) =>
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/landing-page.tsx", import.meta.url), "utf8"),
   );
   assert.match(source, /humanize\(\{ draft: SAMPLE_TEXT, source: "sample" \}\)/);
   assert.match(source, /submissionInFlight\.current/);
