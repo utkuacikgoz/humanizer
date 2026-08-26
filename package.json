@@ -17,6 +17,7 @@
     "db:migrate:local": "node --import tsx scripts/migrate-local-d1.mts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
     "drizzle-orm": "0.45.2",
     "react": "19.2.8",
     "react-dom": "19.2.8",

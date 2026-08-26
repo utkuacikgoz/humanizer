@@ -1,4 +1,5 @@
-import { createHumanizationPipeline, HumanizationFailedError, PIPELINE_VERSION } from "@/src/lib/humanization";
+import { HumanizationFailedError, PIPELINE_VERSION } from "@/src/lib/humanization";
+import { humanizationRuntime } from "./humanization-runtime";
 import type { WritingMode } from "@/src/lib/humanization";
 import {
   DistributedPreviewRequestGuard,
@@ -14,9 +15,8 @@ import type { EntitledRewritePayload } from "@/src/lib/entitled-rewrite";
 import type { AppDatabase, PreviewProjection } from "../../../db/repository";
 
 const allowedModes = new Set<WritingMode>(["natural", "professional", "academic", "casual"]);
-const pipeline = createHumanizationPipeline({ config: { maxInputCharacters: 10_000 } });
+const MAX_INPUT_CHARACTERS = 10_000;
 const MAX_REQUEST_BYTES = 10_000;
-const MAX_PROCESSING_MS = 5_000;
 const IDEMPOTENCY_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{7,127}$/;
 
 /**
@@ -288,7 +288,12 @@ export async function POST(request: Request) {
       fingerprint: contentFingerprint,
       execute: async () => {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(new DOMException("Preview deadline exceeded.", "TimeoutError")), MAX_PROCESSING_MS);
+        // Which provider serves this deployment, and therefore how long a
+        // rewrite is allowed to take: a substitution table answers in
+        // milliseconds, a model call is a round trip. Resolved once per
+        // isolate, not once per request.
+        const runtime = await humanizationRuntime(MAX_INPUT_CHARACTERS);
+        const timeout = setTimeout(() => controller.abort(new DOMException("Preview deadline exceeded.", "TimeoutError")), runtime.processingMs);
         let paidDb: AppDatabase | null = null;
         let paidReservation: PaidUsageReservation | null = null;
         try {
@@ -316,7 +321,7 @@ export async function POST(request: Request) {
             }
           }
 
-          const result = await pipeline.humanize({ text, mode: mode as WritingMode, signal: controller.signal });
+          const result = await runtime.pipeline.humanize({ text, mode: mode as WritingMode, signal: controller.signal });
 
           // ACT-01: never truncate, price, or persist a rewrite that did
           // not rewrite anything. Derived from the normalized full
