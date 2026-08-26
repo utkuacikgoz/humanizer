@@ -13,6 +13,7 @@ import test from "node:test";
 import { randomBytes } from "node:crypto";
 import { BASE_URL, closeBrowser, environmentBlocker, gotoReady, openSession } from "./helpers/harness.mts";
 import { REWRITABLE_DRAFT } from "./helpers/fixtures.mts";
+import { DEV_LINK_NONCE_COOKIE } from "../../src/lib/identity";
 import {
   findAccount,
   grantEntitlement,
@@ -39,8 +40,17 @@ function syntheticIp(): string {
  * issued (empty when it issued none). The cookie is a live credential: it is
  * passed into request headers and never printed.
  */
-async function redeemFull(url: string) {
-  const response = await fetch(url, { redirect: "manual", headers: { "cf-connecting-ip": syntheticIp() } });
+/**
+ * Redeems a link the way the browser that requested it would: presenting the
+ * nonce the link was bound to (SEC-17). Passing a bare URL string deliberately
+ * omits the nonce, which is the attacker's shape and lands on confirmation.
+ */
+async function redeemFull(link: string | { url: string; nonce?: string }) {
+  const url = typeof link === "string" ? link : link.url;
+  const nonce = typeof link === "string" ? undefined : link.nonce;
+  const headers: Record<string, string> = { "cf-connecting-ip": syntheticIp() };
+  if (nonce) headers.cookie = `${DEV_LINK_NONCE_COOKIE}=${nonce}`;
+  const response = await fetch(url, { redirect: "manual", headers });
   const cookies = response.headers.getSetCookie().map((value) => value.split(";")[0]).filter((pair) => pair.split("=")[1]);
   return { status: response.status, location: response.headers.get("location") ?? "", cookie: cookies.join("; ") };
 }
@@ -86,7 +96,7 @@ test("requesting a link for an unknown address is indistinguishable from a known
   // ever is — by redeeming a link — plus a live subscription, so the two
   // addresses differ in every way the database can express.
   const seedLink = await mintSignInLink(BASE_URL, known, "/");
-  const seeded = await redeemFull(seedLink.url);
+  const seeded = await redeemFull(seedLink);
   assert.equal(seeded.status, 303, "seeding the known account failed at redemption");
   const account = findAccount(known);
   assert.ok(account, "seeding the known account created no user row");
@@ -146,7 +156,7 @@ test("a redeemed link produces a working session and cannot be redeemed twice", 
 
   const link = await mintSignInLink(BASE_URL, email, "/history");
 
-  const first = await redeemFull(link.url);
+  const first = await redeemFull(link);
   assert.equal(first.status, 303, `the first redemption answered ${first.status}`);
   assert.equal(first.location, "/history", "the first redemption did not honour the link's return path");
   assert.ok(first.cookie.length > 0, "the first redemption issued no session cookie");
@@ -154,7 +164,7 @@ test("a redeemed link produces a working session and cannot be redeemed twice", 
   const working = await fetch(`${BASE_URL}/api/history`, { headers: { cookie: first.cookie, "cf-connecting-ip": syntheticIp() } });
   assert.equal(working.status, 200, `the session from a redeemed link could not read history (${working.status})`);
 
-  const second = await redeemFull(link.url);
+  const second = await redeemFull(link);
   assert.equal(second.status, 303, `the second redemption answered ${second.status}`);
   assert.equal(
     second.location,
@@ -175,7 +185,7 @@ test("an expired link fails exactly the way a spent one does", { skip: blocker ?
   const issuedAt = Date.now() - 60 * 60 * 1000;
   const link = await mintSignInLink(BASE_URL, email, "/", { issuedAt, expiresAt: issuedAt + 15 * 60 * 1000 });
 
-  const outcome = await redeemFull(link.url);
+  const outcome = await redeemFull(link);
   assert.equal(outcome.status, 303, `redeeming an expired link answered ${outcome.status}`);
   assert.equal(outcome.location, "/signin?error=link&return_to=%2F", "an expired link produced a different destination than a spent one");
   assert.equal(outcome.cookie.length, 0, "an expired link issued a session cookie");
@@ -199,13 +209,49 @@ test("a malformed or invented token is refused without a database lookup being o
   assert.equal([...seen][0], "/signin?error=link&return_to=%2F", "a bad token produced an unexpected destination");
 });
 
+test("a link opened in a browser that did not request it never signs anyone in silently", { skip: blocker ?? false }, async (t) => {
+  // SEC-17. This is the attacker's path: they request a link for their own
+  // address and mail it to someone else. Before the nonce binding, the
+  // victim's click created a session pointing at the attacker, and no page
+  // showed whose account they were in. The link must still be usable when it
+  // is genuinely opened on another device, so the answer is a confirmation
+  // step rather than a refusal.
+  t.after(closeBrowser);
+  const session = await openSession();
+  t.after(() => session.close());
+  const { page } = session;
+
+  const email = testEmail("sec17");
+  t.after(() => purgeTestAccount(email));
+  const link = await mintSignInLink(BASE_URL, email);
+
+  // Deliberately do NOT present the nonce: this browser did not ask for it.
+  await page.goto(link.url, { waitUntil: "domcontentloaded" });
+
+  assert.equal(findAccount(email), null, "opening an unbound link must not create an account on its own");
+
+  const confirm = page.locator('button[type="submit"]');
+  assert.ok(await confirm.count() >= 1, "an unbound link must land on a confirmation step, not a session");
+  const shown = await page.locator("body").innerText();
+  assert.ok(shown.includes(email), "the confirmation step must name the account it would sign you into");
+
+  // Confirming deliberately, as the real cross-device customer would.
+  await confirm.first().click();
+  await page.waitForURL((url: URL) => !url.pathname.startsWith("/api/auth/verify"), { timeout: 15_000 });
+
+  const account = findAccount(email);
+  assert.ok(account, "confirming on another device must still sign the customer in");
+
+  assert.deepEqual(session.pageErrors, [], "the confirmation journey produced uncaught page errors");
+});
+
 test("one customer's history is unreachable from another customer's live session", { skip: blocker ?? false }, async (t) => {
   const owner = testEmail("owner");
   const stranger = testEmail("stranger");
   t.after(() => purgeTestAccount(owner));
   t.after(() => purgeTestAccount(stranger));
 
-  const ownerSession = (await redeemFull((await mintSignInLink(BASE_URL, owner, "/")).url)).cookie;
+  const ownerSession = (await redeemFull(await mintSignInLink(BASE_URL, owner, "/"))).cookie;
   const ownerAccount = findAccount(owner);
   assert.ok(ownerAccount, "the owner account was not created");
   grantEntitlement(ownerAccount.userId);
@@ -225,7 +271,7 @@ test("one customer's history is unreachable from another customer's live session
   assert.equal(jobIds.length, 1, `expected one owned job, found ${jobIds.length}`);
   const jobId = jobIds[0];
 
-  const strangerSession = (await redeemFull((await mintSignInLink(BASE_URL, stranger, "/")).url)).cookie;
+  const strangerSession = (await redeemFull(await mintSignInLink(BASE_URL, stranger, "/"))).cookie;
   const strangerAccount = findAccount(stranger);
   assert.ok(strangerAccount, "the stranger account was not created");
   grantEntitlement(strangerAccount.userId);
