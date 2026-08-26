@@ -205,12 +205,16 @@ test("robots.txt allows the canonical host and fails closed everywhere else", as
   assert.match(canonical, /^User-agent: \*$/m);
   assert.match(canonical, /^Allow: \/$/m);
   assert.match(canonical, /^Sitemap: https:\/\/ownword\.pro\/sitemap\.xml$/m);
-  for (const path of ["/api/", "/account/", "/admin/", "/billing/", "/checkout/", "/history/", "/result/", "/signin"]) {
+  for (const path of ["/api/", "/account/", "/admin/", "/billing/", "/checkout/", "/history/", "/result/"]) {
     assert.match(canonical, new RegExp(`^Disallow: ${path.replace(/\//g, "\\/")}$`, "m"), `${path} must stay disallowed`);
   }
-  // /history is deliberately crawlable so its noindex can be read; only the
-  // subtree below it is disallowed.
+  // /history and /signin are deliberately crawlable so their noindex can be
+  // read; only the subtree below /history is disallowed. /signin is linked
+  // from the header of the homepage, so disallowing it would have left a URL
+  // a crawler is invited to and forbidden to read - the one shape that gets
+  // indexed URL-only. See the comment in app/robots.txt/route.ts.
   assert.doesNotMatch(canonical, /^Disallow: \/history$/m);
+  assert.doesNotMatch(canonical, /^Disallow: \/signin$/m);
 
   for (const host of ["localhost", "staging.ownword.pro", "ownword.pro.example.com"]) {
     const offHost = await (await render("/robots.txt", host)).text();
