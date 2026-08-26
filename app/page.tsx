@@ -62,7 +62,17 @@ async function readJsonResponse<T extends object>(response: Response): Promise<P
   }
 }
 
-const starterPlan = pricingConfig.plans.starter;
+/* Every plan the catalog says is buyable right now, in catalog order. The
+   landing page never decides what is purchasable; it reads the same
+   availability flag src/config/stripe.ts's isPurchasablePlan() enforces
+   server-side, so a plan cannot appear here and be refused at checkout.
+   Prices, allowances, and feature copy all come from the catalog, never
+   from a literal on this page. */
+const purchasablePlans = Object.values(pricingConfig.plans).filter((plan) => plan.availability === "active");
+
+/* The cheapest purchasable plan, so the pricing section can say where
+   prices begin without a second literal to keep in sync. */
+const entryPlan = pricingConfig.plans.starter;
 
 const MAX_FACT_CHIPS = 6;
 
@@ -112,6 +122,11 @@ export default function Home() {
   const [status, setStatus] = useState<"idle" | "working" | "error">("idle");
   const [error, setError] = useState("");
   const [unlockStatus, setUnlockStatus] = useState<"idle" | "working" | "error">("idle");
+  // Which plan's button is mid-redirect. With more than one purchase control
+  // in the card, "working" alone cannot say which one to relabel, and
+  // relabelling both would tell the visitor they had bought something they
+  // had not chosen.
+  const [unlockPlanId, setUnlockPlanId] = useState<string | null>(null);
   const [unlockError, setUnlockError] = useState("");
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [billingReadiness, setBillingReadiness] = useState<BillingReadiness | null>(null);
@@ -151,13 +166,17 @@ export default function Home() {
     applicationCategory: "BusinessApplication",
     operatingSystem: "Web",
     description: "A writing tool that puts meaning first and turns generic AI assisted drafts into natural writing.",
+    // One Offer per purchasable plan, straight from the catalog. Quoting a
+    // single price while the page sells two would publish a figure the
+    // pricing section contradicts.
     ...(productConfig.billingEnabled ? {
-      offers: {
+      offers: purchasablePlans.map((plan) => ({
         "@type": "Offer",
-        price: String(pricingConfig.plans.starter.monthlyPrice),
+        name: plan.name,
+        price: String(plan.monthlyPrice),
         priceCurrency: pricingConfig.currency.toUpperCase(),
         category: "subscription",
-      },
+      })),
     } : {}),
   };
 
@@ -281,6 +300,7 @@ export default function Home() {
     // checkout. This narrows the union as well as guarding reentry.
     if (!result || result.unchanged || isPaidResult(result) || unlockStatus === "working" || !billingReadiness?.available) return;
     setUnlockError("");
+    setUnlockPlanId(planId);
     if (!result.capability) {
       setUnlockError("Checkout is temporarily unavailable for this preview. Please try the rewrite again in a moment.");
       setUnlockStatus("error");
@@ -544,27 +564,48 @@ export default function Home() {
               <div className="unlock-card">
                 <strong><span className="lock" aria-hidden="true"><IconLock /></span>There’s more to this rewrite</strong>
                 <p>{result.hiddenWordCount} more words of this rewrite are ready. The same protected facts were checked in the same way.</p>
-                <button
-                  type="button"
-                  onClick={() => void unlock(starterPlan.id)}
-                  aria-disabled={!billingReadiness?.available || unlockStatus === "working"}
-                >
-                  {unlockStatus === "working"
-                    ? "Redirecting to checkout…"
-                    : billingReadiness?.available
-                      ? `Unlock full rewrite for $${starterPlan.monthlyPrice}/mo`
-                      : billingReadiness
-                        ? "Checkout temporarily unavailable"
-                        : "Checking checkout availability…"}
-                </button>
+                {/* One control per purchasable plan, each carrying its own
+                    plan id into /api/checkout. Nothing is preselected and
+                    nothing is marked "recommended": the plans differ only in
+                    monthly allowance, so the visitor picks by their own
+                    volume, not by a badge we put on one of them. */}
+                <div className="unlock-plans">
+                  {billingReadiness?.available ? (
+                    purchasablePlans.map((plan) => (
+                      <button
+                        key={plan.id}
+                        type="button"
+                        className={plan.id === entryPlan.id ? undefined : "plan-alt"}
+                        onClick={() => void unlock(plan.id)}
+                        aria-disabled={unlockStatus === "working"}
+                      >
+                        {unlockStatus === "working" && unlockPlanId === plan.id
+                          ? "Redirecting to checkout…"
+                          : `Unlock full rewrite with ${plan.name}, $${plan.monthlyPrice}/mo`}
+                      </button>
+                    ))
+                  ) : (
+                    /* One control, not one per plan, while checkout is shut. Two
+                       buttons carrying the same words would give a screen reader
+                       two identical names for the same dead end, and there is no
+                       plan to choose between when neither can be bought. The
+                       handler is the real one: unlock() returns immediately
+                       while readiness is unavailable, so the guard lives in one
+                       place rather than being duplicated as an empty callback. */
+                    <button type="button" onClick={() => void unlock(entryPlan.id)} aria-disabled="true">
+                      {billingReadiness ? "Checkout temporarily unavailable" : "Checking checkout availability…"}
+                    </button>
+                  )}
+                </div>
                 {/* ACT-10: the whole offer before the click includes the amount, that it
                     recurs, the included monthly allowance, and the cancellation
-                    path (ACT-09). No countdown, no scarcity, no preselected
-                    upsell. */}
+                    path (ACT-09). Every purchasable plan states its own terms
+                    here, so neither button is cheaper to read than the other.
+                    No countdown, no scarcity, no preselected upsell. */}
                 <small className="unlock-terms">
-                  <span role="status">{billingReadiness?.message ?? "Checking checkout availability before you continue."}</span><br />
-                  {subscriptionDisclosure(starterPlan)}{" "}
-                  <Link href="/terms#manage-billing">Cancel anytime</Link>. No cancellation fee.
+                  <span role="status">{billingReadiness?.message ?? "Checking checkout availability before you continue."}</span>
+                  {purchasablePlans.map((plan) => <span key={plan.id}>{subscriptionDisclosure(plan)}</span>)}
+                  <span><Link href="/terms#manage-billing">Cancel anytime</Link>. No cancellation fee.</span>
                 </small>
                 {unlockStatus === "error" ? <small role="alert">{unlockError}</small> : null}
               </div>
@@ -631,14 +672,25 @@ export default function Home() {
       <section className="pricing" id="pricing">
         <div className="pricing-intro">
           <h2>Try the quality.<br />Pay for the full result.</h2>
-          <p>Every rewrite is checked before you see it. You only pay once you have read part of the result and judged it for yourself.</p>
+          <p>Every rewrite is checked before you see it. You only pay once you have read part of the result and judged it for yourself. Plans start at ${entryPlan.monthlyPrice} a month and you can cancel at any time.</p>
         </div>
-        <article>
-          <div><span>{pricingConfig.plans.starter.name}</span><p>Everything you need to make drafts sound like you meant them.</p></div>
-          <strong><sup>$</sup>{pricingConfig.plans.starter.monthlyPrice}<small>/ month</small></strong>
-          <ul>{pricingConfig.plans.starter.features.map((feature) => <li key={feature}><IconCheck /> {feature}</li>)}</ul>
-          <a href="#top">Try it with your text</a>
-        </article>
+        {/* Two plans, one difference: the monthly allowance. Both lists are
+            read from the catalog, and the roadmap line below each card is
+            marked as not included so a planned capability can never be read
+            as a bought one (docs/MONETIZATION.md dark-pattern list). */}
+        <div className="pricing-plans">
+          {purchasablePlans.map((plan) => (
+            <article key={plan.id}>
+              <div><span>{plan.name}</span><p>{plan.summary}</p></div>
+              <strong><sup>$</sup>{plan.monthlyPrice}<small>/ month</small></strong>
+              <ul>{plan.features.map((feature) => <li key={feature}><IconCheck /> {feature}</li>)}</ul>
+              <p className="plan-roadmap">
+                <b>Not included.</b> Being built for a later release: {plan.plannedFeatures.join(", ")}.
+              </p>
+              <a href="#top">Try it with your text</a>
+            </article>
+          ))}
+        </div>
       </section>
 
       {/* ACT-09: the hero promises "Cancel anytime", so the path has to

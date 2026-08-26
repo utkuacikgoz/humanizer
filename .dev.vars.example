@@ -16,10 +16,18 @@
 # - STRIPE_PRICE_STARTER: Product catalog -> Starter plan -> Price ID
 #   (starts with price_) — must be a *recurring* (subscription) price to
 #   match app/api/checkout/route.ts's `mode: "subscription"`.
+# - STRIPE_PRICE_PRO: Product catalog -> Pro plan -> Price ID. Same rules,
+#   and its amount must equal src/config/pricing.ts's `pro.monthlyPrice`
+#   ($19/month recurring) or src/lib/price-integrity.ts closes checkout
+#   rather than charging a figure the page never showed.
+#
+# Every plan in src/config/stripe.ts's STRIPE_PRICE_ENV_KEYS needs a value
+# here; validateStripeConfig() fails closed on the whole set if one is missing.
 
 STRIPE_SECRET_KEY=sk_test_replace_me
 STRIPE_WEBHOOK_SECRET=whsec_replace_me
 STRIPE_PRICE_STARTER=price_replace_me
+STRIPE_PRICE_PRO=price_replace_me
 
 # Magic-link sign-in (Resend). Without RESEND_API_KEY the sign-in route
 # answers 503 and logs why, so local sign-in needs either a real key or a
