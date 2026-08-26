@@ -21,6 +21,7 @@ import {
   resultRegion,
   submitDraft,
   unlockButton,
+  unlockCard,
 } from "./helpers/harness.mts";
 import { REWRITABLE_DRAFT } from "./helpers/fixtures.mts";
 
@@ -67,7 +68,7 @@ test("anonymous visitor: paste, humanize, compare, hit the paywall", { skip: blo
 
   // ACT-10: the recurring terms are disclosed at the decision point, and they
   // come from the plan catalog rather than being typed into the page.
-  const unlockCardText = (await unlock.locator("xpath=..").innerText()).replace(/\s+/g, " ");
+  const unlockCardText = (await unlockCard(page).innerText()).replace(/\s+/g, " ");
   assert.ok(
     unlockCardText.includes(subscriptionDisclosure(starter)),
     `the purchase card must carry the catalog disclosure. Card read: ${JSON.stringify(unlockCardText)}`,
@@ -82,8 +83,26 @@ test("anonymous visitor: paste, humanize, compare, hit the paywall", { skip: blo
   );
 
   // ACT-09: the cancellation path is reachable from the page that sells.
-  assert.equal(await billingEntryPoint(page).count(), 1, "a billing/cancel entry point must exist on the landing page");
-  assert.ok(await billingEntryPoint(page).locator("button").first().isVisible(), "the billing entry point must be operable");
+  //
+  // The portal control itself deliberately no longer sits on the landing page
+  // (a15f919 moved it to /terms beside the cancellation clause, because
+  // advertising cancellation to people who have not bought anything is not
+  // what ACT-09 asked for). What ACT-09 requires is that the claim and the
+  // path ship together, so this asserts the reachable link rather than the
+  // control's old location. The operable control is asserted on /terms below,
+  // and on the post-purchase page in its own test.
+  const cancelLink = page.locator('a[href*="/terms#manage-billing"]');
+  assert.ok(await cancelLink.count() >= 1, "the landing page must offer a reachable cancellation path");
+  assert.ok(await cancelLink.first().isVisible(), "the cancellation path must be visible on the page that sells");
+
+  await cancelLink.first().click();
+  await page.waitForURL(/\/terms/, { timeout: 15_000 });
+  await billingEntryPoint(page).waitFor({ timeout: 15_000 });
+  assert.ok(
+    await billingEntryPoint(page).locator("button").first().isVisible(),
+    "the linked cancellation path must land on an operable billing control",
+  );
+  await gotoHydrated(page, "/");
 
   assert.deepEqual(session.pageErrors, [], "the journey produced uncaught page errors");
 });

@@ -190,6 +190,42 @@ export async function gotoHydrated(page: Page, path = "/"): Promise<void> {
   await page.waitForFunction(() => document.documentElement.classList.contains("motion-ready"), null, { timeout: 30_000 });
 }
 
+/**
+ * Loads a page that fires no analytics beacon, and waits for React to hydrate.
+ *
+ * `gotoHydrated` above waits on `POST /api/events` before checking the
+ * hydration class. Only app/page.tsx and app/checkout/success/page.tsx call
+ * `track()` (src/lib/analytics.ts), so on /signin and /history that wait can
+ * only ever end in its own 30-second timeout — a signed-in journey built out
+ * of `gotoHydrated` calls spends minutes waiting for a request that is never
+ * going to be made. `motion-ready` is added by a client-only effect on every
+ * app page, so it is a sufficient hydration signal on its own here.
+ *
+ * `domcontentloaded`, never `networkidle`: /checkout/success polls
+ * /api/result, so `networkidle` times out there instead of resolving.
+ */
+export async function gotoReady(page: Page, path: string): Promise<void> {
+  await page.goto(`${BASE_URL}${path}`, { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(
+    () => document.documentElement.classList.contains("motion-ready"),
+    null,
+    { timeout: 30_000 },
+  );
+}
+
+/**
+ * The `Cookie` header this browser context would send to the app, or "".
+ *
+ * Returned so a test can prove a server-side property that a browser cannot
+ * show on its own: that a session the customer signed out of is refused when
+ * the exact cookie value is replayed. The value is a live credential — pass
+ * it straight into a request header and never print it.
+ */
+export async function cookieHeaderFor(context: BrowserContext): Promise<string> {
+  const cookies = await context.cookies(BASE_URL);
+  return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+}
+
 // ---------------------------------------------------------------------------
 // Semantic locators.
 //
@@ -222,6 +258,21 @@ export function resultHeading(page: Page) {
 /** The purchase control. Its presence — not its wording — is the paywall. */
 export function unlockButton(page: Page) {
   return page.locator(".unlock-card button, [data-testid=unlock]").first();
+}
+
+/**
+ * The whole purchase card: the control, the plan choices, and the terms.
+ *
+ * Named rather than reached as `unlockButton(page).locator("xpath=..")`, which
+ * is what the ACT-10 disclosure assertions used to do. That worked only while
+ * the button happened to be a direct child of the card; wrapping the buttons
+ * in their own row moved the terms out of the button's parent and the
+ * assertions started failing on a DOM change that broke nothing a customer
+ * can see. The card is the thing those assertions were always about, so it is
+ * resolved by its own stable container instead.
+ */
+export function unlockCard(page: Page) {
+  return page.locator(".unlock-card").first();
 }
 
 /** The two comparison panels, source first. */
