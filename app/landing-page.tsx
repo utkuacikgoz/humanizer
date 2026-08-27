@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { MODES, productConfig } from "@/src/config/product";
 import { pricingConfig } from "@/src/config/pricing";
+import { PREVIEW_LINK_TTL_HOURS } from "@/src/config/retention";
 import { SAMPLE_TEXT } from "@/src/config/sample";
 import { track } from "@/src/lib/analytics";
 import type { BillingReadiness } from "@/src/lib/billing-readiness";
@@ -75,6 +76,16 @@ const purchasablePlans = Object.values(pricingConfig.plans).filter((plan) => pla
    prices begin without a second literal to keep in sync. */
 const entryPlan = pricingConfig.plans.starter;
 
+/* What every purchasable plan includes, taken as the intersection of the
+   catalog's own feature lists. Written out instead, it would be a fourth copy
+   of the same three claims and the first one to go stale. The allowance
+   bullet differs per plan, so it falls out of the intersection by itself and
+   is the one thing left for the cards to say. */
+const sharedFeatures = purchasablePlans.reduce<string[]>(
+  (shared, plan) => shared.filter((feature) => (plan.features as readonly string[]).includes(feature)),
+  [...(purchasablePlans[0]?.features ?? [])],
+);
+
 const MAX_FACT_CHIPS = 6;
 
 function countWords(value: string) {
@@ -137,6 +148,12 @@ export default function LandingPage() {
   const submissionInFlight = useRef(false);
   const idempotency = useRef<{ request: string; key: string } | null>(null);
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
+  /* The pricing band's one piece of urgency, and it is the visitor's own:
+     words that have already been written for them and that they have not read
+     yet. Zero unless there is a real unpaid rewrite on screen with a real
+     remainder, in which case the band says nothing about it. */
+  const unreadWords =
+    result && !result.unchanged && !isPaidResult(result) && shouldOfferUnlock(result) ? result.hiddenWordCount : 0;
   const wordCount = useMemo(() => countWords(text), [text]);
 
   // The AHA surface (docs/ACTIVATION.md §1): what changed, and what was
@@ -651,25 +668,73 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Pricing.
+          Both plans deliver the same rewriting. The only thing that differs
+          today is how many words a month it covers, so everything shared is
+          stated once, above the cards, and the allowance is the largest thing
+          on each card instead of the fourth bullet in two identical lists.
+
+          On urgency. docs/ACTIVATION.md rejects fake scarcity, countdowns and
+          fabricated allowances, and docs/SEO.md and docs/PRODUCT.md forbid
+          manufactured pressure. Nothing here is invented. Two real pressures
+          are read out of the running application instead: the visitor's own
+          unread words, which only appears when there actually are some, and
+          the preview lifetime, which comes from the constant the database
+          stamps on the capability token. If either stops being true it stops
+          being on screen. */}
       <section className="pricing" id="pricing">
         <div className="pricing-intro">
           <h2>Try the quality.<br />Pay for the full result.</h2>
-          <p>Every rewrite is checked before you see it. You only pay once you have read part of the result and judged it for yourself. Plans start at ${entryPlan.monthlyPrice} a month and you can cancel at any time.</p>
+          <p>
+            {unreadWords > 0
+              ? `${unreadWords} more words of your rewrite are already written and waiting. `
+              : "Read part of every rewrite before you decide, with the changes marked against your own draft. "}
+              A preview stays open for {PREVIEW_LINK_TTL_HOURS} hours, and a plan can be cancelled at any time.
+          </p>
+          <div className="pricing-shared">
+            <b>Both plans, in full:</b>
+            <ul>
+              {sharedFeatures.map((feature) => (
+                <li key={feature}><IconCheck /> {feature}</li>
+              ))}
+            </ul>
+            <em>The only difference is how much you write.</em>
+          </div>
         </div>
-        {/* Two plans, one difference: the monthly allowance. Both lists are
-            read from the catalog, and the roadmap line below each card is
-            marked as not included so a planned capability can never be read
-            as a bought one (docs/MONETIZATION.md dark-pattern list). */}
         <div className="pricing-plans">
           {purchasablePlans.map((plan) => (
             <article key={plan.id}>
-              <div><span>{plan.name}</span><p>{plan.summary}</p></div>
-              <strong><sup>$</sup>{plan.monthlyPrice}<small>/ month</small></strong>
-              <ul>{plan.features.map((feature) => <li key={feature}><IconCheck /> {feature}</li>)}</ul>
-              <p className="plan-roadmap">
-                <b>Not included.</b> Being built for a later release: {plan.plannedFeatures.join(", ")}.
+              <div className="plan-head">
+                <span>{plan.name}</span>
+                <strong><sup>$</sup>{plan.monthlyPrice}<small>/ month</small></strong>
+              </div>
+              {/* The one line that separates the two plans, at the size that
+                  says so. Read from the catalog, like every other number. */}
+              <p className="plan-allowance">
+                <b>{plan.wordLimit.toLocaleString("en-US")}</b>
+                <span>words a month</span>
               </p>
-              <a href="#top">Try it with your text</a>
+              <p className="plan-summary">{plan.summary}</p>
+              {/* Roadmap rows live in the card now, because a trailing
+                  sentence under a feature list is a sentence people skip. Each
+                  one carries its own status, on its own line, immediately
+                  before the name, and the status is real text so it reaches a
+                  screen reader as part of the list item rather than as a
+                  colour. No tick: a tick means you get this.
+
+                  "Planned" and not "Coming soon": docs/PRODUCT.md defers all
+                  of these past V1 with no agreed date, and a word that implies
+                  a date is a refund conversation with someone who paid for Pro
+                  partly because of it. */}
+              <ul className="plan-roadmap">
+                {plan.plannedFeatures.map((feature) => (
+                  <li key={feature}>
+                    <span className="plan-status">Planned</span>
+                    <span>{feature}</span>
+                  </li>
+                ))}
+              </ul>
+              <a href="#top">Start with {plan.wordLimit.toLocaleString("en-US")} words</a>
             </article>
           ))}
         </div>

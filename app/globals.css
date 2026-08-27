@@ -1023,55 +1023,115 @@ textarea:focus { background: color-mix(in srgb, var(--green-bright) 3%, transpar
 .pricing-intro h2 { color: var(--band-ink); }
 .pricing-intro p { margin: var(--s5) 0 0; max-width: 54ch; color: var(--band-ink-2); font-size: var(--t-base); line-height: 1.6; }
 
+/* What both plans include, said once. Three of the four bullets used to be
+   identical in both cards, so the two lists asked the reader to diff them and
+   the one line that actually differs was buried fourth. Stating the shared
+   part here leaves each card holding only its own answer. */
+.pricing-shared {
+  margin: var(--s5) 0 0;
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s5);
+  padding: var(--s4) var(--s5);
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: var(--radius-md);
+  font-size: var(--t-sm);
+}
+.pricing-shared b { color: var(--band-ink); font-weight: 650; }
+/* A real list, because that is what it is: the three things every plan
+   delivers, each with the marker that means the customer gets it. */
+.pricing-shared ul {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4);
+}
+.pricing-shared li { display: inline-flex; align-items: center; gap: 7px; color: var(--band-ink-2); }
+.pricing-shared svg { color: var(--band-accent); }
+/* The sentence that names the decision, in the accent, because it is the
+   only thing the two cards are for. */
+.pricing-shared em { font-style: normal; font-weight: 600; color: var(--band-accent); }
+
 /* Equal columns, equal height: a taller card reads as the better deal, and
    the difference between these two is the allowance, not the amount of card. */
 .pricing-plans {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--s5); min-width: 0; align-items: stretch;
 }
+/* Flex, not grid: the two cards are stretched to equal height and the CTA has
+   to sit on the same line in both. In a grid whose rows are all content sized
+   there is no free space for `align-self: end` to move into, so the plan with
+   fewer roadmap rows put its button 60px higher than the other one. */
 .pricing article {
   padding: var(--s6);
-  display: grid; grid-template-columns: 1fr auto; gap: var(--s4);
-  align-content: start;
+  display: flex; flex-direction: column; gap: var(--s4);
   border: 1px solid rgba(255, 255, 255, .22); border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, .055);
   transition: translate var(--dur-base) var(--ease-out), background var(--dur-base) var(--ease-out);
 }
 .pricing article:hover { translate: 0 -3px; background: rgba(255, 255, 255, .085); }
-.pricing article span { font-size: var(--t-md); font-weight: 650; letter-spacing: -.02em; }
-.pricing article p { margin: var(--s2) 0 0; max-width: 40ch; color: var(--band-ink-2); font-size: var(--t-sm); line-height: 1.55; }
-.pricing article > strong {
-  align-self: start; justify-self: end; white-space: nowrap;
-  font-family: var(--font-display); font-size: var(--t-2xl); font-weight: 400; letter-spacing: -.02em;
+.plan-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--s2) var(--s4); }
+.plan-head > span { font-size: var(--t-md); font-weight: 650; letter-spacing: -.02em; }
+.plan-head > strong {
+  white-space: nowrap;
+  font-family: var(--font-display); font-size: var(--t-xl); font-weight: 400; letter-spacing: -.02em;
 }
-.pricing article > strong sup { font-size: .48em; top: -.7em; margin-right: 1px; }
-.pricing article > strong small {
+.plan-head > strong sup { font-size: .48em; top: -.7em; margin-right: 1px; }
+.plan-head > strong small {
   font-family: var(--font-ui); font-size: var(--t-xs); font-weight: 500; color: var(--band-ink-2); margin-left: 4px;
 }
-.pricing ul {
-  grid-column: 1 / -1; margin: 0; padding: var(--s5) 0;
-  display: grid; grid-template-columns: 1fr; gap: var(--s3);
-  border-top: 1px solid rgba(255, 255, 255, .16); border-bottom: 1px solid rgba(255, 255, 255, .16);
-  list-style: none; color: var(--band-ink); font-size: var(--t-sm);
+
+/* The one number that separates the two plans, set at the size that says so.
+   It was the fourth line of a four-line list that was otherwise identical. */
+.plan-allowance { margin: 0; display: grid; gap: 2px; }
+.plan-allowance b {
+  font-family: var(--font-display); font-weight: 400;
+  font-size: var(--t-3xl); line-height: 1; letter-spacing: -.03em;
+  color: var(--band-ink);
+  font-variant-numeric: tabular-nums;
 }
-.pricing li { display: flex; align-items: center; gap: var(--s2); }
-.pricing li svg { color: var(--band-accent); }
-/* The roadmap line. Deliberately not a checkmark list item: an unbuilt
-   capability must not be able to read as a bought one (docs/MONETIZATION.md
-   forbids claiming unavailable Pro features are present), so it sits outside
-   the ruled feature list, carries no tick, and opens with the words that
-   settle it. */
-.pricing .plan-roadmap {
-  grid-column: 1 / -1; margin: 0; max-width: none;
-  color: var(--band-ink-2); font-size: var(--t-xs); line-height: 1.5;
+.plan-allowance span { color: var(--band-ink-2); font-size: var(--t-md); }
+.plan-summary { margin: 0; max-width: 40ch; color: var(--band-ink-2); font-size: var(--t-sm); line-height: 1.55; }
+
+/* Roadmap rows. They are inside the card now rather than in a trailing
+   sentence below it, because a paragraph after a feature list is a paragraph
+   people skip, and a per row status is much harder to miss. What makes that
+   safe rather than reckless (docs/MONETIZATION.md: an unavailable feature may
+   never read as present):
+
+     - no tick anywhere in this list; a tick means you get this,
+     - the status is real text inside the list item, so a screen reader reads
+       "Planned, Voice DNA" and not just the name,
+     - it leads the row rather than trailing it, so it is read first in both
+       channels,
+     - and it is set quieter and smaller than a delivered feature, in the
+       secondary band ink at 8.3:1, so a two second scan cannot mistake one
+       for the other.
+
+   tests/landing-activation.test.mts fails if a roadmap row ever renders with
+   the included marker or without its status. */
+.plan-roadmap {
+  margin: 0; padding: var(--s4) 0 0;
+  display: grid; gap: var(--s2);
+  border-top: 1px solid rgba(255, 255, 255, .16);
+  list-style: none;
 }
-.pricing .plan-roadmap b { color: var(--band-ink); font-weight: 650; }
+.plan-roadmap li {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2) var(--s3);
+  color: var(--band-ink-2); font-size: var(--t-sm);
+}
+.plan-status {
+  flex: none;
+  padding: 2px 8px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--band-ink-2) 42%, transparent);
+  color: var(--band-ink-2);
+  font-family: var(--font-mono); font-size: var(--t-2xs); font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase;
+}
+
 .pricing article > a {
-  grid-column: 1 / -1; align-self: end; margin-top: var(--s2);
+  margin-top: auto;
   padding: 15px; border-radius: var(--radius-sm);
   background: var(--band-cta); color: var(--band);
   font-size: var(--t-base); font-weight: 650; letter-spacing: -.015em;
-  text-align: center; text-decoration: none;
+  text-align: center; text-decoration: none; text-wrap: balance;
+  font-variant-numeric: tabular-nums;
   transition: translate var(--dur-fast) var(--ease-spring), background var(--dur-fast) var(--ease-out);
 }
 .pricing article > a:hover { translate: 0 -2px; background: #eaf5ec; }
@@ -1273,9 +1333,9 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   .how-grid article:hover { translate: 0; }
   .pricing { padding: var(--s8) var(--gutter); gap: var(--s6); }
   .pricing-plans { grid-template-columns: minmax(0, 1fr); }
-  .pricing article { padding: var(--s5); grid-template-columns: 1fr; gap: var(--s4); }
-  .pricing article > strong { justify-self: start; }
-  .pricing ul { grid-template-columns: 1fr; }
+  .pricing article { padding: var(--s5); gap: var(--s4); }
+  .pricing-shared { padding: var(--s4); gap: var(--s3); }
+  .pricing-shared ul { flex-direction: column; gap: var(--s2); }
   footer { display: grid; gap: var(--s3); }
   footer nav { flex-wrap: wrap; }
 }

@@ -141,6 +141,25 @@ applied where it had not been.
   system serif stack and needs no webfont, so it is the one face that carries
   across unchanged.
 
+### Pricing band
+
+Reworked 2026-08-27, in the same pass. The band is still the inverse band and
+still uses only `--band-*` ink.
+
+- The three features both plans deliver are stated once, above the cards. They
+  used to be three of four bullets in each card, identical, which asked the
+  reader to diff two lists to find the one line that differs.
+- That line, the monthly allowance, is now the largest thing on each card,
+  set in `--font-display` at `--t-3xl` with `tabular-nums`. It was the fourth
+  bullet.
+- Roadmap rows sit in the card with a `Planned` status pill leading each row.
+  See docs/MONETIZATION.md for what makes that safe and what is tested.
+- Urgency is only ever a fact read out of the running application: the
+  visitor's own unread word count, which is absent when there is no result,
+  and `PREVIEW_LINK_TTL_MS` from `src/config/retention.ts`, which is the same
+  constant `db/repository.ts` stamps on the capability token. Nothing is
+  invented, and a second copy of either number fails the build.
+
 ### Planned signed-in surfaces
 
 `docs/SIGNED-IN.md` is the DES plan for the signed-in header, the `/account`

@@ -18,6 +18,7 @@ import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "./schema";
 import type { JobState, WritingModeValue } from "./schema";
+import { PREVIEW_LINK_TTL_MS } from "../src/config/retention";
 
 const { anonymousSessions, humanizationJobs, jobAttempts, jobPayloads, protectedItems } = schema;
 
@@ -28,7 +29,11 @@ const { anonymousSessions, humanizationJobs, jobAttempts, jobPayloads, protected
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AppDatabase = BaseSQLiteDatabase<"async", any, typeof schema>;
 
-const DEFAULT_CAPABILITY_TTL_MS = 24 * 60 * 60 * 1000; // 24h, per D-P01's proposed default (pending ratification).
+// 24h, per D-P01's proposed default (pending ratification). The value lives
+// in src/config/retention.ts because /privacy and the pricing band both state
+// it to customers, and a stated deadline that does not match the enforced one
+// is manufactured urgency rather than a fact.
+const DEFAULT_CAPABILITY_TTL_MS = PREVIEW_LINK_TTL_MS;
 const CAPABILITY_TOKEN_BYTES = 32; // 256 bits of entropy.
 
 /** Fields already derived and approved for display before payment. Never includes full result text. */
