@@ -32,7 +32,27 @@
 import { useEffect, useState } from "react";
 
 /** Unknown until /api/auth/session answers; the cookie is HttpOnly, so the page has to ask. */
-type SessionState = { kind: "unknown" } | { kind: "signed-out" } | { kind: "signed-in"; email: string };
+export type SessionState = { kind: "unknown" } | { kind: "signed-out" } | { kind: "signed-in"; email: string };
+
+/**
+ * One read of "who is signed in", shared by the hook below and by the
+ * paywall's sign-in dialog, which polls it while it waits for a link to be
+ * opened in another tab. A second copy of this fetch is how two answers to
+ * the same question start disagreeing.
+ *
+ * A failed lookup answers `unknown` rather than `signed-out`: telling a
+ * signed-in customer they are signed out is the one wrong answer here.
+ */
+export async function readSessionState(): Promise<SessionState> {
+  try {
+    const response = await fetch("/api/auth/session", { cache: "no-store" });
+    if (!response.ok) return { kind: "unknown" };
+    const body = (await response.json().catch(() => ({}))) as { signedIn?: boolean; email?: string };
+    return body.signedIn && body.email ? { kind: "signed-in", email: body.email } : { kind: "signed-out" };
+  } catch {
+    return { kind: "unknown" };
+  }
+}
 
 /**
  * Reads the caller's own session state.
@@ -50,18 +70,11 @@ export function useSessionState(): SessionState {
 
   useEffect(() => {
     let cancelled = false;
-    async function read() {
-      try {
-        const response = await fetch("/api/auth/session", { cache: "no-store" });
-        const body = (await response.json().catch(() => ({}))) as { signedIn?: boolean; email?: string };
-        if (cancelled) return;
-        // A failed lookup leaves the state unknown rather than claiming
-        // signed-out, which would tell a signed-in customer nothing is wrong.
-        if (!response.ok) return;
-        setSession(body.signedIn && body.email ? { kind: "signed-in", email: body.email } : { kind: "signed-out" });
-      } catch { /* leave the state unknown */ }
-    }
-    void read();
+    void readSessionState().then((next) => {
+      // A failed lookup leaves the state unknown rather than claiming
+      // signed-out, which would tell a signed-in customer nothing is wrong.
+      if (!cancelled && next.kind !== "unknown") setSession(next);
+    });
     return () => { cancelled = true; };
   }, []);
 

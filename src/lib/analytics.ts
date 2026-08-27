@@ -5,6 +5,11 @@ export const ANALYTICS_EVENTS = [
   "humanization_completed",
   "preview_viewed",
   "checkout_started",
+  // The paywall stopped a signed-out visitor and asked for an address.
+  // Without it `checkout_started` is followed by nothing and the funnel shows
+  // a drop-off that is really a sign-in step. Carries the plan id only; the
+  // address is never an event property.
+  "signin_prompted",
   "checkout_completed",
   "full_result_unlocked",
   "result_copied",

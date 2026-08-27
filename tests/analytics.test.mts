@@ -10,6 +10,7 @@ test("defines the complete privacy-safe V1 funnel vocabulary", () => {
     "humanization_completed",
     "preview_viewed",
     "checkout_started",
+    "signin_prompted",
     "checkout_completed",
     "full_result_unlocked",
     "result_copied",
