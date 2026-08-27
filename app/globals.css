@@ -1833,3 +1833,95 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .auth-quiet:hover { border-color: var(--line-strong); color: var(--ink); }
+
+/* ------------------------------------------------------------
+   THE PAYWALL'S SIGN-IN DIALOG
+   src/components/signin-modal.tsx
+
+   A native <dialog>, so the top-layer stacking, the focus trap, the inert
+   background and the Escape key are the browser's and not a hand-rolled
+   approximation of them. That decision is what this block has to respect:
+   `dialog` arrives with a user-agent border, a `max-width`, `margin: auto`
+   and `display: block` that must be overridden deliberately rather than
+   fought with `!important`.
+
+   Everything inside is the sign-in page's own vocabulary — `.auth-form`,
+   `.signin-input`, `.auth-submit`, `.auth-status`, `.auth-legal` all style
+   themselves here, because the markup is the same component. This block only
+   has to build the card around them, which is `.auth-card` with a heading
+   row and a way out.
+   ------------------------------------------------------------ */
+
+.auth-dialog {
+  width: min(430px, calc(100vw - var(--s5) * 2));
+  max-width: none;
+  max-height: calc(100dvh - var(--s5) * 2);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--e2);
+  overflow: auto;
+  /* Overscroll on a dialog that scrolls internally otherwise chains to the
+     page underneath, which then moves while the customer is reading — the
+     one thing this dialog exists to prevent. */
+  overscroll-behavior: contain;
+}
+.auth-dialog::backdrop {
+  /* The rewrite behind this is the reason the customer is here, so the
+     backdrop dims rather than hides: it stays legible enough to be reassuring
+     and dark enough that focus is not ambiguous. */
+  background: rgba(18, 33, 26, .45);
+  backdrop-filter: blur(2px);
+}
+@media (prefers-color-scheme: dark) {
+  .auth-dialog::backdrop { background: rgba(0, 0, 0, .62); }
+}
+
+.auth-dialog-body { display: grid; gap: var(--s5); padding: var(--s6); }
+@media (max-width: 560px) {
+  .auth-dialog-body { padding: var(--s5); }
+}
+
+/* The heading and the way out on one row, the close control aligned to the
+   heading's cap-height rather than to the paragraph below it. */
+.auth-dialog-head { display: flex; align-items: flex-start; gap: var(--s4); }
+.auth-dialog-head .auth-intro { flex: 1; min-width: 0; }
+.auth-dialog-head form { margin: 0; }
+.auth-dialog-head h2 {
+  margin: 0 0 var(--s2);
+  font-size: var(--t-xl);
+  font-weight: 660;
+  letter-spacing: -.025em;
+  line-height: 1.15;
+}
+.auth-dialog-head p { margin: 0; color: var(--ink-2); font-size: var(--t-sm); line-height: 1.55; }
+
+.auth-dialog-close {
+  display: grid; place-items: center;
+  /* 36px, which is the smallest this may be: a close control is the only
+     escape for a pointer user who does not know Escape closes a dialog. */
+  width: 36px; height: 36px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.auth-dialog-close:hover { color: var(--ink); border-color: var(--line-strong); }
+
+/* Said only once a link is on its way. It is the promise that leaving for a
+   mail app costs the customer nothing, so it is given the affirmative ground
+   the status region uses rather than being set as a quiet footnote. */
+.auth-dialog-wait {
+  margin: 0;
+  padding: var(--s3) var(--s4);
+  border-radius: var(--radius-sm);
+  background: var(--mint);
+  color: var(--ink);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+}

@@ -27,13 +27,12 @@
 //     DOM from first paint, because a region inserted together with its
 //     message is not announced — but they are empty, and an empty region
 //     paints nothing.
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { productConfig } from "@/src/config/product";
 import { safeRelativeReturnPath } from "@/src/lib/identity";
 import { useSessionState } from "@/src/components/account-indicator";
-
-type Status = "idle" | "working" | "sent" | "error";
+import { SignInForm } from "@/src/components/signin-form";
 
 // The query string is read through useSyncExternalStore rather than an effect,
 // the same way app/checkout/success/page.tsx reads its job id: the server
@@ -63,77 +62,24 @@ const readLinkError = () => readQuery("error");
 const safeReturnTo = (value: string | null): string => safeRelativeReturnPath(value ?? "/");
 
 export default function SignInPage() {
-  const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<Status>("idle");
-  const [message, setMessage] = useState("");
   const returnTo = safeReturnTo(useSyncExternalStore(subscribeToLocation, readReturnTo, noServerValue));
   const linkError = useSyncExternalStore(subscribeToLocation, readLinkError, noServerValue);
-  const linkErrored = linkError === "link";
-  const serviceUnavailable = linkError === "unavailable";
-  const [dismissedLinkError, setDismissedLinkError] = useState(false);
-  const linkFailed = linkErrored && !dismissedLinkError;
-  const serviceFailed = serviceUnavailable && !dismissedLinkError;
   // One implementation of "who is signed in", shared with the header
   // indicator every other surface now carries. Two copies of this fetch is
   // how the two states drift.
   const session = useSessionState();
-  // Re-entrancy guard. The submit control stays focusable and uses
-  // aria-disabled, so this ref is the only thing stopping a second submit; a
-  // button that disables itself on click strands keyboard users mid-flow.
-  const busy = useRef(false);
 
   useEffect(() => { document.documentElement.classList.add("motion-ready"); }, []);
 
-  async function requestLink(event: React.FormEvent) {
-    event.preventDefault();
-    if (busy.current) return;
-    const address = email.trim();
-    if (!address) {
-      setStatus("error");
-      setMessage("Enter the email address you want to sign in with.");
-      return;
-    }
-
-    busy.current = true;
-    setStatus("working");
-    setDismissedLinkError(true);
-    try {
-      const response = await fetch("/api/auth/request-link", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: address, returnTo }),
-      });
-      const body = (await response.json().catch(() => ({}))) as { message?: string; error?: string };
-      if (response.ok) {
-        setStatus("sent");
-        setMessage(body.message ?? "Check your inbox for the sign-in link.");
-      } else {
-        setStatus("error");
-        setMessage(body.error ?? "The sign-in link could not be sent. Please try again.");
-      }
-    } catch {
-      setStatus("error");
-      setMessage("The connection was interrupted. Please check your connection and try again.");
-    } finally {
-      busy.current = false;
-    }
-  }
-
-  // One string per outcome, read by one region. The error region is separate
-  // and assertive because a failure has to interrupt; both exist from first
-  // paint and are empty until there is something true to say.
-  const liveStatus = status === "working"
-    ? "Sending your sign-in link."
-    : status === "sent"
-      ? message
+  // What the failed link left in the query string. The form owns everything
+  // that happens after a submit, including dismissing this the moment a new
+  // link is on its way — a "that link expired" notice is stale as soon as a
+  // replacement is in flight.
+  const failedLinkMessage = linkError === "link"
+    ? "That sign-in link has expired or has already been used. Each link works once and lasts 15 minutes. Ask for a new one above."
+    : linkError === "unavailable"
+      ? "We could not complete your sign-in just now. This is a problem on our side and your link may still be good. Try opening it again in a moment, or ask for a new link above."
       : "";
-  const liveError = status === "error"
-    ? message
-    : linkFailed
-      ? "That sign-in link has expired or has already been used. Each link works once and lasts 15 minutes. Ask for a new one above."
-      : serviceFailed
-        ? "We could not complete your sign-in just now. This is a problem on our side and your link may still be good. Try opening it again in a moment, or ask for a new link above."
-        : "";
 
   return (
     <main>
@@ -182,50 +128,13 @@ export default function SignInPage() {
               </div>
             ) : null}
 
-            <form className="auth-form" onSubmit={requestLink} aria-labelledby="signin-title">
-              {session.kind === "signed-in" ? (
-                <p className="auth-switch">Or send a link to a different address.</p>
-              ) : null}
-
-              <div className="auth-field">
-                <label htmlFor="signin-email">Email address</label>
-                <input
-                  className="signin-input"
-                  id="signin-email"
-                  name="email"
-                  type="email"
-                  inputMode="email"
-                  autoComplete="email"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                />
-              </div>
-
-              <button className="auth-submit" type="submit" aria-disabled={status === "working"}>
-                {status === "working" ? (
-                  <>
-                    <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span>
-                    Sending
-                  </>
-                ) : (
-                  "Email me a link"
-                )}
-              </button>
-
-              {/* Both regions are present before there is anything to announce.
-                  They paint nothing while empty. */}
-              <p className="auth-status" role="status" aria-live="polite">{liveStatus}</p>
-              <p className="auth-alert" role="alert">{liveError}</p>
-
-              <p className="auth-note">
-                {status === "sent"
-                  ? "Nothing arrived? Check the spam folder, then request another link."
-                  : "We only use your address to sign you in and to send receipts."}
-              </p>
-            </form>
+            <SignInForm
+              returnTo={returnTo}
+              labelledBy="signin-title"
+              fieldId="signin-email"
+              externalError={failedLinkMessage}
+              showSwitchNote={session.kind === "signed-in"}
+            />
           </div>
 
           <p className="auth-legal">
