@@ -127,8 +127,11 @@ test("the per-word ceiling is derived from the plan catalogue, not hardcoded", (
   const ceiling = costCeilingFromPlans(Object.values(pricingConfig.plans), 0.5);
 
   // Pro earns $19 for 200,000 words = $0.000095/word; Starter earns
-  // $9.99 for 50,000 = $0.0001998/word. Pro is the worse of the two.
-  assert.equal(Number(ceiling.toFixed(9)), 0.0000475);
+  // Starter earns $9.99/50,000 = $0.0001998/word; Pro earns
+  // $39.99/200,000 = $0.00019995. Pro was the weaker plan by a factor of two
+  // until its price was raised to match Starter's per-word rate, so the two
+  // now sit within a rounding error and Starter is marginally the worse.
+  assert.equal(Number(ceiling.toFixed(9)), 0.0000999);
 
   const shifted = costCeilingFromPlans([{ monthlyPrice: 20, wordLimit: 50_000 }], 0.5);
   assert.equal(Number(shifted.toFixed(9)), 0.0002, "a price change must move the alarm with it");

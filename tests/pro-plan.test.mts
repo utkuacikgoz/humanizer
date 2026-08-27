@@ -80,8 +80,8 @@ test("Pro differs from Starter only by its allowance", () => {
 // -------------------------------------------------------- price integrity
 
 test("a Pro Stripe price is validated against the catalog like every other plan", () => {
-  assert.equal(expectedMinorUnits("pro"), 1900);
-  const valid = { unit_amount: 1900, currency: "usd", active: true, recurring: { interval: "month" as const } };
+  assert.equal(expectedMinorUnits("pro"), 3999);
+  const valid = { unit_amount: 3999, currency: "usd", active: true, recurring: { interval: "month" as const } };
   assert.doesNotThrow(() => assertPriceMatchesCatalog("pro", valid));
 
   // A misconfigured Pro price must close checkout, never sell at the wrong

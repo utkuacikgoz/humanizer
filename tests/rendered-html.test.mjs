@@ -105,6 +105,43 @@ test("publishes one coherent Ownword identity on the canonical host", async () =
   assert.match(sitemap, /<loc>https:\/\/ownword\.pro\/terms<\/loc>/);
 });
 
+// SEO-001. The brand mark exists and ships in two places at once: `public/icon.svg`
+// is declared as the favicon, the shortcut icon and the apple-touch icon in
+// app/layout.tsx, and app/landing-page.tsx redraws the same geometry inline in
+// the header so it can take its colours from the theme's custom properties.
+//
+// Two copies of one mark is a defensible arrangement - an inline SVG themes,
+// an external favicon does not - but it is only defensible while they are the
+// same mark. Nothing else in the build compares them, so a redesign that
+// touches one file and not the other would ship a header that does not match
+// the browser tab, and nobody would find out from a green build.
+test("the favicon and the header mark are the same mark", async () => {
+  const [html, icon] = await Promise.all([
+    render("/", "ownword.pro").then((response) => response.text()),
+    readFile(new URL("../public/icon.svg", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(html, /<link[^>]*rel="icon"[^>]*href="\/icon\.svg"/, "the favicon is not the shipped mark");
+  assert.match(html, /<link[^>]*rel="apple-touch-icon"[^>]*href="\/icon\.svg"/, "the touch icon is not the shipped mark");
+
+  // Geometry only: the file is coloured with literal hex so it renders
+  // standalone in a browser tab, and the inline copy is coloured with the
+  // theme's custom properties. Colour is allowed to differ; shape is not.
+  const geometry = (svg) => [
+    ...[...svg.matchAll(/\b(viewBox|d|rx|ry|x|y|cx|cy|r|width|height|stroke-width|stroke-dasharray|transform)="([^"]+)"/g)]
+      .map(([, name, value]) => `${name}=${value.replace(/\s+/g, " ").trim()}`),
+  ];
+
+  const header = html.match(/<svg class="brand-icon"[\s\S]*?<\/svg>/);
+  assert.ok(header, "the header no longer draws a brand mark");
+
+  assert.deepEqual(
+    geometry(header[0]),
+    geometry(icon),
+    "app/landing-page.tsx and public/icon.svg draw different shapes: the browser tab and the header would show two different marks",
+  );
+});
+
 test("keeps brand and pricing copy centralized", async () => {
   // SEO handoff H-1 split the homepage route into a server shell
   // (app/page.tsx) and the landing surface (app/landing-page.tsx). The copy
