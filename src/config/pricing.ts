@@ -31,7 +31,7 @@ export const pricingConfig = {
       interval: "month",
       availability: "active",
       wordLimit: 200_000,
-      summary: "The same rewriting and the same checks, with room for a heavy month of drafts.",
+      summary: "For the months when the drafts keep coming.",
       // Pro differs from Starter in exactly one way today: the monthly
       // allowance. It is deliberately described that way rather than with
       // the Voice DNA / batch bullets it used to carry, none of which exist

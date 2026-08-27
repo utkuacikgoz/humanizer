@@ -24,7 +24,16 @@ blocker "claiming unavailable Pro features are present", so the plan is now sold
 on the one thing that is real: four times the monthly words at roughly twice the
 price, for a writer whose volume needs it.
 
-Voice DNA, multiple voice profiles, larger documents, batch processing, and advanced controls remain future Pro capabilities, not V1 deliverables. They live in the catalog's `plannedFeatures`, which the pricing card renders as a separate roadmap line opening with `Not included.` — outside the ruled feature list and with no checkmark, so a planned capability cannot be misread as a bought one. Nothing in `features` may carry a `coming later` qualifier; a capability moves into `features` only once it ships. `tests/pro-plan.test.mts` asserts both rules.
+Voice DNA, multiple voice profiles, larger documents, batch processing, and advanced controls remain future Pro capabilities, not V1 deliverables. They live in the catalog's `plannedFeatures`.
+
+Since 2026-08-27 the pricing card renders them as rows inside the card rather than as a trailing `Not included.` sentence, because a paragraph under a feature list is a paragraph people skip. Each row carries its own status, which is what keeps the move safe:
+
+- The status is the first thing in the row, as real text (`Planned`), so a screen reader reads "Planned, Voice DNA" rather than the bare name. It is never carried by colour or shape alone.
+- No checkmark appears on a roadmap row. The marker means "you get this", and the delivered features are stated once, with the marker, above both cards.
+- The status word must not imply a date. All of these are deferred past V1 with no agreed schedule, so `Coming soon` is forbidden: someone who paid for Pro partly because a capability read as weeks away is a refund conversation.
+- The roadmap rows are set smaller and in the secondary band ink, so a two second scan cannot mistake one for a delivered feature.
+
+Nothing in `features` may carry a `coming later` qualifier; a capability moves into `features` only once it ships. `tests/pro-plan.test.mts` asserts the catalog rules, and `tests/rendered-html.test.mjs` asserts the rendered ones against the real HTML: a roadmap row that gains the included marker, loses its status, or gains a date-implying word fails the build.
 
 ### Owner action required before Pro can be sold
 

@@ -1,6 +1,6 @@
 # Ownword Brand Authority
 
-Last updated: 2026-08-24
+Last updated: 2026-08-27
 
 ## Confirmed identity
 
@@ -109,6 +109,56 @@ These are load-bearing. Do not "simplify" them away:
 `tests/e2e/accessibility.e2e.test.mts` covers these. Playwright and Chromium are
 installed in the project, and the release gate requires zero skipped browser
 tests; a run reporting any skip is not accepted as green.
+
+### Private surfaces
+
+`/signin`, `/history`, `/checkout/success` and the cross-device confirmation
+page (`src/lib/magic-link.ts`) were reworked on 2026-08-27. No new token, type
+family or spacing step was introduced; everything below is the existing system
+applied where it had not been.
+
+- **No step number outside the rewrite sequence.** `.step-number` encodes
+  position (01 paste, 02 read, 03 pay). All three surfaces carried one anyway
+  — 00, 03, 04 — which is the same mistake `.why` already refuses to make.
+  `tests/private-surface-quality.test.mjs` now fails if one returns.
+- **The primary control on a private surface takes the `--band-*` set**:
+  `--band` ground with `--band-ink` on paper, `--band-cta` with `--band` on
+  the dark theme. The action is always the inverse of the ground it sits on,
+  which is one decision rather than two, and it keeps a saturated mint slab
+  off the muted deep-green ground. The ledge stays unique to
+  `.humanize-button`, as that rule already claimed.
+- **`--font-read` is for prose the customer wrote or that we rewrote.** The
+  email field was set in it, at display size, while its own label was mono.
+  Credentials and controls belong to `--font-ui`.
+- **Rules separate things that differ in kind.** `/signin` has one, between an
+  existing session and a fresh sign-in. It had four.
+- **`.surface-note` / `.surface-gate` / `.surface-alert`** are the shared
+  state vocabulary for `/history` and `/checkout/success`. A routine gate
+  ("sign in to see this") is not painted in the colour of a failure.
+- The confirmation page cannot link `app/globals.css` — no external asset, and
+  it answers at the URL the mail client opened — so it mirrors the tokens it
+  needs as custom properties, named as they are here. `--font-display` is a
+  system serif stack and needs no webfont, so it is the one face that carries
+  across unchanged.
+
+### Pricing band
+
+Reworked 2026-08-27, in the same pass. The band is still the inverse band and
+still uses only `--band-*` ink.
+
+- The three features both plans deliver are stated once, above the cards. They
+  used to be three of four bullets in each card, identical, which asked the
+  reader to diff two lists to find the one line that differs.
+- That line, the monthly allowance, is now the largest thing on each card,
+  set in `--font-display` at `--t-3xl` with `tabular-nums`. It was the fourth
+  bullet.
+- Roadmap rows sit in the card with a `Planned` status pill leading each row.
+  See docs/MONETIZATION.md for what makes that safe and what is tested.
+- Urgency is only ever a fact read out of the running application: the
+  visitor's own unread word count, which is absent when there is no result,
+  and `PREVIEW_LINK_TTL_MS` from `src/config/retention.ts`, which is the same
+  constant `db/repository.ts` stamps on the capability token. Nothing is
+  invented, and a second copy of either number fails the build.
 
 ### Planned signed-in surfaces
 

@@ -69,12 +69,17 @@ test("a signed-out visitor cannot reach /history and is told to sign in", { skip
   ]);
   assert.equal(listResponse.status(), 401, `an anonymous /api/history request answered ${listResponse.status()}`);
 
-  const alert = page.locator("[role=alert]").first();
-  await alert.waitFor({ timeout: 30_000 });
-  const text = (await alert.innerText()).replace(/\s+/g, " ").trim();
+  // A live region, and specifically a polite one since the redesign: being
+  // signed out on /history is the ordinary state of a visitor who has not
+  // signed in, not a failure, so it is announced rather than interrupted with.
+  // What matters here is unchanged: the page says so, in a region a screen
+  // reader is watching, with a way in.
+  const gate = page.locator("[role=status], [role=alert]").filter({ hasText: /sign in/i }).first();
+  await gate.waitFor({ timeout: 30_000 });
+  const text = (await gate.innerText()).replace(/\s+/g, " ").trim();
   assert.match(text, /sign in/i, `the signed-out history page did not tell the visitor to sign in: ${JSON.stringify(text)}`);
 
-  const signInLink = alert.getByRole("link", { name: /sign in/i }).first();
+  const signInLink = gate.getByRole("link", { name: /sign in/i }).first();
   assert.ok(await signInLink.isVisible(), "the signed-out history page offers no way to get to sign-in");
   assert.equal(
     new URL(await signInLink.getAttribute("href") ?? "", BASE_URL).pathname,

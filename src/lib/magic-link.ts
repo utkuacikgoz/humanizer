@@ -734,30 +734,63 @@ const CONFIRM_HEADERS = {
   "x-robots-tag": "noindex, nofollow",
 } as const;
 
+// The palette is the product's, not a generic neutral one. This page cannot
+// link app/globals.css — it must carry no external asset, and it answers at
+// the URL the mail client opened rather than after a redirect — so the tokens
+// it needs are mirrored here as custom properties, named exactly as they are
+// in globals.css so the mirror is checkable by eye. Values copied on
+// 2026-08-27 from the `:root` and `prefers-color-scheme: dark` blocks.
+//
+// The display face is `--font-display`, which is a system serif stack and so
+// needs no webfont. The UI face is the fallback stack `--font-ui` declares
+// after Geist, which is the closest this page can honestly get.
 const CONFIRM_STYLE = [
-  ":root{color-scheme:light dark}",
+  ":root{color-scheme:light dark;",
+  "--paper:#f4f1e8;--paper-sunken:#e9e5d8;--surface:#fffdf8;",
+  "--ink:#12211a;--ink-2:#4b5850;--ink-3:#5c6860;",
+  "--green:#1f5a3d;--green-bright:#2f7a53;",
+  "--band:#0f2f21;--band-ink:#f6f2e8;",
+  "--line:#d9d5c6;--line-soft:#e6e2d5;",
+  "--font-ui:'Helvetica Neue',Arial,sans-serif;",
+  "--font-display:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,'Times New Roman',serif}",
+  "@media (prefers-color-scheme:dark){:root{",
+  "--paper:#0e1714;--paper-sunken:#0a110f;--surface:#141f1a;",
+  "--ink:#ece7da;--ink-2:#a9b4a8;--ink-3:#8b968b;",
+  "--green:#79dba6;--green-bright:#5fd39a;",
+  "--band:#d3e8d8;--band-ink:#0f2f21;",
+  "--line:#2a3831;--line-soft:#1e2a25}}",
   "*{box-sizing:border-box}",
   "body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;",
-  "font:16px/1.55 ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;",
-  "background:#faf9f6;color:#14171a}",
-  "main{width:100%;max-width:34rem;background:#fff;border:1px solid #e4e2dc;border-radius:16px;padding:32px 28px}",
-  "h1{margin:0 0 4px;font-size:1.35rem;letter-spacing:-.02em}",
-  ".brand{margin:0 0 20px;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;color:#6b7076}",
-  "p{margin:0 0 16px;color:#41474d}",
-  ".address{display:block;margin:0 0 16px;padding:12px 14px;border:1px solid #e4e2dc;border-radius:10px;",
-  "background:#faf9f6;font-weight:600;color:#14171a;overflow-wrap:anywhere}",
-  "button{appearance:none;border:1px solid #14171a;background:#14171a;color:#fff;border-radius:999px;",
-  "padding:12px 22px;font:inherit;font-weight:550;cursor:pointer}",
-  "button:hover{background:#000}",
-  "a{color:#41474d}",
-  ".note{margin:20px 0 0;font-size:.85rem;color:#6b7076}",
-  "@media (prefers-color-scheme:dark){",
-  "body{background:#111315;color:#f2f1ee}",
-  "main{background:#191c1e;border-color:#2c3033}",
-  "p{color:#c3c7cb}.address{background:#111315;border-color:#2c3033;color:#f2f1ee}",
-  ".brand,.note{color:#8d9298}",
-  "button{background:#f2f1ee;border-color:#f2f1ee;color:#14171a}button:hover{background:#fff}",
-  "a{color:#c3c7cb}}",
+  "font-family:var(--font-ui);font-size:15px;line-height:1.55;",
+  "background:var(--paper);color:var(--ink)}",
+  "main{width:100%;max-width:30rem;display:grid;gap:20px;",
+  "background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:32px 28px;",
+  "box-shadow:0 1px 2px rgba(18,33,26,.05),0 18px 44px -26px rgba(18,33,26,.38)}",
+  ".brand{margin:0;font-size:14px;font-weight:640;letter-spacing:-.035em;color:var(--ink)}",
+  "h1{margin:0 0 8px;font-size:26px;line-height:1.05;letter-spacing:-.04em;font-weight:600}",
+  ".lead{margin:0;color:var(--ink-2)}",
+  "p{margin:0;color:var(--ink-2)}",
+  // The address is the security control on this page, so it is set apart and
+  // in the display face at reading size: it has to be read, not skimmed.
+  ".address{display:block;margin:0;padding:14px 16px;border:1px solid var(--line);border-radius:9px;",
+  "background:var(--paper-sunken);color:var(--ink);font-family:var(--font-display);font-size:19px;",
+  "font-weight:600;letter-spacing:-.01em;overflow-wrap:anywhere}",
+  "form{margin:0}",
+  // Same rule as the app's own primary control: deep on paper, pale on the
+  // dark theme's ground, always the inverse of what is behind it.
+  "button{appearance:none;width:100%;border:1px solid transparent;border-radius:9px;",
+  "background:var(--band);color:var(--band-ink);padding:13px 18px;font:inherit;font-size:15px;",
+  "font-weight:650;letter-spacing:-.015em;cursor:pointer}",
+  "button:hover{background:var(--green)}",
+  "@media (prefers-color-scheme:dark){button:hover{background:var(--band-ink);color:var(--band)}}",
+  "a{color:var(--ink-2);text-decoration:underline;text-underline-offset:2px}",
+  "a:hover{color:var(--ink)}",
+  // Every control keeps a visible keyboard indicator. Nothing here suppresses
+  // the outline, and it is stated so a future edit cannot quietly drop it.
+  ":focus-visible{outline:2px solid var(--green-bright);outline-offset:3px;border-radius:4px}",
+  ".note{margin:0;padding-top:20px;border-top:1px solid var(--line-soft);",
+  "font-size:13px;color:var(--ink-3)}",
+  "@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}",
 ].join("");
 
 function confirmPageShell(title: string, body: string, status: number): Response {
@@ -788,8 +821,8 @@ function confirmPageShell(title: string, body: string, status: number): Response
  */
 function confirmationPage(email: string, token: string, safeReturnTo: string): Response {
   const body = [
-    "<h1>Confirm this sign-in</h1>",
-    "<p>This link will sign this browser in as:</p>",
+    "<div><h1>Confirm this sign-in</h1>",
+    "<p class=\"lead\">This link will sign this browser in as:</p></div>",
     `<span class="address">${escapeHtml(email)}</span>`,
     "<p>If that is not your address, close this page. Someone else&#39;s sign-in link ",
     "will sign you into <em>their</em> account, and anything you write here would be saved to it.</p>",
@@ -814,10 +847,10 @@ function confirmationPage(email: string, token: string, safeReturnTo: string): R
  */
 function refusedConfirmation(): Response {
   const body = [
-    "<h1>This sign-in was not completed</h1>",
-    "<p>This request did not come from ",
+    "<div><h1>This sign-in was not completed</h1>",
+    "<p class=\"lead\">This request did not come from ",
     escapeHtml(productConfig.productName),
-    ", so nobody was signed in and nothing was changed.</p>",
+    ", so nobody was signed in and nothing was changed.</p></div>",
     `<p><a href="${escapeHtml(SIGN_IN_PATH)}">Go to sign in</a> and request a link yourself.</p>`,
   ].join("");
   return confirmPageShell("Sign-in not completed", body, 403);

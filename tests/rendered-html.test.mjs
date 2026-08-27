@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { pricingConfig } from "../src/config/pricing.ts";
+import { PREVIEW_LINK_TTL_HOURS } from "../src/config/retention.ts";
 
 async function render(path = "/", host = "localhost") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -132,6 +134,111 @@ test("keeps brand and pricing copy centralized", async () => {
   // Anchored: a bare /monthlyPrice:\s*9/ also matches 9.99, so it would
   // silently keep passing across a price change (MON finding).
   assert.match(pricingConfig, /monthlyPrice:\s*9\.99,/);
+});
+
+// ---------------------------------------------------------------------
+// The pricing band's roadmap rows
+// ---------------------------------------------------------------------
+//
+// Unbuilt capabilities used to sit outside the ruled feature list, in a
+// trailing "Not included." sentence. That made a planned capability reading as
+// a bought one structurally impossible, and it also made it a paragraph most
+// people's eyes slide past. The rows are inside the card now with a per row
+// status, which is harder to miss and easier to get wrong, so the property
+// docs/MONETIZATION.md actually cares about is asserted here instead of being
+// guaranteed by the layout.
+
+/** Every `<li>` in the document, markup intact. */
+const listItems = (html) => [...html.matchAll(/<li\b[^>]*>[\s\S]*?<\/li>/g)].map((match) => match[0]);
+// React's SSR splits an interpolated value out of its sentence with comment
+// markers, so a copy assertion has to read the text a person sees, not the
+// markup.
+const visible = (markup) =>
+  markup.replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+
+test("no planned capability can read as one the customer has bought", async () => {
+  const html = await (await render("/", "ownword.pro")).text();
+  const rows = listItems(html);
+  assert.ok(rows.length > 0, "the page rendered no list items at all, so this test would prove nothing");
+
+  for (const plan of Object.values(pricingConfig.plans)) {
+    if (plan.availability !== "active") continue;
+
+    for (const feature of plan.plannedFeatures) {
+      const row = rows.find((item) => visible(item).includes(feature));
+      assert.ok(row, `${plan.id} does not render its planned capability "${feature}" at all`);
+
+      // The status is real text inside the row, so a screen reader reads it as
+      // part of the list item rather than it being carried by colour alone.
+      assert.match(
+        row,
+        /class="plan-status"[^>]*>[^<]*[^\s<]/,
+        `"${feature}" renders with no status, so it reads as a delivered feature`,
+      );
+      // A tick means "you get this". A roadmap row may never carry one.
+      assert.doesNotMatch(
+        row,
+        /<svg\b/,
+        `"${feature}" carries the included-feature marker while not being included`,
+      );
+      // And no word implying a date nobody has agreed to. docs/PRODUCT.md
+      // defers every one of these past V1 with no schedule.
+      assert.doesNotMatch(
+        visible(row),
+        /coming soon|shortly|next month|this year|Q[1-4] 20|\b20\d\d\b/i,
+        `"${feature}" promises a date for something that has none`,
+      );
+    }
+
+    // The delivered features are the ones that carry the marker.
+    for (const feature of plan.features) {
+      if (/words/i.test(feature)) continue; // the allowance is the cards' own line
+      const row = rows.find((item) => visible(item).includes(feature));
+      assert.ok(row, `"${feature}" is sold but not shown`);
+      assert.match(row, /<svg\b/, `"${feature}" is included but carries no marker`);
+      assert.doesNotMatch(row, /class="plan-status"/, `"${feature}" is included but wears a roadmap status`);
+    }
+
+    // The allowance is the one thing the two plans differ by, so it is on the
+    // card, and it comes from the catalog.
+    assert.ok(
+      html.includes(plan.wordLimit.toLocaleString("en-US")),
+      `${plan.id} does not show the allowance it is sold on`,
+    );
+  }
+});
+
+test("the pricing band's only deadline is the one the database enforces", async () => {
+  const [html, source] = await Promise.all([
+    (await render("/", "ownword.pro")).text(),
+    readFile(new URL("../app/landing-page.tsx", import.meta.url), "utf8"),
+  ]);
+
+  // Stated, and stated as the value the capability token is actually stamped
+  // with. A lifetime written down a second time is the invented scarcity
+  // docs/ACTIVATION.md rejects, arriving by drift rather than by intent.
+  assert.match(visible(html), new RegExp(`stays open for ${PREVIEW_LINK_TTL_HOURS} hours`));
+  assert.match(source, /PREVIEW_LINK_TTL_HOURS/);
+  assert.doesNotMatch(
+    source.replace(/^\s*\/\/.*$/gm, ""),
+    /24 hours/,
+    "the preview lifetime must be read from src/config/retention.ts, not written out",
+  );
+
+  // The other real pressure: the visitor's own unread words, rendered from the
+  // live result and therefore absent when there is no result to be urgent
+  // about.
+  assert.match(source, /unreadWords > 0/);
+  assert.match(source, /\$\{unreadWords\} more words of your rewrite/);
+
+  // Nothing invented. No timer, no seat count, no deadline on the price.
+  const band = html.match(/<section class="pricing"[\s\S]*?<\/section>/);
+  assert.ok(band, "the pricing band did not render");
+  assert.doesNotMatch(
+    visible(band[0]),
+    /limited time|hurry|only \d+ (left|remaining|seats)|today only|ends (in|soon)|\d+ (people|customers)|free trial/i,
+    "the pricing band introduced urgency that is not a fact about this product",
+  );
 });
 
 test("indexes completed legal pages only on the canonical host", async () => {
