@@ -1588,6 +1588,21 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   color: var(--ink-2); font-size: var(--t-sm); line-height: 1.6;
 }
 
+/* Narrow screens, for every block above. These rules sit after the main
+   RESPONSIVE section, so they are declared here rather than in it: a later
+   single-class rule would otherwise win over the media query and undo it. */
+@media (max-width: 760px) {
+  .stage-auth { padding-top: var(--s6); padding-bottom: var(--s6); }
+  .auth-card { padding: var(--s5); }
+  .surface-topline, .surface-states { padding: var(--s4); }
+  .surface-notice, .surface-alert-inset { margin: 0 var(--s4) var(--s4); }
+  .history-item { padding: var(--s4); }
+  .history-item .paid-actions { max-width: none; }
+  /* Two columns here squeezed the cancellation disclosure into a one-word
+     ribbon beside the button. */
+  .billing-strip-inner { grid-template-columns: minmax(0, 1fr); padding: var(--s6) var(--gutter); }
+}
+
 
 /* ------------------------------------------------------------
    AUTH SURFACE (/signin)

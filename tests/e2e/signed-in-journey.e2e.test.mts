@@ -80,7 +80,10 @@ test("a customer signs in by link, rewrites, reads it in history, deletes it, an
   const requestBody = (await requestResponse.json()) as { message?: string; error?: string };
   if (requestStatus === 200) {
     assert.ok(requestBody.message, "a successful link request returned no message for the page to show");
-    await page.locator(".status-line").filter({ hasText: requestBody.message }).first().waitFor({ timeout: 10_000 });
+    // `.auth-status` since the sign-in redesign: the polite live region is in
+    // the DOM from first paint and empty until there is an outcome, so this
+    // waits for the text rather than for the element to appear.
+    await page.locator(".auth-status").filter({ hasText: requestBody.message }).first().waitFor({ timeout: 10_000 });
   } else {
     assert.ok(requestBody.error, "a refused link request returned no error for the page to show");
     await page.locator("[role=alert]").filter({ hasText: requestBody.error }).first().waitFor({ timeout: 10_000 });
@@ -185,7 +188,7 @@ test("a customer signs in by link, rewrites, reads it in history, deletes it, an
   ]);
   assert.equal(deleteResponse.status(), 200, "deleting an owned rewrite was refused");
 
-  await page.locator(".status-line, .copy-status").filter({ hasText: /deleted/i }).first().waitFor({ timeout: 30_000 });
+  await page.locator(".surface-notice, .copy-status").filter({ hasText: /deleted/i }).first().waitFor({ timeout: 30_000 });
   await page.waitForFunction(() => document.querySelectorAll(".history-list .history-item").length === 0, null, { timeout: 30_000 });
 
   // Inaccessible: the owner's own detail request now answers the same 404 a
@@ -208,7 +211,7 @@ test("a customer signs in by link, rewrites, reads it in history, deletes it, an
   assert.ok(staleCookie.length > 0, "the browser held no cookie to replay, so the sign-out assertion would be vacuous");
 
   await gotoReady(page, "/signin");
-  await page.locator("form.signin-signout button[type=submit]").first().click();
+  await page.locator(".auth-session form button[type=submit]").first().click();
   await page.waitForURL((url) => new URL(url).pathname === "/", { timeout: 30_000 });
 
   assert.equal(
