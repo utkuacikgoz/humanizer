@@ -35,6 +35,16 @@ const STATUS_HEADINGS = {
   "signed-out": "Sign-in needed",
 } as const;
 
+// One line under the heading in every state, so the surface says what is
+// happening and what to expect rather than showing a title over empty ground.
+const STATUS_SUBHEADS = {
+  confirming: "Stripe is answering. Nothing else is needed from you.",
+  unlocked: "Every change is marked against your original, and it is saved to your account.",
+  delayed: "Your payment went through. Only the confirmation is slow.",
+  missing: "This page needs the reference that came with your rewrite.",
+  "signed-out": "Your result is held under the account that paid for it.",
+} as const;
+
 function readJobIdFromLocation(): string | null {
   if (typeof window === "undefined") return null;
   return new URLSearchParams(window.location.search).get("job");
@@ -125,45 +135,53 @@ export default function CheckoutSuccessPage() {
             reaches straight after paying said nothing about which account was
             charged or which account the rewrite was saved to. */}
         <nav aria-label="Primary navigation">
+          <Link href="/">Rewrite another draft</Link>
           <AccountIndicator />
         </nav>
       </header>
 
       <div className="stage stage-single">
         <section className="workspace" aria-labelledby="checkout-status-title">
-        <div className="workspace-topline">
-          <div>
-            <span className="step-number">03</span>
-            <h2 id="checkout-status-title">{STATUS_HEADINGS[visibleStatus]}</h2>
-          </div>
+        {/* The heading is the page's one h1 and it names the actual state, so
+            the tab title, the outline and the screen agree. No step number:
+            `.step-number` marks position in the rewrite sequence, and a
+            payment confirming is not step 03 of it. */}
+        <div className="workspace-topline surface-topline">
+          <h1 id="checkout-status-title">{STATUS_HEADINGS[visibleStatus]}</h1>
+          <p>{STATUS_SUBHEADS[visibleStatus]}</p>
         </div>
 
-        {visibleStatus === "confirming" ? (
-          <p className="status-line" role="status" style={{ borderTop: "none" }}>
-            <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span>
-            {" "}We&apos;re confirming your payment with Stripe. This usually takes a few seconds.
-          </p>
-        ) : null}
+        <div className="surface-states">
+          {visibleStatus === "confirming" ? (
+            <p className="surface-note" role="status">
+              <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span>
+              {" "}We&apos;re confirming your payment with Stripe. This usually takes a few seconds.
+            </p>
+          ) : null}
 
-        {visibleStatus === "delayed" ? (
-          <p className="status-line" role="status" style={{ borderTop: "none" }}>
-            Your payment is still being confirmed. This can take a little longer than usual.
-            Refresh this page in a moment, or check{" "}
-            <Link href="/">the homepage</Link>. You will not be charged again, and nothing is lost.
-          </p>
-        ) : null}
+          {visibleStatus === "delayed" ? (
+            <p className="surface-note" role="status">
+              Your payment is still being confirmed. This can take a little longer than usual.
+              Refresh this page in a moment, or check{" "}
+              <Link href="/">the homepage</Link>. You will not be charged again, and nothing is lost.
+            </p>
+          ) : null}
 
-        {visibleStatus === "signed-out" ? (
-          <p className="error" role="alert" style={{ borderTop: "none" }}>
-            <Link href="/signin?return_to=%2Fcheckout%2Fsuccess">Sign in</Link> to view your unlocked result.
-          </p>
-        ) : null}
+          {/* Signing in is the way forward here, not a fault report, so it is
+              drawn as a gate with the action in it rather than as an error. */}
+          {visibleStatus === "signed-out" ? (
+            <div className="surface-gate" role="status">
+              <p>Your rewrite is unlocked and waiting. Sign in with the address you paid with to read it.</p>
+              <Link className="next-action" href="/signin?return_to=%2Fcheckout%2Fsuccess">Sign in</Link>
+            </div>
+          ) : null}
 
-        {visibleStatus === "missing" ? (
-          <p className="error" role="alert" style={{ borderTop: "none" }}>
-            This link does not include a result reference. Return to <Link href="/">the homepage</Link> to open your draft or start another rewrite.
-          </p>
-        ) : null}
+          {visibleStatus === "missing" ? (
+            <p className="surface-alert" role="alert">
+              This link does not include a result reference. Return to <Link href="/">the homepage</Link> to open your draft or start another rewrite.
+            </p>
+          ) : null}
+        </div>
 
         {visibleStatus === "unlocked" && result && marks ? (
           <>
@@ -192,13 +210,18 @@ export default function CheckoutSuccessPage() {
                 <b>Held exactly as you wrote them</b>
                 {facts.length ? <ul>{facts.slice(0, 6).map((fact) => <li key={fact}>{fact}</li>)}</ul> : <p>No names, dates, numbers, citations, or links needed special protection.</p>}
               </div>
+              {/* One primary action, then two ways onward set as links. Three
+                  controls of equal weight made the customer choose between
+                  them instead of taking the rewrite they just paid for. */}
               <div className="paid-actions">
                 <button type="button" className="copy-result" onClick={copyResult}>Copy full rewrite</button>
-                <Link className="next-action" href="/">Rewrite another draft</Link>
-                {/* M3-01: this rewrite is now claimed by the account, so it is
-                    in history. Say where it went rather than leaving the
-                    customer to guess whether it was kept. */}
-                <Link className="next-action" href="/history">Your saved rewrites</Link>
+                <p className="paid-onward">
+                  <Link href="/">Rewrite another draft</Link>
+                  {/* M3-01: this rewrite is now claimed by the account, so it is
+                      in history. Say where it went rather than leaving the
+                      customer to guess whether it was kept. */}
+                  <Link href="/history">Your saved rewrites</Link>
+                </p>
                 <p className="copy-status" role="status" aria-live="polite">
                   {copyStatus === "copied" ? "Copied to your clipboard." : copyStatus === "failed" ? "Copy was blocked. Select the text and copy it manually." : ""}
                 </p>
@@ -213,14 +236,16 @@ export default function CheckoutSuccessPage() {
           present on the post-purchase surface where a customer who has
           just been charged is most likely to look for it. */}
       <section className="billing-strip" id="manage-billing" aria-labelledby="manage-billing-title">
-        <div>
-          <h2 id="manage-billing-title">Your subscription</h2>
-          <p>
-            {subscriptionDisclosure(pricingConfig.plans.starter)} Cancel or change it at any time. The
-            billing portal shows the exact effective date before you confirm.
-          </p>
+        <div className="billing-strip-inner">
+          <div>
+            <h2 id="manage-billing-title">Your subscription</h2>
+            <p>
+              {subscriptionDisclosure(pricingConfig.plans.starter)} Cancel or change it at any time. The
+              billing portal shows the exact effective date before you confirm.
+            </p>
+          </div>
+          <ManageBilling returnTo="/checkout/success" />
         </div>
-        <ManageBilling returnTo="/checkout/success" />
       </section>
     </main>
   );

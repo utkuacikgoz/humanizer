@@ -204,7 +204,11 @@ export default function HistoryPage() {
           <span>{productConfig.productName}</span>
         </Link>
         <nav aria-label="Primary navigation">
-          <Link className="sign-in" href="/">Rewrite another draft</Link>
+          {/* A plain nav link, not a second pill. It goes where the wordmark
+              already goes, so the 760px rule that hides it costs a phone
+              nothing, and at full width the header now carries one outlined
+              control rather than two competing ones. */}
+          <Link href="/">Rewrite another draft</Link>
           {/* SEC-17: history is the account's own writing, so the account it
               belongs to has to be named on it. */}
           <AccountIndicator />
@@ -213,50 +217,56 @@ export default function HistoryPage() {
 
       <div className="stage stage-single">
         <section className="workspace" aria-labelledby="history-title">
-          <div className="workspace-topline">
-            <div>
-              <span className="step-number">04</span>
-              <h2 id="history-title">Your rewrites</h2>
-            </div>
+          {/* One h1, no step number. `.step-number` says where you are in the
+              rewrite sequence; history is not step 04 of it. */}
+          <div className="workspace-topline surface-topline">
+            <h1 id="history-title">Your rewrites</h1>
+            <p>Rewrites you unlocked through checkout are kept here until you delete them.</p>
           </div>
 
-          {list.kind === "loading" ? (
-            <p className="status-line" role="status" style={{ borderTop: "none" }}>
-              <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span>
-              {" "}Loading your saved rewrites.
-            </p>
-          ) : null}
+          <div className="surface-states">
+            {list.kind === "loading" ? (
+              <p className="surface-note" role="status">
+                <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span>
+                {" "}Loading your saved rewrites.
+              </p>
+            ) : null}
 
-          {list.kind === "signed-out" ? (
-            <p className="error" role="alert" style={{ borderTop: "none" }}>
-              <Link href={SIGN_IN_HREF}>Sign in</Link> to see the rewrites saved to your account. Nothing is
-              stored under an account until you sign in and unlock a rewrite.
-            </p>
-          ) : null}
+            {/* Being signed out here is a gate, not a fault: it is announced
+                politely and drawn as the way in, not as an error. */}
+            {list.kind === "signed-out" ? (
+              <div className="surface-gate" role="status">
+                <p>Your rewrites are kept under your account. Nothing is stored under one until you sign in and unlock a rewrite.</p>
+                <Link className="next-action" href={SIGN_IN_HREF}>Sign in</Link>
+              </div>
+            ) : null}
 
-          {list.kind === "unavailable" ? (
-            <p className="error" role="alert" style={{ borderTop: "none" }}>
-              Your history could not be loaded right now. This is a problem on our side, not a sign that
-              anything was lost. Please try again in a moment.
-            </p>
-          ) : null}
+            {list.kind === "unavailable" ? (
+              <p className="surface-alert" role="alert">
+                Your history could not be loaded right now. This is a problem on our side, not a sign that
+                anything was lost. Please try again in a moment.
+              </p>
+            ) : null}
 
-          {list.kind === "ready" && list.items.length === 0 ? (
-            <p className="status-line" role="status" style={{ borderTop: "none" }}>
-              No saved rewrites yet. A rewrite is saved to your account when you unlock it through
-              checkout. Rewrites you run while signed in and subscribed are returned to you in full and
-              are not stored here.
-            </p>
-          ) : null}
+            {list.kind === "ready" && list.items.length === 0 ? (
+              <p className="surface-note" role="status">
+                No saved rewrites yet. A rewrite is saved to your account when you unlock it through
+                checkout. Rewrites you run while signed in and subscribed are returned to you in full and
+                are not stored here.
+              </p>
+            ) : null}
 
-          {list.kind === "ready" && !list.entitled && list.items.length ? (
-            <p className="status-line" role="status" style={{ borderTop: "none" }}>
-              Your subscription is not active, so these rewrites cannot be opened in full. You can still
-              see what is stored and delete any of it.
-            </p>
-          ) : null}
+            {list.kind === "ready" && !list.entitled && list.items.length ? (
+              <p className="surface-note" role="status">
+                Your subscription is not active, so these rewrites cannot be opened in full. You can still
+                see what is stored and delete any of it.
+              </p>
+            ) : null}
+          </div>
 
-          <p className="copy-status" role="status" aria-live="polite" tabIndex={-1} ref={noticeRef}>{notice}</p>
+          {/* Present from first paint, empty until a deletion has something
+              true to report; an empty region paints nothing. */}
+          <p className="surface-notice" role="status" aria-live="polite" tabIndex={-1} ref={noticeRef}>{notice}</p>
 
           {list.kind === "ready" && list.items.length ? (
             <ul className="history-list">
@@ -280,16 +290,7 @@ export default function HistoryPage() {
                     >
                       {openId === item.jobId ? "Opened" : "Open full rewrite"}
                     </button>
-                    {confirmingId === item.jobId ? (
-                      <>
-                        <button type="button" className="history-delete" onClick={() => void deleteItem(item.jobId)}>
-                          Delete permanently
-                        </button>
-                        <button type="button" className="history-cancel" onClick={() => setConfirmingId(null)}>
-                          Keep it
-                        </button>
-                      </>
-                    ) : (
+                    {confirmingId === item.jobId ? null : (
                       <button
                         type="button"
                         className="history-cancel"
@@ -299,10 +300,24 @@ export default function HistoryPage() {
                       </button>
                     )}
                   </div>
+                  {/* The question and its two answers are one block. Split
+                      across a button row and a paragraph below it, the warning
+                      arrived after the control it was warning about. */}
                   {confirmingId === item.jobId ? (
-                    <p className="history-warning" role="status">
-                      This removes the rewrite and the text it was made from. It cannot be undone.
-                    </p>
+                    <div className="history-confirm" role="status">
+                      <p>
+                        Delete this rewrite? This removes it and the text it was made from. It cannot
+                        be undone.
+                      </p>
+                      <div className="history-confirm-actions">
+                        <button type="button" className="history-delete" onClick={() => void deleteItem(item.jobId)}>
+                          Delete permanently
+                        </button>
+                        <button type="button" className="history-cancel" onClick={() => setConfirmingId(null)}>
+                          Keep it
+                        </button>
+                      </div>
+                    </div>
                   ) : null}
                   {openId === item.jobId && detail ? (
                     <>
@@ -325,7 +340,7 @@ export default function HistoryPage() {
           ) : null}
 
           {detailError ? (
-            <p className="error" role="alert" style={{ borderTop: "none" }}>{detailError}</p>
+            <p className="surface-alert surface-alert-inset" role="alert">{detailError}</p>
           ) : null}
         </section>
       </div>

@@ -319,7 +319,7 @@ h1, h2, h3 { margin: 0; }
   position: sticky; top: 0; z-index: 40;
   max-width: var(--container); margin: 0 auto;
   height: 68px; padding: 0 var(--gutter);
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s4);
 }
 .site-header::before {
   content: ""; position: absolute; inset: 0 0 auto 0;
@@ -369,13 +369,19 @@ nav a:not(.sign-in):hover::after { right: 0; }
 .account-address { min-width: 0; overflow-wrap: anywhere; }
 .account-address b { color: var(--ink); font-weight: 600; }
 .account-signout { margin: 0; flex: none; }
+/* Quieter than the outlined nav pill beside it. Signing out is the way out,
+   not the thing to do: the two used to carry identical borders, so the header
+   presented two equal calls to action and neither was the page's purpose. It
+   is still a filled, obviously pressable control, because SEC-17 needs the
+   way out visible in the same glance as the address. */
 .account-signout-button {
   appearance: none; cursor: pointer; white-space: nowrap;
-  padding: 7px 14px; border: 1px solid var(--line-strong); border-radius: 999px;
-  background: transparent; color: inherit; font: inherit; font-weight: 550;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  padding: 7px 14px; border: 1px solid transparent; border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--ink-2); font: inherit; font-weight: 550;
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.account-signout-button:hover { background: var(--ink); color: var(--paper); }
+.account-signout-button:hover { border-color: var(--line-strong); color: var(--ink); }
 
 /* ============================================================
    STAGE — the pitch and the product share the first screen.
@@ -402,6 +408,22 @@ nav a:not(.sign-in):hover::after { right: 0; }
    it, only the result the customer just paid for. */
 .stage-single { grid-template-columns: minmax(0, 1fr); padding-top: var(--s7); }
 .stage-single .workspace { max-width: 940px; width: 100%; margin: 0 auto; }
+
+/* The one control is narrow, so the argument gets the wide column —
+   the reverse of the landing stage, where the product is the wide half. */
+.stage-auth {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 404px);
+  /* `main` is a full-height column; this is its only band, so it takes the
+     leftover height and centres in it. Without this the card sat near the top
+     of a screen of empty ground with nothing holding it there. */
+  flex: 1 1 auto;
+  align-content: center;
+  padding-top: var(--s8);
+  padding-bottom: var(--s9);
+}
+.auth-intro h1 { font-size: var(--t-3xl); }
+.auth-intro .hero-copy { max-width: 42ch; margin-bottom: 0; }
+
 
 .hero { position: relative; }
 .hero h1 {
@@ -1341,15 +1363,19 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
   margin: 0;
   padding: 0;
   list-style: none;
-  border-top: 1px solid var(--line);
 }
 
+/* The rows used to be padded vertically only, inside a card that carries no
+   padding of its own, so every line of a customer's own writing started
+   hard against the card's border and each rule ran the full width of the
+   surface. They are inset to the same gutter the topline uses. */
 .history-item {
   display: grid;
   gap: var(--s3);
-  padding: var(--s5) 0;
-  border-bottom: 1px solid var(--line);
+  padding: var(--s5);
+  border-top: 1px solid var(--line-soft);
 }
+.history-item:first-child { border-top: 0; }
 
 .history-meta {
   display: flex;
@@ -1402,75 +1428,323 @@ footer a:hover { color: var(--ink); text-decoration-color: currentColor; }
 
 .history-cancel:hover { border-color: var(--line-strong); color: var(--ink); }
 
-.history-warning {
+/* The question, its consequence and its two answers in one bordered block,
+   tinted with the accent that already means "destructive" on the button
+   inside it. Previously the warning sat below the buttons, so the sentence
+   explaining what could not be undone arrived after the control that did
+   it. */
+.history-confirm {
+  display: grid;
+  gap: var(--s3);
+  padding: var(--s4);
+  border: 1px solid color-mix(in srgb, var(--clay) 34%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--clay-soft) 60%, transparent);
+}
+.history-confirm > p {
   margin: 0;
   max-width: 60ch;
   color: var(--ink-2);
   font-size: var(--t-sm);
   line-height: 1.55;
 }
+.history-confirm-actions { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); align-items: center; }
 
 .history-detail { display: grid; gap: var(--s4); }
+.history-detail .checks { border-radius: var(--radius-md); }
 .history-detail .comparison { border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
+/* Inside a list row the copy control is one action among several, not the
+   full-width primary it is on the post-purchase page. */
+.history-item .paid-actions { max-width: 260px; }
 
-/* Sign in. The same workspace shell the rewriter and history use, with the
-   textarea swapped for one field: same paper, same rule weights, same
-   editor-footer holding the one action. Nothing new is introduced here. */
-.signin-copy {
-  margin: 0;
-  padding: var(--s5) var(--s5) 0;
-  max-width: 58ch;
-  color: var(--ink-2);
-  font-size: var(--t-sm);
-  line-height: 1.6;
+/* ------------------------------------------------------------
+   SURFACE STATES — shared by /history and /checkout/success
+   ------------------------------------------------------------
+   Both pages are one card that reports what is true right now.
+   They used to say it with `.status-line` and `.error`, which
+   are full-bleed bands with their own top rule: correct inside
+   the rewriter, where they are footers to a control, and wrong
+   here, where they stacked into extra rows of a table and
+   painted a routine gate ("sign in to see this") in the colour
+   of a failure.
+
+   Three kinds, and the difference between them is real:
+     .surface-note   something is true and nothing is wrong
+     .surface-gate   the way forward, with the action in it
+     .surface-alert  something failed
+   ------------------------------------------------------------ */
+
+/* One heading and one line of context, stacked. `.workspace-topline` is a
+   flex row built for a title beside a control; these pages have no control
+   up there. */
+.surface-topline {
+  display: block;
+  padding: var(--s5);
+  min-height: 0;
+}
+.surface-topline h1 {
+  font-size: var(--t-xl); line-height: 1.1; letter-spacing: -.035em; font-weight: 600;
+  text-wrap: balance;
+}
+.surface-topline > p {
+  margin: var(--s2) 0 0; max-width: 64ch;
+  color: var(--ink-2); font-size: var(--t-sm); line-height: 1.55;
 }
 
-.signin-label {
-  display: block;
-  padding: var(--s4) var(--s5) 0;
+.surface-states { display: grid; gap: var(--s3); padding: var(--s5); }
+/* These blocks hold at most one child; with none, the padding would leave a
+   blank band and a stray rule under the topline. */
+.surface-states:not(:has(> *)) { display: none; }
+
+/* Block flow, not flex: these sentences carry inline links, and flex items
+   would break one sentence into three boxes with gaps between them. */
+.surface-note, .surface-alert {
+  margin: 0;
+  padding: var(--s4);
+  border-radius: var(--radius-md);
+  font-size: var(--t-sm); line-height: 1.55;
+  text-wrap: pretty;
+}
+.surface-note { background: var(--paper-sunken); color: var(--ink-2); }
+.surface-note .dot-loader { vertical-align: middle; }
+.surface-note .dot-loader span { background: var(--green-bright); }
+.surface-note a, .surface-alert a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.surface-alert {
+  background: var(--mark-cut-bg);
+  color: var(--mark-cut-ink);
+  font-weight: 500;
+}
+.surface-alert-inset { margin: 0 var(--s5) var(--s5); }
+
+.surface-gate {
+  display: grid; justify-items: start; gap: var(--s4);
+  padding: var(--s5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-sunken);
+}
+.surface-gate > p { margin: 0; max-width: 56ch; color: var(--ink-2); font-size: var(--t-sm); line-height: 1.6; }
+
+/* Live region: in the DOM from first paint, invisible and occupying nothing
+   until it has something to say. `height: 0` rather than `display: none` so
+   the node a screen reader is watching is never removed and re-inserted. */
+.surface-notice {
+  margin: 0 var(--s5) var(--s5);
+  padding: var(--s4);
+  border-radius: var(--radius-md);
+  background: var(--mint);
+  color: var(--ink);
+  font-size: var(--t-sm); line-height: 1.55;
+}
+.surface-notice:empty { height: 0; margin: 0; padding: 0; overflow: hidden; }
+
+/* Two ways onward, set as links because there is one primary action above
+   them and it is the one the customer paid for. */
+.paid-onward {
+  margin: 0; display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4);
+  font-size: var(--t-sm);
+}
+.paid-onward a {
+  color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px;
+  text-decoration-color: var(--line);
+}
+.paid-onward a:hover { color: var(--ink); text-decoration-color: currentColor; }
+
+/* ------------------------------------------------------------
+   BILLING STRIP (/checkout/success)
+   ------------------------------------------------------------
+   This band shipped with no styling at all: full-bleed, unpadded,
+   its heading and its cancellation disclosure running edge to edge
+   of the viewport. It is the ACT-09 cancellation path on the page
+   a customer reaches straight after being charged, so it gets the
+   recessed ground and the container the rest of the page uses, and
+   it sits at the foot of the page instead of floating mid-viewport
+   above empty ground.
+   ------------------------------------------------------------ */
+.billing-strip {
+  margin-top: auto;
+  border-top: 1px solid var(--line-soft);
+  background: var(--paper-sunken);
+}
+.billing-strip-inner {
+  max-width: var(--container); margin: 0 auto;
+  padding: var(--s7) var(--gutter);
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center; gap: var(--s4) var(--s7);
+}
+.billing-strip h2 { font-size: var(--t-lg); letter-spacing: -.03em; font-weight: 600; }
+.billing-strip p {
+  margin: var(--s2) 0 0; max-width: 68ch;
+  color: var(--ink-2); font-size: var(--t-sm); line-height: 1.6;
+}
+
+
+/* ------------------------------------------------------------
+   AUTH SURFACE (/signin)
+   ------------------------------------------------------------
+   The gate every paying customer passes through, built from the
+   landing page's own parts: the two-column stage, the hero type
+   on the left, one card holding one control on the right.
+
+   Three things it deliberately does not do, each of which it
+   used to do:
+
+   1. No step number. `.step-number` is positional information
+      (01 paste, 02 read, 03 pay). Sign-in is not step 00 of a
+      sequence, and `.why` below already refuses to number four
+      independent reasons for the same stated reason.
+   2. No rule between every pair of elements. Four hairlines
+      turned a three-element form into a five-row table. There
+      is one rule in the card, and only where the two sides are
+      genuinely different in kind: a session that already exists
+      above it, a fresh sign-in below.
+   3. The email field is a field. It was a full-bleed slab set
+      in `--font-read` while its own label was mono — two type
+      systems inside one control, reading as a rendering fault.
+      `--font-read` is for prose the customer wrote or that we
+      rewrote; an address is a credential and belongs to the UI
+      face, in a bordered box with a ground of its own.
+   ------------------------------------------------------------ */
+
+.auth-card {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  gap: var(--s5);
+  padding: var(--s6);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--e1);
+}
+
+/* The one rule that earns its place: above it, the session this browser
+   already holds; below it, signing in as somebody else. */
+.auth-session {
+  display: grid;
+  gap: var(--s4);
+  padding-bottom: var(--s5);
+  border-bottom: 1px solid var(--line-soft);
+}
+.auth-session p { margin: 0; color: var(--ink-2); font-size: var(--t-sm); line-height: 1.55; }
+.auth-session p b { color: var(--ink); font-weight: 620; overflow-wrap: anywhere; }
+.auth-session-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); }
+.auth-session-actions form { margin: 0; }
+
+.auth-form { display: grid; gap: var(--s4); }
+.auth-switch { margin: 0; color: var(--ink-3); font-size: var(--t-xs); }
+
+.auth-field { display: grid; gap: var(--s2); }
+.auth-field > label {
   color: var(--ink-3);
   font-family: var(--font-mono);
-  font-size: var(--t-xs);
-  letter-spacing: .08em;
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  letter-spacing: .12em;
   text-transform: uppercase;
 }
-
 .signin-input {
-  display: block; width: 100%;
-  padding: var(--s3) var(--s5) var(--s5);
-  border: 0; outline: 0;
-  background: transparent; color: var(--ink);
-  font-family: var(--font-read); font-size: var(--t-lg); line-height: 1.62;
-  transition: background var(--dur-base) var(--ease-out);
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper-sunken);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--t-md);
+  letter-spacing: -.01em;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out);
 }
 .signin-input::placeholder { color: var(--ink-3); }
-.signin-input:focus { background: color-mix(in srgb, var(--green-bright) 3%, transparent); }
-/* The global :focus-visible ring is defined earlier in this file at equal
-   specificity, so `outline: 0` above wins even while focused and the field
-   showed no keyboard indicator at all (WCAG 2.4.7). Restored here, inset:
-   the input fills its card to the edge, so a positive offset would draw the
-   ring outside the card border instead of around the field. */
+.signin-input:hover { border-color: var(--line-strong); }
+/* QA: this field once carried `outline: 0` at the same specificity as the
+   global `:focus-visible` ring and later in the file, so it took keyboard
+   focus with no indicator at all (WCAG 2.4.7). The base rule no longer
+   suppresses the outline, and the ring is restated here so that stays true
+   even if the global rule moves. The field is inset from the card edge now,
+   so the offset can be positive. */
 .signin-input:focus-visible {
   outline: 2px solid var(--green-bright);
-  outline-offset: -2px;
+  outline-offset: 2px;
+  border-color: var(--green-bright);
+  background: var(--surface);
 }
 
-.signin-note {
+/* The primary action is always the inverse of the ground it sits on: deep
+   forest on paper, pale on the dark theme's forest. It is drawn from the
+   `--band-*` set, which BRAND.md defines as the one group that does not flip
+   with the theme, so the two states are one decision rather than two.
+
+   It carries no ledge. The ledge belongs to `.humanize-button` alone
+   ("nothing else is allowed to look like it"), and a saturated mint slab was
+   exactly what did not sit in the same world as this page's ground. */
+.auth-submit {
+  display: flex; align-items: center; justify-content: center; gap: var(--s2);
+  width: 100%;
+  padding: 13px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--band);
+  color: var(--band-ink);
+  font-size: var(--t-base); font-weight: 650; letter-spacing: -.015em;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              translate var(--dur-fast) var(--ease-spring);
+}
+.auth-submit:hover:not([aria-disabled="true"]) { background: var(--green); translate: 0 -1px; }
+.auth-submit:active:not([aria-disabled="true"]) { translate: 0 1px; }
+.auth-submit[aria-disabled="true"] { cursor: progress; opacity: .82; }
+.auth-submit .dot-loader span { background: currentColor; }
+@media (prefers-color-scheme: dark) {
+  .auth-submit { background: var(--band-cta); color: var(--band); }
+  .auth-submit:hover:not([aria-disabled="true"]) { background: var(--band-accent); }
+}
+
+/* Live regions, present from first paint because a region inserted together
+   with its message is not announced. Empty, they paint nothing and occupy
+   nothing: `height: 0` rather than `display: none`, so the region a screen
+   reader is watching is never removed from the accessibility tree and
+   re-inserted. */
+.auth-status, .auth-alert {
   margin: 0;
-  max-width: 46ch;
-  color: var(--ink-3);
-  font-size: var(--t-xs);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--radius-sm);
+  font-size: var(--t-sm);
   line-height: 1.5;
 }
-
-.signin-legal {
-  margin: 0;
-  padding: var(--s4) var(--s5) var(--s5);
-  color: var(--ink-3);
-  font-size: var(--t-xs);
-  line-height: 1.55;
+.auth-status { background: var(--mint); color: var(--ink); }
+.auth-alert {
+  background: var(--mark-cut-bg);
+  color: var(--mark-cut-ink);
+  font-weight: 500;
 }
-.signin-legal a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
-.signin-legal a:hover { color: var(--ink); }
+/* Taken out of flow while empty rather than merely flattened: an empty grid
+   item still creates a row, and three of them added three `gap`s of dead
+   space under the button. The node itself stays in the DOM and in the
+   accessibility tree, which is the whole point. */
+.auth-status:empty, .auth-alert:empty {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0);
+}
 
-.signin-signout { padding: 0 var(--s5); }
+.auth-note { margin: 0; color: var(--ink-3); font-size: var(--t-xs); line-height: 1.5; }
+.auth-legal { margin: 0; color: var(--ink-3); font-size: var(--t-xs); line-height: 1.55; }
+.auth-legal a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
+.auth-legal a:hover { color: var(--ink); }
+
+/* A secondary control that is a button because it submits, and looks like
+   what it is: quieter than the pill beside it, still obviously pressable. */
+.auth-quiet {
+  padding: 9px 15px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  color: var(--ink-2);
+  font: inherit; font-size: var(--t-sm); font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.auth-quiet:hover { border-color: var(--line-strong); color: var(--ink); }
