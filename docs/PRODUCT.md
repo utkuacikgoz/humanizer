@@ -192,9 +192,11 @@ Bottom-funnel analytics fire, but `/api/events` validates each event and then di
 
 Status: open. Release blockers include:
 
-- **no purchase has ever completed end to end.** `/signin` is live and `RESEND_API_KEY` is
-  configured, but the mail provider is rejecting the send, so nobody has signed in, bought and
-  unlocked on the production host. Every commercial claim below waits on this one;
+- **no purchase has ever completed end to end.** Sign-in is verified working on the production host
+  (2026-08-27, owner-confirmed): mail is accepted, the link arrives, and it signs the customer in.
+  The earlier failures were an unverified Resend sending domain, now resolved. Unproven from that
+  point on: checkout opening, payment completing, the unlock, and the rewrite reaching history.
+  Every commercial claim below still waits on this one;
 - production provider selection and frozen benchmark. The Claude provider is implemented and
   merged but **not active**; no real API call has ever been made from this codebase;
 - **the unit economics are unmeasured.** Modelled cost for a full Starter allowance spans $2.25 to
