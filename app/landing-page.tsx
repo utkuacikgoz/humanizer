@@ -12,6 +12,8 @@ import { improvementLabel, MIN_PAYWALLABLE_INPUT_WORDS, shouldOfferUnlock } from
 import { subscriptionDisclosure } from "@/src/lib/subscription-disclosure";
 import { MarkedText, describeMarks, diffRewrite, selectDisplayFacts } from "@/src/components/rewrite-marks";
 import { AccountIndicator } from "@/src/components/account-indicator";
+import { SignInModal } from "@/src/components/signin-modal";
+import { safeRelativeReturnPath } from "@/src/lib/identity";
 
 type Mode = (typeof MODES)[number]["id"];
 type UsageQuota = { consumed: number; allowance: number; remaining: number; periodEnd: string };
@@ -53,6 +55,16 @@ function isPaidResult(result: Result): result is PaidResult {
 }
 
 class UserFacingRequestError extends Error {}
+
+/* Where a sign-in link should come back to. It is this page including its
+   query string, narrowed by the one implementation of that check the codebase
+   has: src/lib/identity.ts's, which the server applies to the same value.
+   A local `startsWith("/")` re-implementation is exactly the weaker copy
+   SEC-21 removed from the sign-in page. */
+function currentReturnPath(): string {
+  if (typeof window === "undefined") return "/";
+  return safeRelativeReturnPath(`${window.location.pathname}${window.location.search}`);
+}
 
 async function readJsonResponse<T extends object>(response: Response): Promise<Partial<T>> {
   if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) return {};
@@ -140,6 +152,11 @@ export default function LandingPage() {
   // had not chosen.
   const [unlockPlanId, setUnlockPlanId] = useState<string | null>(null);
   const [unlockError, setUnlockError] = useState("");
+  /* The paywall's sign-in dialog, and the checkout it interrupted. Holding
+     the plan id here is what lets the dialog hand the flow straight back to
+     unlock() the moment a session appears, rather than dropping the customer
+     on a signed-in page with nothing selected. */
+  const [signInPrompt, setSignInPrompt] = useState<{ planId: string; returnTo: string } | null>(null);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [billingReadiness, setBillingReadiness] = useState<BillingReadiness | null>(null);
   const [notice, setNotice] = useState("");
@@ -313,7 +330,16 @@ export default function LandingPage() {
       });
       const payload = await readJsonResponse<{ url?: string; signInPath?: string; error?: string }>(response);
       if (response.status === 401 && payload.signInPath) {
-        window.location.href = payload.signInPath;
+        // Checkout needs an identity and this browser has none. It used to
+        // follow `signInPath` with a full navigation, which signed the
+        // customer in and threw away the rewrite they were about to pay for:
+        // the preview is React state on this page and nothing survives
+        // leaving it. The dialog asks for the address here instead, and when
+        // a link is opened in another tab it resumes this same checkout with
+        // the same capability. See src/components/signin-modal.tsx.
+        setUnlockStatus("idle");
+        setSignInPrompt({ planId, returnTo: currentReturnPath() });
+        track("signin_prompted", { planId });
         return;
       }
       if (!response.ok || !payload.url) throw new UserFacingRequestError(payload.error ?? "Checkout could not be started. Please try again.");
@@ -754,6 +780,26 @@ export default function LandingPage() {
         </nav>
         <span>{productConfig.productName} at {productConfig.domain}</span>
       </footer>
+
+      {/* Mounted only while it is wanted, so the session poll inside it exists
+          only while something is waiting on it. */}
+      {signInPrompt ? (
+        <SignInModal
+          returnTo={signInPrompt.returnTo}
+          reason="Your rewrite stays on this page. We need an address to send the receipt to and to keep your subscription attached to."
+          onClose={() => setSignInPrompt(null)}
+          onSignedIn={() => {
+            const { planId } = signInPrompt;
+            setSignInPrompt(null);
+            // Straight back into the checkout the 401 interrupted. The
+            // capability is still in `result` and the rewrite is still on
+            // screen behind the dialog, which is the whole reason this is a
+            // dialog: the next thing the customer sees is Stripe, not a page
+            // asking them to start again.
+            void unlock(planId);
+          }}
+        />
+      ) : null}
     </main>
   );
 }

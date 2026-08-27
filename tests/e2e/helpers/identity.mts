@@ -121,7 +121,17 @@ export function identityBlocker(): string | null {
 function open(): DatabaseSync {
   const file = localD1Path();
   if (!file) throw new Error("no local D1 database; run `npm run dev` then `npm run db:migrate:local`");
-  return new DatabaseSync(file);
+  const db = new DatabaseSync(file);
+  // `node --test` runs each e2e file in its own process and runs the files
+  // concurrently, so several of them write to this one SQLite file at the same
+  // time as the dev worker does. Without a busy timeout SQLite does not wait
+  // for the lock, it fails the statement immediately with "database is locked"
+  // — which surfaced as a seed step failing in whichever file happened to lose
+  // the race, a different one on each run. Five seconds is far longer than any
+  // of these writes takes and shorter than the tests' own timeouts, so a real
+  // deadlock still fails rather than hanging the suite.
+  db.exec("PRAGMA busy_timeout = 5000");
+  return db;
 }
 
 /** Runs one unit of work against the dev server's database and always closes the handle. */

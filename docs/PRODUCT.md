@@ -134,6 +134,7 @@ Current privacy-safe vocabulary:
 - `humanization_completed`
 - `preview_viewed`
 - `checkout_started`
+- `signin_prompted`
 - `checkout_completed`
 - `full_result_unlocked`
 - `result_copied`
@@ -141,7 +142,7 @@ Current privacy-safe vocabulary:
 - `second_humanization`
 - `subscription_cancelled`
 
-`repeat_preview` is anonymous repetition. `second_humanization` is reserved for the second successful entitled rewrite and is derived from ledger-backed `paidUseCount`. Event payloads must not contain source/output text, protected terms, prompts, payment data, capabilities, or provider payloads. A privacy-reviewed analytics destination and cancellation-event production wiring remain open.
+`signin_prompted` is the paywall stopping a signed-out visitor to ask for an address; it carries the plan id and never the address. `repeat_preview` is anonymous repetition. `second_humanization` is reserved for the second successful entitled rewrite and is derived from ledger-backed `paidUseCount`. Event payloads must not contain source/output text, protected terms, prompts, payment data, capabilities, or provider payloads. A privacy-reviewed analytics destination and cancellation-event production wiring remain open.
 
 ## Success metrics and guardrails
 

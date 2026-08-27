@@ -1,6 +1,6 @@
 # Quality Assurance and Release Gates
 
-Last updated: 2026-08-25
+Last updated: 2026-08-27
 Owners: Automated QA and Manual QA
 
 ## Quality strategy
@@ -86,6 +86,8 @@ Network assertions confirm that hidden output is not present before unlock and w
 
 Implemented in `tests/e2e/` (browser, requires `npm run dev` and Chromium):
 
+`npm run test:e2e` bounds `node --test` to four files at a time. Unbounded, it starts thirteen browsers against one Vite dev server that compiles routes on demand, and roughly one run in three lost a different test to a 15-second locator timeout or to `database is locked` on the shared local D1 file. Neither is a product defect: every one of those tests passes alone. The lock contention is fixed properly at the source (`tests/e2e/helpers/identity.mts` now sets `PRAGMA busy_timeout`); the compile contention is a dev-server property, and the bound is how it stops being everyone's flake.
+
 | Journey | Coverage |
 |---|---|
 | 1 Anonymous paste → modes → preview → paywall disclosure | `anonymous-journey.e2e.test.mts`. Live Stripe checkout, sign-in, unlock, and a paid second generation are not automated (need test-mode secrets). A second *preview* in the same visit is covered. |
@@ -94,6 +96,7 @@ Implemented in `tests/e2e/` (browser, requires `npm run dev` and Chromium):
 | 4 History, sentence restore, protected phrases, account deletion | History list/detail/delete: `signed-in-journey.e2e.test.mts` and `session-integrity.e2e.test.mts`. Sentence restore/regenerate, protected phrases and account deletion are not browser-covered. |
 | 5 Mobile and keyboard | `responsive.e2e.test.mts`, `accessibility.e2e.test.mts`, `signed-in-accessibility.e2e.test.mts`. |
 | 6 Signed-in journey: request a link → redeem → rewrite → history → delete → sign out | `signed-in-journey.e2e.test.mts`, `session-integrity.e2e.test.mts`. |
+| 7 Signed-out customer signs in at the paywall | `paywall-signin.e2e.test.mts`. The 401 opens a dialog over the rewrite instead of navigating to `/signin`, and the interrupted checkout resumes itself when a link is opened elsewhere. Readiness, checkout, request-link and session are stubbed at the network (a dev worker has no Stripe keys and sends no mail); the components, the native `<dialog>`, the poll and the resumed call are real. |
 
 Also covered: locked-remainder leak checks, hostile input, unchanged/cosmetic un-sellable guards, activation landing, paid-result copy (API mocked), error/rate-limit UX.
 
