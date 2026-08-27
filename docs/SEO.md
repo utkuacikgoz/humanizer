@@ -2,7 +2,7 @@
 
 **Owner:** SEO/GEO Agent
 **Status:** V1 acquisition architecture
-**Updated:** 2026-08-26 (SEO finishing pass: H-1, SEO-005, SEO-006, SEO-007, SEO-013, SEO-020 third crawl)
+**Updated:** 2026-08-27 (SEO completion pass: F6/H-8 closed, SEO-011 drafted, SEO-019 written, SEO-023 defined, SEO-024 decided, SEO-025 audited and gated, SEO-001 re-statused, fourth crawl)
 **Canonical brand:** Ownword at `ownword.pro` (`humanizer` remains the internal codename and a generic query category)
 
 ## 0. Current build reality (verified 2026-08-25, second pass)
@@ -78,6 +78,12 @@ until the funnel has been observed end to end.
   page cannot quietly inherit the homepage's identity. **Every public page now reads it, `app/page.tsx`
   included** (H-1, done 2026-08-26). The registry also carries the page-template fields SEO-013 enforces:
   `intent`, `contentOwner` and `primaryCta`.
+- **The brand mark exists and ships in one shape from two files.** `public/icon.svg` is the icon, shortcut
+  icon and apple-touch icon declared in `app/layout.tsx`; `app/landing-page.tsx` redraws the same geometry
+  inline in the header so it can take colours from the theme's custom properties, which an external favicon
+  cannot. `tests/rendered-html.test.mjs` compares their geometry and ignores their colour, so a redesign
+  that touches one file cannot ship a header that disagrees with the browser tab. Social handles are still
+  genuinely absent: `productConfig.socialHandles` is empty and `sameAs` stays out of the JSON-LD (SEO-001).
 - `src/lib/site-structured-data.ts` emits `Organization` + `WebSite` JSON-LD on the canonical host only
   (SEO-006), and now also the homepage's `SoftwareApplication`, whose `Offer` block is conditional on
   `productConfig.billingEnabled` (currently `true`). **Both blocks are host-gated by the same rule** as of
@@ -90,10 +96,19 @@ until the funnel has been observed end to end.
   placeholders, but final counsel review remains part of M4-03.
 - `/signin`, `/history` and `/checkout/success` are private: all three emit `noindex, nofollow, nocache` and,
   since this pass, no canonical, no meta description, and no Open Graph or Twitter card at all. Rendered tests
-  prove none of them appears in the sitemap.
+  prove none of them appears in the sitemap. Each also renders exactly one `<h1>` naming its state, pinned by
+  `tests/private-surface-quality.test.mjs` — finding F3 and handoff H-7, closed by the auth-surface design
+  pass on 2026-08-27.
 - A genuine 404 is a genuine 404. `app/not-found.tsx` returns HTTP 404 with one H1, a link back to `/`, no
   canonical, and no inherited homepage card. Trailing slashes normalize in one hop (`/privacy/` -> 308 ->
-  `/privacy`).
+  `/privacy`). **Since 2026-08-27 it also answers `no-store, must-revalidate`** — finding F6 and handoff
+  H-8, closed. The 200 routes get that header from the framework's dynamic-render path and the error path
+  does not go through it, so `applyDefaultHtmlCacheControl()` in `worker/index.ts` fills the silence for
+  any HTML response that comes back without one. It is absent-only and HTML-only on purpose: `/robots.txt`
+  and `/sitemap.xml` keep the `public, max-age=3600` they choose for themselves, and hashed static assets
+  keep their long lives. Every HTML response this application emits is now `no-store, must-revalidate`,
+  with no exceptions, which is what makes it a single testable invariant rather than a rule with a
+  footnote.
 - **The root layout no longer lends its pages the homepage's identity.** `app/layout.tsx` used to supply the
   homepage's title, description, canonical, Open Graph and Twitter card as the site-wide default, which is
   why the 404 and the three private surfaces each had to remember to null all of it out, and why the ones
@@ -116,6 +131,15 @@ until the funnel has been observed end to end.
 - `tests/page-quality-gate.test.mjs` is the CI gate for SEO-013, and `tests/discovery-privacy.test.mjs` is
   the discovery half of SEO-007. `scripts/seo-crawl.mts` (`npm run seo:crawl`) is the SEO-020 crawl pass
   itself, rerunnable against any build. All three are described in Sections 11.2 and 11.5.
+- Three gates were added on 2026-08-27, each holding a document to the code it describes rather than to
+  good intentions. `tests/claims-standard.test.mjs` compares `docs/CLAIMS.md`'s enforced-shape table
+  against the page gate's `FORBIDDEN_CLAIMS` array in both directions, and fails the build if the document
+  ever claims a Legal approval (SEO-011). `tests/meaning-preservation.test.mjs` holds
+  `docs/MEANING-PRESERVATION.md` to covering every `ProtectedContentKind` the code defines, and to quoting
+  the verifier's real thresholds (SEO-019). `tests/agent-readability.test.mjs` holds the public product
+  flow to semantic controls, to facts that agree between the page and its structured data, to errors that
+  are sentences, and to the no-new-protocol guardrail (SEO-025). Every rule in all three was mutated and
+  confirmed to fail before it was kept.
 
 
 ## 1. Outcome and guardrails
@@ -140,6 +164,11 @@ SEO is a primary acquisition channel, but it must compound trust rather than tra
 - Do not use fabricated statistics, testimonials, ratings, expert identities, or fake precision.
 - Do not expose private customer text to crawlers, analytics, logs, public examples, or training workflows.
 - Academic pages must frame the product as a revision and clarity aid, not a way to evade academic-integrity controls.
+
+These guardrails are now written out once, with the artifact each claim shape requires, in
+**`docs/CLAIMS.md`** (SEO-011). That file is a draft awaiting Legal approval; use it in the meantime, and
+do not cite it as a sign-off. `tests/page-quality-gate.test.mjs` is the mechanical floor under it and fails
+nine claim shapes on every build; Section 11.5 says what the floor does not reach.
 
 Google's current generative-search guidance says conventional SEO remains the foundation for AI visibility, prioritizes original non-commodity content, and explicitly rejects special GEO hacks such as unnecessary `llms.txt` files or manufactured mentions. This plan follows that model: accessible pages, original evidence, clear entities, and useful answers. See [Google's generative AI search guide](https://developers.google.com/search/docs/fundamentals/ai-optimization-guide), [AI-generated content guidance](https://developers.google.com/search/docs/fundamentals/using-gen-ai-content), and [spam policies](https://developers.google.com/search/docs/essentials/spam-policies).
 
@@ -169,7 +198,9 @@ Every commercial page should prove the promise in this order:
 - Trustworthy assessment without invented percentages
 - Personal voice as a future capability, not a V1 claim
 
-The canonical brand is Ownword and the canonical domain is `ownword.pro`. Bosphorus Elevate LLC and `support@ownword.pro` are the configured operator and support contact. All resolve from centralized product configuration. Social profiles and official logo artwork remain unconfirmed and must not be invented for structured data. Use a text wordmark until approved visual assets are supplied.
+The canonical brand is Ownword and the canonical domain is `ownword.pro`. Bosphorus Elevate LLC and `support@ownword.pro` are the configured operator and support contact. All resolve from centralized product configuration.
+
+**Updated 2026-08-27.** The mark is no longer unconfirmed: `public/icon.svg` ships as the favicon and is redrawn inline as the header mark, alongside the text wordmark, and a test holds the two to the same geometry (SEO-001). **Social profiles remain genuinely unconfirmed** — `productConfig.socialHandles` is empty, `sameAs` is deliberately absent from the structured data, and a test fails if it appears. Creating those accounts is the owner's. Do not invent either a handle or a second mark for structured data. Note that `docs/BRAND.md` still lists the favicon among the unconfirmed assets; that line predates `public/icon.svg` and needs a one-line correction from whoever owns that document.
 
 ## 3. Search-intent map
 
@@ -468,40 +499,46 @@ Never present rank as the only SEO KPI. A lower-volume page that produces retain
 
 IDs are stable for orchestration. `P0` blocks an SEO-ready public launch; `P1` creates the first acquisition loop; `P2` follows evidence.
 
-Status values (updated 2026-08-25 verification pass): **Done** — acceptance criteria verified against the current
+Status values (re-statused 2026-08-27): **Done** — acceptance criteria verified against the current
 codebase; **Partial** — some but not all acceptance criteria hold; **Open** — not started or not verifiable
 from this repo; **Blocked** — implementation is not the gap, a human/Legal decision is; **owner action** — no
 agent can close it, because it needs a login, a DNS record, or a human decision. An honest *Partial* is worth
 more than a *Done* nobody can support; do not upgrade a row without evidence named in the row itself.
 
+**Every row that is not Done now names the single missing input and who owns it**, rather than saying
+*Open*. That is the difference between a backlog and a list of things nobody has got to: eight of these
+wait on one login, one purchase, one Legal signature, one analytics destination, or one provider selection,
+and reading the row should tell you which. Where the answer is *nothing an agent can do*, the row says so
+in those words rather than implying unstarted work.
+
 | ID | Pri | Task | Owner | Depends on | Status | Acceptance criteria |
 |---|---|---|---|---|---|---|
-| SEO-001 | P0 | Define canonical domain and brand metadata contract | Engineering + Product | Naming config | Partial | One config source supplies confirmed product name, domain, support email, and legal entity, and staging cannot emit production canonicals. Official logo artwork and social handles remain unconfirmed and are intentionally omitted. |
+| SEO-001 | P0 | Define canonical domain and brand metadata contract | Engineering + Product | Naming config | Done (repository) | One config source (`src/config/product.ts`) supplies the product name, domain, support address and legal entity, and staging cannot emit production canonicals. **Re-statused 2026-08-27 against the artwork that actually ships.** The mark is no longer unconfirmed: `public/icon.svg` exists, is declared as the icon, shortcut icon and apple-touch icon in `app/layout.tsx`, and `app/landing-page.tsx` redraws the same geometry inline in the header so it can take theme colours a favicon cannot. Two copies of one mark is defensible only while they stay one mark, so `tests/rendered-html.test.mjs` now compares their geometry and ignores their colour; it was mutated three ways (corner radius in the file, accent bar in the header, the layout's `icons` declaration removed) and fails on each. It was recorded as legible at 16/24/32/64px in both themes by the design pass that shipped it; **this pass did not re-render it** — no browser is available in this session — so that half is carried, not re-measured. **Still genuinely absent, and correctly so:** social handles. `productConfig.socialHandles` is empty, `sameAs` is deliberately omitted from the JSON-LD, and a test fails if it appears. Creating the accounts is the owner's, not an agent's. |
 | SEO-002 | P0 | Implement indexation matrix | Engineering + Security | SEO-001 | Done (repository) | Rendered tests prove the canonical-host public allow path, the off-host `noindex`/empty-sitemap default, `noindex, nofollow, nocache` with no canonical and no social card on all three private surfaces (`/signin`, `/history`, `/checkout/success`), and a genuine 404 that declares no canonical. No private URL appears in the sitemap. `tests/metadata-contract.test.mjs` re-checks every class each build. The 404 gap that held this at *Partial* is closed by `app/not-found.tsx`. Account and admin surfaces do not exist yet; robots.txt already disallows their paths. Since 2026-08-26 the root layout's metadata default is fail-closed rather than the homepage's identity, so a route that declares no metadata is `noindex` with no canonical instead of claiming to be `/`; and `/signin` is `Allow`ed so the `noindex` it carries can actually be read (finding F7). Live verification is owner action O-1. |
 | SEO-003 | P0 | Implement canonical and redirect policy | Engineering | SEO-001 | Done (repository) / owner-verified live | Verified against the built Worker: `/`, `/privacy`, `/terms` self-canonicalize on the canonical host only; private surfaces and the 404 carry no canonical; off-host output fails closed; trailing slashes normalize in one hop (`/privacy/` -> 308 -> `/privacy`); and `www.ownword.pro` now 308s to the apex in one hop with path, query and method preserved, so `www` consolidates instead of leaking. 308 rather than 301 so a `POST` to `/api/*` cannot be silently downgraded to `GET`. **Not verifiable here:** that the deploy carrying the redirect is live, and that HTTP -> HTTPS is enforced at the Cloudflare edge. Both are owner action O-6. |
 | SEO-004 | P0 | Generate XML sitemap and robots.txt | Engineering | SEO-002 | Done (repository) / owner-verified live | Canonical-host output lists exactly `/`, `/privacy`, `/terms`, each an existing 200 route drawn from `src/lib/public-pages.ts`; robots.txt references the sitemap; off-host output fails closed. `lastmod` is emitted only for `/privacy` and `/terms`, from the same constant those pages display, and a test fails if a sitemap date is not visible on its page; `/` tracks no material modification date and correctly omits `lastmod`. `/signin`, `/history` and `/checkout/success` are private and are proven absent. Both files read the shared host rule rather than a private copy, and their output is pinned on and off the canonical host. The `Disallow` list is now the exported `CRAWLER_DISALLOWED_PREFIXES` in `src/lib/public-pages.ts`, which lets `tests/page-quality-gate.test.mjs` fail the build if an indexable page ever links into a disallowed path. Live fetch of the two files is owner action O-1. |
 | SEO-005 | P0 | Build reusable metadata API | Engineering + Copy | SEO-001 | Done (repository) | `src/lib/public-pages.ts` is the shared registry and holds both builders. **Adopted by every route that renders HTML**, `app/page.tsx` included since handoff H-1 closed on 2026-08-26: `app/layout.tsx`, `/`, `/privacy`, `/terms`, `app/sitemap.xml/route.ts`, `app/robots.txt/route.ts`, `app/not-found.tsx`, and the `/signin`, `/history`, `/checkout/success` layouts. The root layout's default is now `buildPrivateSurfaceMetadata()` rather than the homepage's own metadata, so a route that declares nothing is `noindex` with no canonical instead of inheriting `/`. **The gate is proven, not asserted:** on 2026-08-25 five deliberate mutations were each caught by `tests/metadata-contract.test.mjs` with a message naming the defect — removing `og:image` (*is missing og:image*), duplicating a description (*duplicates another page's meta description*), adding a second H1 (*must have exactly one H1, found 2*), registering a sitemap URL with no route (*does not return 200*), and dropping the canonical (*does not self-canonicalize*). On 2026-08-26 a sixth proved the gate now reaches the homepage: deleting `generateMetadata()` from `app/page.tsx` fails it with *https://ownword.pro/ is missing a usable `<title>`*, where before the split it changed nothing. Two structural regressions the field gate cannot see are held by source guards in the same file: the layout must not reach for `buildPublicPageMetadata` again, and `app/page.tsx` must not become a client component. |
 | SEO-006 | P0 | Add truthful structured data | Engineering + SEO | SEO-001, pricing config | Done (repository) / owner-verified live | `Organization` + `WebSite` ship from `src/lib/site-structured-data.ts` **on the canonical host only**, and parse valid. Every property is verifiable from `src/config/product.ts`: brand name, `legalName` Bosphorus Elevate LLC, origin, support `ContactPoint`, `inLanguage`. `logo`, `sameAs`, `aggregateRating`, `foundingDate`, `address` and `SearchAction` are deliberately absent and a test fails if any appears. **The correction recorded on 2026-08-25 is now resolved rather than restated.** The homepage's `SoftwareApplication` block was *not* host-gated, because it rendered from the client component `app/page.tsx`; it moved into `site-structured-data.ts` with H-1 and is gated by the same host rule. A rendered test requires the entity and its `Offer` prices on `ownword.pro` and asserts their absence on `staging.ownword.pro`, `localhost` and `www.ownword.pro.example.com`. Finding F4 is closed. Remaining: live Rich Results validation, owner action O-4. |
 | SEO-007 | P0 | Protect customer text from discovery/analytics | Security + Engineering | SEO-002 | Done (repository) | Closed against its own acceptance criteria, each with a named test. **URL:** `tests/discovery-privacy.test.mjs` walks every internal `href` on every route and fails if a query value exceeds 64 characters or contains whitespace; the only identifiers this application puts in a URL are a job UUID and a `return_to` path. **Metadata, sitemap, structured data:** `tests/metadata-contract.test.mjs` and `tests/rendered-html.test.mjs` — private surfaces carry no title claim, no description, no canonical, no social card, and no page-level entity. **Analytics:** `/api/events` allowlists property *names* and caps string values at 64 bytes server-side (`tests/events-api.test.mts`), and the new client-side guard fails the build if any `track()` call site sends a name the endpoint does not allow — so a call passing a draft cannot ship as a silent production 400. **Public cache:** every personalizable HTML route answers `no-store, must-revalidate`, asserted per route. **Unauthorized response:** `tests/history-access.test.mts`, `tests/result-access.test.mts` and `tests/sentence-operations.test.mts` hold every read, write and delete to the owner who made it, including the sentence endpoint that has no UI. The concern the previous pass left open — that `/history` renders a customer's own writing and must be authenticated on the server rather than merely `noindex` — is resolved by measurement: `/history` is a client component that fetches over an authenticated request, so its server HTML contains no customer text at all, on any host, which the crawl sweeps for directly. **Not in these criteria, and not claimed here:** server-side logging and retention, which are `docs/SECURITY.md`'s. |
-| SEO-008 | P0 | Establish performance budgets | Engineering + Design | Core UI | Open | Not verified in any of the three QA passes, and not verifiable from this repository: Core Web Vitals need field data or a Lighthouse run against a live host this session cannot reach. Owner action O-8. The budgets themselves are stated in Section 6; what is missing is a measurement, not a target. Not attemptable by an agent here — a rendered-HTML parse cannot produce an LCP. |
-| SEO-009 | P0 | Verify search-engine consoles | SEO + Hosting (owner action) | Live deployment | Partial (owner-reported; steps 1-4 and 7 done, 5-6 and 8 open) | **Owner-reported, not verified by any agent:** Google Search Console is connected for `ownword.pro`, the sitemap is submitted, and Bing Webmaster Tools verification is complete. **Verified from the repository:** the `msvalidate.01` token is present and ungated in `app/layout.tsx` (it renders on every host, including off-canonical, which is deliberate so a Bing fetch through any hostname still finds it), and the canonical-host sitemap serves exactly the three apex URLs with `lastmod` on `/privacy` and `/terms`. **No agent in this project can reach GSC, Bing, or the live host** — outbound to `ownword.pro` is blocked from the sandbox — so nothing below the repository line is evidence. Still open and owner-only: live URL Inspection on `/`, `/privacy`, `/terms` for *Indexing allowed = Yes* and the expected canonical (step 5); re-check `www` now that the 308 has shipped (step 6); record the console-reported URL counts and the Rich Results result here (step 8). |
-| SEO-010 | P0 | Connect organic funnel attribution | Analytics + Engineering | Existing events | Open | Not attemptable from this repository, and re-confirmed 2026-08-26. Funnel events exist and are well shaped: twelve `track()` call sites, an allowlisted event vocabulary, and content-free properties (now guarded on both sides, see SEO-007). But `app/api/events/route.ts` validates each event and **returns 204 without forwarding or storing it** — provider forwarding is deliberately deferred until a privacy-reviewed destination is configured — so there is nothing to join. Closing this needs a chosen analytics destination *and* a Search Console export, neither of which an agent here can reach. |
-| SEO-011 | P0 | Write responsible claims standard | Legal + Copy + SEO | Product brief | Open | Guardrails are stated in this document, `PRODUCT.md`, and `README.md`, but there is no single Legal-approved allowed/forbidden claims list. **Not an agent's to close: the missing artefact is an approval, not a document.** SEO-013's claims check is a mechanical floor under it — it fails nine claim *shapes* on every build — and Section 11.5 says what that floor does not reach. The floor is worth having while the standard is drafted; it is not the standard. |
-| SEO-012 | P0 | Publish trust proof modules | Humanization + Copy | Benchmark evidence | Open | No `/trust/*` pages exist; the homepage carries inline trust copy only. **Evidence-blocked, not writing-blocked, and re-confirmed 2026-08-26:** a trust module has to present a measured result, and the deployed engine is the deterministic substitution baseline (`HUMANIZATION_PROVIDER` unset, `resolveHumanizationProvider()` fails closed). Benchmarks run against it measure a substitution table, not a product claim. Same reasoning as H-6 and SEO-017/018. |
+| SEO-008 | P0 | Establish performance budgets | Engineering + Design | Core UI | Open — owner action O-8 | The budgets are stated in Section 6. **The single missing input is a measurement: a Lighthouse run or 28 days of Chrome UX field data against `https://ownword.pro`.** Owner: the site owner, because outbound to that host is blocked from every agent session in this project and no rendered-HTML parse can produce an LCP, an INP or a CLS. Not deferred for want of effort — there is no version of this an agent can attempt. Nothing else is missing: when the numbers exist, they go in Section 11.1 step 8 and this row closes or takes a dated exception with a named owner. |
+| SEO-009 | P0 | Verify search-engine consoles | SEO + Hosting (owner action) | Live deployment | Partial — owner action, steps 5, 6 and 8 remain | **Verified from the repository:** the `msvalidate.01` token is present and ungated in `app/layout.tsx` (deliberately ungated, so a Bing fetch through any hostname finds it), and the canonical-host sitemap serves exactly the three apex URLs with `lastmod` on `/privacy` and `/terms`. **Owner-reported, not verified by any agent:** Search Console connected, sitemap submitted, Bing verification complete (steps 1-4 and 7). **The three missing inputs are all logins, and all the owner's:** step 5, live URL Inspection on `/`, `/privacy` and `/terms` for *Indexing allowed = Yes* and the expected canonical (O-3); step 6, re-check `www` in the console now that the 308 has shipped (O-6); step 8, record the console-reported URL counts and the Rich Results outcome in Section 11.1 (O-2, O-4, O-5). No agent in this project can reach GSC, Bing or the live host, so nothing below the repository line here is evidence. |
+| SEO-010 | P0 | Connect organic funnel attribution | Analytics + Engineering | Existing events | Open — one missing input, and it is a decision | The events are well shaped and were re-confirmed 2026-08-27: twelve `track()` call sites, an allowlisted vocabulary, content-free properties guarded on both sides (SEO-007). **The single missing input is a privacy-reviewed analytics destination.** `app/api/events/route.ts` validates every event and **returns 204 without forwarding or storing it**, by design — so there is no store to join a Search Console export against, and there is nothing an agent can attribute. Owner: Product chooses the destination, Security/Legal review it, Engineering wires the forwarder. Until then no funnel figure exists anywhere in this system, and Section 9's preview-to-paid KPIs are unmeasured rather than unmeasured-yet-estimated. |
+| SEO-011 | P0 | Write responsible claims standard | Legal + Copy + SEO | Product brief | Partial — draft written 2026-08-27, awaiting Legal approval | **The document now exists: `docs/CLAIMS.md`.** It is the single allowed/forbidden list this row asked for, assembled from the six places the rules were already scattered (Section 1 here, `docs/ACTIVATION.md`'s rejected tactics, `docs/MONETIZATION.md`'s dark-pattern and roadmap-honesty rules, `docs/PRODUCT.md`, `README.md`, and the nine claim shapes in `tests/page-quality-gate.test.mjs`). It enumerates eight allowed claim shapes with the artifact each requires, the seven machine-enforced forbidden shapes, and the eleven forbidden shapes no build can see. `tests/claims-standard.test.mjs` compares its enforced-shape table against the gate in both directions so the two cannot drift, and fails the build if the document ever claims an approval — both mutations verified. **The single missing input is the approval itself, and it is Legal's.** Section 7 of that file is an empty table for Legal to fill in; its first row currently reads *Approved: No*. This row does not close until that row changes, and no agent may change it. |
+| SEO-012 | P0 | Publish trust proof modules | Humanization + Copy | Benchmark evidence | Open — evidence-blocked, re-confirmed 2026-08-27 | **The single missing input is a measured result produced by the engine that is actually deployed.** A trust module presents a measurement; `HUMANIZATION_PROVIDER` is unset and `resolveHumanizationProvider()` fails closed, so the deployed engine is the deterministic substitution baseline and any benchmark run today measures a substitution table rather than the product. Owner: Product selects a provider, Humanization produces the dated measurement. This is not writing time — writing it now would state a result nobody has. Same reasoning as H-6 and SEO-017/018. |
 | SEO-013 | P1 | Create page-template quality gate | SEO + Engineering | SEO-005 | Done (repository) | `tests/page-quality-gate.test.mjs` runs the template against every page in `PUBLIC_PAGES` on every build, and the registry now carries the fields it checks, so a page cannot be registered without declaring them. Enforced mechanically: one distinct declared `intent` per page (>= 40 characters, unique — two pages that cannot state different intents are one page); an accountable `contentOwner` role; a `primaryCta` that is actually rendered as a link or button with that label and href; a `lastModified` the page shows a reader, and no displayed date the sitemap does not claim; at least one link to another indexable page; no link into a path robots.txt disallows; nine forbidden claim *shapes* (guaranteed detector or Turnitin outcome, star rating, customer count, unevidenced percentage, ranking claim, superlative market claim, a free trial that does not exist), negation-aware so the required disclaimer on `/terms` is not mistaken for the promise it disclaims; and the static half of accessibility — `lang`, exactly one non-empty H1, no skipped heading level, a `<main>` landmark, `alt` on every image, a name on every link and inline SVG, a label on every form control, and no native `disabled` on a focusable control. Canonical and off-host `noindex` are re-checked from the registry side. Every rule was mutated and confirmed to fail before being kept. **What it cannot check is listed in Section 11.5 rather than implied to be covered:** whether evidence is original, whether a well-shaped claim is true, author identity, analytics coverage, and the dynamic half of accessibility. |
-| SEO-014 | P1 | Launch AI Writing Pattern Diagnostic | Humanization + Engineering | Privacy review | Open | Tool analyzes stated patterns, does not infer authorship probability, stores no text by default, has an accessible explanation and useful empty/error states |
-| SEO-015 | P1 | Publish field guide | SEO + Copy | SEO-014 | Open | Contains >=12 original annotated examples, counterexamples, source/method notes, stable anchors, and links to the live diagnostic |
-| SEO-016 | P1 | Publish benchmark methodology/results | Humanization + SEO | Benchmark V1 | Open | Page documents corpus, metrics, versions/dates, aggregate results, failures, limitations, provenance, changelog, and downloadable data where licensed |
-| SEO-017 | P1 | Publish Academic mode page | SEO + Legal + Copy | SEO-011, real examples | Open (evidence-blocked) | Distinct academic workflow/example, citation protection proof, visible integrity notice, and zero evasion claims. Blocked on evidence, not on writing: see the note under SEO-018. |
-| SEO-018 | P1 | Publish Professional mode page | SEO + Copy | Real examples | Open (evidence-blocked) | Distinct business workflow/example, factual/terminology proof, and product start CTA; not duplicated from core page. **Deliberately not built in the 2026-08-25 pass.** The deployed engine is a deterministic demo baseline: `src/lib/humanization/deterministic-provider.ts` distinguishes Professional from the other modes by exactly three regular-expression substitutions layered on a shared table. A page claiming a distinct professional workflow, or mode-specific quality, would state something the product cannot do today, which Section 1 forbids outright. Build it when the mode genuinely differs and a real annotated before/after exists. |
-| SEO-019 | P1 | Publish meaning-preservation checklist | Humanization + SEO | SEO-012 | Open | Web and accessible downloadable versions cover all protected claim classes, cite methodology, and contain no customer text |
-| SEO-020 | P1 | Run crawl/render QA | QA + SEO | SEO-002..008 | Partial | Third pass completed 2026-08-26 and it is now a program, not a paragraph: `scripts/seo-crawl.mts` (`npm run seo:crawl`) renders every route the application serves out of the built Worker on four hosts and reports. Recorded in Section 11.2. Of the five findings from the second pass, F4 (un-host-gated `SoftwareApplication`) is now fixed and F3 (no H1 on the three private surfaces) is unchanged and still DESIGN-owned as H-7. Two new: F6, a genuine 404 emits no `cache-control` at all — the only HTML response that does — which is ENG-owned and carries no personalization; and F7, `/signin` was `Disallow`ed while `/` linked to it, the one shape that gets indexed URL-only, now fixed by letting the crawler read its `noindex`. Zero orphan indexable pages, zero broken internal links, valid JSON-LD everywhere it is emitted, `og:image` resolves, and no customer text or session identity in any crawlable surface on any host. Held at *Partial* because F3 and F6 are real and open, and because performance (SEO-008) still needs a live host this session cannot reach. |
-| SEO-021 | P1 | Create weekly SEO scorecard | SEO + Analytics | SEO-009, SEO-010 | Open | Report includes business, funnel, demand, quality, technical, link, and risk KPIs with 7/28-day comparisons and written decisions |
-| SEO-022 | P2 | Publish category comparison | SEO + Legal | Firsthand test corpus | Open | Dated methodology, real testing, balanced findings, relationship disclosures, correction route, and update owner are visible |
-| SEO-023 | P2 | Build content pruning cadence | SEO | 60 days of data | Open | Monthly review labels each page keep/improve/merge/retire; changes preserve redirects and are tied to traffic/conversion/citation evidence |
-| SEO-024 | P2 | Evaluate localization | SEO + Product | Demand evidence | Open | Decision memo documents demand, product support, translation/review ownership, hreflang design, and why each proposed locale is genuinely useful |
-| SEO-025 | P2 | Agent-friendly product audit | Engineering + SEO | Stable public UI | Open | Public product flow has semantic controls, labels, understandable errors, and stable product/pricing facts; no new protocol adopted without consumer evidence |
-| SEO-026 | P0 | Publish Privacy and Terms pages | SEO + Legal | SEO-001 | Blocked (Legal signoff) | `/privacy` and `/terms` exist, return 200, carry unique host-gated metadata, use the configured Ownword/operator identity, and contain substantive retention, billing, refund, governing-law, liability, eligibility, and termination language without `PENDING` placeholders. The Terms page explicitly records that counsel has not reviewed it; M4-03 therefore remains blocked until LEGAL approves the disclosures. |
+| SEO-014 | P1 | Launch AI Writing Pattern Diagnostic | Humanization + Engineering | Privacy review | Open — evidence- and build-blocked | Acceptance unchanged: analyzes stated patterns, does not infer authorship probability, stores no text by default, has an accessible explanation and useful empty/error states. **The single missing input is a diagnostic that produces findings worth showing.** The analyzer exists (`src/lib/humanization/analysis.ts`), but its output has never been checked against a corpus, and shipping a tool whose findings are unvalidated is the *superficial tool built to attract links* Section 8 forbids by name. Owner: Humanization, for the validation; Engineering, for the surface. |
+| SEO-015 | P1 | Publish field guide | SEO + Copy | SEO-014 | Open — blocked by SEO-014 | Acceptance unchanged: >=12 original annotated examples, counterexamples, source/method notes, stable anchors, and links to the live diagnostic. **The single missing input is twelve original annotated examples**, which means twelve real before/after passes through the shipped engine — the same evidence SEO-012 waits on, plus SEO-014's tool for the guide to link to. Owner: Humanization for the examples, SEO for the guide. |
+| SEO-016 | P1 | Publish benchmark methodology/results | Humanization + SEO | Benchmark V1 | Open — evidence-blocked | Acceptance unchanged: corpus, metrics, versions/dates, aggregate results, failures, limitations, provenance, changelog, and downloadable data where licensed. **The single missing input is a benchmark run against a selected provider.** The harness exists in `benchmarks/` and `docs/BENCHMARKS.md`; what it has to measure does not, because `HUMANIZATION_PROVIDER` still selects the deterministic baseline. Publishing its numbers as product results would be the invented-precision failure `docs/CLAIMS.md` Section 2.4 forbids. Owner: Product (provider selection), then Humanization. |
+| SEO-017 | P1 | Publish Academic mode page | SEO + Legal + Copy | SEO-011, real examples | Open — declined a fourth time, 2026-08-27 | **The Claude provider merged and nothing changed: `HUMANIZATION_PROVIDER` still selects deterministic, so Academic still differs from the other modes by three regular-expression substitutions, and a page describing a distinct academic workflow would state something the engine cannot do.** Acceptance unchanged: distinct academic workflow/example, citation-protection proof, visible integrity notice, zero evasion claims. Owner: Product, to select a provider; Humanization, to produce one real annotated before/after per mode. |
+| SEO-018 | P1 | Publish Professional mode page | SEO + Copy | Real examples | Open — declined a fourth time, 2026-08-27 | **The Claude provider merged and nothing changed: `HUMANIZATION_PROVIDER` still selects deterministic, so Professional still differs from the other modes by exactly three regular-expression substitutions (`a lot of` -> `many`, `kind of` -> `somewhat`, `get the ball rolling` -> `begin`) layered on a shared table, and a page claiming a distinct business workflow or mode-specific quality would state something the engine cannot do.** Acceptance unchanged: distinct business workflow/example, factual/terminology proof, product start CTA, not duplicated from the core page. Owner: Product, to select a provider; Humanization, for the annotated example. |
+| SEO-019 | P1 | Publish meaning-preservation checklist | Humanization + SEO | SEO-012 | Partial — written 2026-08-27, not published | **Three of the four acceptance clauses are met and the content exists: `docs/MEANING-PRESERVATION.md`.** All thirteen protected classes from `ProtectedContentKind` are covered, each with what the extractor recognises *and* what it does not; the method note describes `DeterministicVerificationProvider` as written — its four computations, its real thresholds, its pass rule, its issue vocabulary, and that a candidate which cannot pass is refused; and it contains no customer text. `tests/meaning-preservation.test.mjs` holds the coverage clause in both directions and the method note's quoted constants, and was mutated four ways. Crucially it makes **no claim about rewrite quality**, which is what unblocks it while SEO-012 and SEO-017/018 stay blocked. **The single missing clause is publication: a web page and an accessible download do not exist, because that is a new public route.** Owner: Product, under Section 7's velocity caps and Section 3's query-to-page rule. When that decision is made, this file is the content and both existing page gates hold the new route automatically. |
+| SEO-020 | P1 | Run crawl/render QA | QA + SEO | SEO-002..008 | Partial — every finding closed; held only by SEO-008 | Fourth pass completed 2026-08-27: `npm run seo:crawl` renders every route on four hosts and reports **zero findings**. **All seven findings from all passes are now closed.** F6 (a genuine 404 with no `cache-control`) was fixed in this pass by `applyDefaultHtmlCacheControl()` in `worker/index.ts`; F3 (no H1 on the three private surfaces) by the auth-surface design pass on 2026-08-27. The crawl script itself had a blind spot that let F6 sit for two passes — it decided what was HTML by `status === 200`, which excluded the 404 from every check below it — and now reads the content type, holds the 404 to the private-surface rules, reports `cache-control`, and raises an HTML response with no cache directive as a finding in its own words. Zero orphan indexable pages, zero broken internal links, valid JSON-LD everywhere it is emitted, `og:image` resolves, and no customer text or session identity on any crawlable surface on any host. **The single reason this is not Done is the page-experience half: SEO-008 needs a Lighthouse run or field data against a live host no agent here can reach (owner action O-8).** |
+| SEO-021 | P1 | Create weekly SEO scorecard | SEO + Analytics | SEO-009, SEO-010 | Open — blocked by its two dependencies | Acceptance unchanged: business, funnel, demand, quality, technical, link and risk KPIs with 7/28-day comparisons and written decisions. **The two missing inputs are its stated dependencies, and both are already precisely described above: a Search Console export (SEO-009, owner) and an analytics destination (SEO-010, Product + Security).** Four of the seven KPI families have no source at all today. A scorecard template written now would be a form with empty columns, and filling those columns with anything is the fabricated-metric failure `docs/CLAIMS.md` forbids. Owner: SEO, once either dependency lands. |
+| SEO-022 | P2 | Publish category comparison | SEO + Legal | Firsthand test corpus | Open — evidence-blocked | Acceptance unchanged: dated methodology, real testing, balanced findings, relationship disclosures, correction route, and a visible update owner. **The single missing input is a firsthand test corpus: the same passages run through Ownword and through each named competitor, dated, by someone who ran them.** It does not exist, and neither half can be manufactured here — the competitor runs need accounts and outbound access no agent in this project has, and Ownword's own side needs a selected provider (SEO-012). Owner: Humanization/SEO to run it, Legal to review the comparative claims before publication. Note that `docs/CLAIMS.md` Section 2.7 forbids implicit comparisons too: *unlike other tools* is a comparison. |
+| SEO-023 | P2 | Build content pruning cadence | SEO | 60 days of data | Partial — process defined 2026-08-27, first run needs data | **The definitional half is complete and in force: Section 15 of this document.** It fixes when the review runs (monthly, first working day, every page in `src/lib/public-pages.ts`, no sampling), the four labels and what earns each, the 90-day exemption from retire/merge, and six binding rules — a retirement is a 301 to a specifically relevant page and never a blanket redirect to `/`; no redirect chain longer than one hop; registry and sitemap move in the same commit; a label without evidence is not a label; never retire a page for underperforming a claim `docs/CLAIMS.md` forbids it from making; never retire a legal page. **The single missing input is the data to run it on: 60 days of Search Console performance on a page-set larger than the current three, plus SEO-010's destination for any conversion-based label.** Owner: the site owner for the export, Product for SEO-010. Defining the cadence before the data is deliberate — a pruning rule invented after a page has disappointed is a rule written to justify a decision already made. |
+| SEO-024 | P2 | Evaluate localization | SEO + Product | Demand evidence | Done — decision recorded 2026-08-27 | The acceptance criterion is a decision memo, and Section 16 of this document is it. **Decision: defer, with one named reversal condition.** It documents demand (there is none, in either direction, and why: no analytics destination, no customer population, and the one useful source — Search Console's country report — is one owner export away), product support (decisive and independent of demand: the deployed engine's substitution tables, the verifier's negation and stop-word lists, and half the protected-content extractor are English, so a localized page would sell a product that does not work in that language), translation and review ownership (unowned, including translated legal pages nobody has reviewed in English yet), and the full hreflang design so a reversal is an implementation rather than a redesign. **No locale is proposed** — naming one without evidence would be the invented-precision failure this document forbids elsewhere. Reversal needs all three of demand, a provider that handles the language *with* the verifier extended to it, and named ownership; owner: Product with SEO. |
+| SEO-025 | P2 | Agent-friendly product audit | Engineering + SEO | Stable public UI | Done (repository) | Audited 2026-08-27 against the built Worker; the public product flow passes all four halves, so the work worth doing was making it stay that way. **Semantic controls:** every interaction handler in the flow is on a `<button>`, no element is painted as a button with `role`, and every button declares its type. **Labels:** already held by `tests/page-quality-gate.test.mjs` and deliberately not duplicated. **Understandable errors:** all 71 error literals in `app/api/**` and `src/lib/**` are plain sentences with terminal punctuation, no internal identifiers, and no interpolation that could carry the customer's writing. **Stable facts:** the `Offer` blocks equal the purchasable plans in `src/config/pricing.ts`, every offered price is visible on the page, no currency amount appears that the catalog does not know, allowances match, and every named entity uses the configured product name. `tests/agent-readability.test.mjs` enforces the three the page gate does not, each mutated first. **The guardrail is enforced, not just stated:** there is no `llms.txt` and the test fails if one appears in `public/`, if `/llms.txt`, `/ai.txt` or `/.well-known/ai-plugin.json` stops returning 404, or if robots.txt advertises one — Google's guidance rejects it by name (Section 1), so revisiting that decision means deleting a line out loud rather than a file appearing quietly. |
+| SEO-026 | P0 | Publish Privacy and Terms pages | SEO + Legal | SEO-001 | Blocked — Legal signoff | `/privacy` and `/terms` exist, return 200, carry unique host-gated metadata, use the configured Ownword/operator identity, and contain substantive retention, billing, refund, governing-law, liability, eligibility and termination language with no `PENDING` placeholders. The Terms page records on its own face that counsel has not reviewed it. **The single missing input is counsel review and approval of the processor, retention/deletion, subscription, cancellation/refund and prohibited-claim disclosures. Owner: Legal.** No agent may close this, and no agent may soften the on-page notice that says so. M4-03 stays a release blocker until Legal approves. |
 
 ### 11.1 Owner actions: search-console verification (SEO-009)
 
@@ -566,7 +603,7 @@ sandbox — so it is recorded as the owner's report, not as evidence.
 Do not request indexing for `/signin`, `/checkout/success`, `/history`, or any `/api/` URL. They are private
 by design, and all of them are `noindex, nofollow, nocache` with no canonical.
 
-### 11.2 Crawl and render QA pass (SEO-020, third pass 2026-08-26)
+### 11.2 Crawl and render QA pass (SEO-020, fourth pass 2026-08-27)
 
 **Method, and it is now reproducible.** The pass is `scripts/seo-crawl.mts`, run as `npm run seo:crawl`
 after `npm run build`. It renders every route the application serves out of the built Worker
@@ -584,6 +621,17 @@ because a stub makes every `<link href="/icon.svg">` and the `og:image` look bro
 nobody can act on. The second pass's paragraph is superseded by the program; run it rather than trusting
 this section's age.
 
+**The script had a blind spot and it is worth recording, because it is why F6 survived two passes.** It
+decided what counted as HTML by `status === 200`, so the 404 page — an HTML document a crawler renders and
+a cache stores like any other — was excluded from every check below that line and printed as `(not html)`.
+Since 2026-08-27 it reads the content type instead and excludes redirects by status, so the 404 is held to
+the same private-surface rules as `/signin`: `noindex` on every host, no canonical, no description, no
+social card, no page-level entity, one H1. Each row now also reports `cache-control`, and an HTML response
+that declares none is a finding in its own words. Verified by reintroducing F6 deliberately: the crawl
+reports it nine times across three hosts, where before it reported nothing.
+
+**Fourth pass result: zero findings.**
+
 **This is a rendered-HTML pass, not a live-site pass.** Outbound to `ownword.pro` is blocked from this
 sandbox. Nothing here is an observation of production; every statement is about the code in this repository
 as built. The live equivalents are owner actions O-1 and O-6.
@@ -594,15 +642,21 @@ as built. The live equivalents are owner actions O-1 and O-6.
 |---|---|---|---|
 | F1 | A genuine 404 emitted `<link rel="canonical" href="https://ownword.pro">` along with the homepage title, description and social card. A canonical asserts that two URLs are the same page; a missing URL is not the homepage, and repeated across every stale link that is how a 404 gets folded into `/`. | High | **Fixed** — `app/not-found.tsx` |
 | F2 | `/signin`, `/history` and `/checkout/success` inherited the homepage's meta description and its whole Open Graph and Twitter card from the root layout, including `og:url` pointing at `https://ownword.pro`. A private URL pasted into a chat unfurled as the homepage. `/checkout/success` also wore the homepage `<title>` verbatim. | Medium | **Fixed** — `buildPrivateSurfaceMetadata()` |
-| F3 | `/signin`, `/history` and `/checkout/success` render **zero** `<h1>` elements; each opens its content with an `<h2>` inside `<main>`. Not an indexing problem (all three are `noindex`), but Section 6 requires one clear H1 per page for the document outline, and screen-reader users navigating by heading level find no top-level heading. | Low | **Open** — handoff H-7, DESIGN/COPY-owned |
+| F3 | `/signin`, `/history` and `/checkout/success` rendered **zero** `<h1>` elements, each opening with an `<h2>` inside `<main>`. Not an indexing problem (all three are `noindex`), but Section 6 requires one H1 per page for the document outline, and screen-reader users navigating by heading level found no top-level heading. | Low | **Fixed 2026-08-27** by the auth-surface design pass. Each page renders exactly one `<h1>` naming its state, pinned by `tests/private-surface-quality.test.mjs`. |
 | F4 | The homepage's `SoftwareApplication` JSON-LD, `Offer` block included, was emitted on **every** host — it rendered from `app/page.tsx`, a client component that cannot read the request `Host`. `Organization` and `WebSite` were correctly gated. Nothing was indexed off-host (those pages are `noindex`), but SEO-006's gating claim did not hold for this block. | Low | **Fixed** — H-1 split the route; the block now lives in `src/lib/site-structured-data.ts` behind the same host rule, with a test requiring it on `ownword.pro` and asserting its absence on three off-canonical hosts |
 | F5 | `www.ownword.pro` was a bound custom domain serving the entire application with no redirect. Fail-closed (`Disallow: /`, `noindex`), so nothing duplicate was ever indexed, but nothing consolidated either: a link or share on a `www` URL earned the apex nothing. | Medium | **Fixed in code** — 308 in `worker/index.ts`; live state unverified (O-6) |
-| F6 | A genuine 404 emits **no `cache-control` header at all** — the only HTML response in the application that does not. Every 200 HTML route answers `no-store, must-revalidate`. RFC 9111 lets a shared cache apply heuristic freshness to a 404 with no explicit directive, so a 404 can outlive the URL becoming a real page. It carries no personalization, so this is a staleness risk rather than a disclosure risk. The header comes from the framework's error path, not from application code. | Low | **Open** — ENG-owned. `tests/discovery-privacy.test.mjs` excludes the 404 from its shared-cache assertion and says why, so the exclusion is a record rather than a silence |
+| F6 | A genuine 404 emitted **no `cache-control` header at all** — the only HTML response in the application that did not. Every 200 HTML route answers `no-store, must-revalidate`. RFC 9111 lets a shared cache apply heuristic freshness to a response with no explicit directive, and 404 is heuristically cacheable by default, so a 404 could outlive the URL becoming a real page. It carries no personalization, so this was a staleness risk rather than a disclosure risk. The header comes from the framework's dynamic-render path and the error path does not go through it. | Low | **Fixed 2026-08-27** — `applyDefaultHtmlCacheControl()` in `worker/index.ts` fills the silence for any HTML response that arrives without a directive. Absent-only and HTML-only, so `/robots.txt` and `/sitemap.xml` keep their own `public, max-age=3600` and hashed assets keep their long lives. `tests/discovery-privacy.test.mjs` dropped its exclusion and added both halves as their own tests; removing the call fails with *"/this-page-does-not-exist may be retained by a shared cache"*, and making it a blanket `set` fails with *"/robots.txt lost the cache directive it sets for itself"* |
 | F7 | `/signin` was `Disallow`ed in robots.txt *and* linked from the header of `/`, the site's most indexable page. That combination — invited by a link, refused by robots.txt — is precisely the shape Google indexes URL-only: the crawler is not allowed to fetch the page, so the page's own `noindex` is never read and cannot object. `/history` already took the opposite side of this trade for exactly this reason. Unlike `/checkout/success`, which is reached only through a Stripe redirect and linked from nowhere, `/signin` has an inbound internal link. | Medium | **Fixed** — `/signin` left the `Disallow` list and keeps `noindex, nofollow, nocache`, so the instruction that actually removes it can be read. `tests/page-quality-gate.test.mjs` now fails the build if any indexable page links into a disallowed path |
 
-**F3 is unchanged and was re-measured, not assumed.** `/signin`, `/history` and `/checkout/success` still
-render zero `<h1>` on all four host profiles. It remains DESIGN/COPY-owned (H-7): the heading is visible
-copy in files SEO does not own, and the fix is a one-element change per page.
+**Every finding in this table is now closed.** F3 was fixed by the auth-surface design pass on
+2026-08-27; F6 was fixed in this pass. The fourth crawl, over four host profiles and fourteen routes,
+reports zero findings, zero orphan indexable pages, zero broken internal links, valid JSON-LD everywhere it
+is emitted, an `og:image` that resolves, and no customer text or session identity in any crawlable surface
+on any host.
+
+**SEO-020 is nevertheless still *Partial*, and for one reason only.** Section 6's release gate includes
+page experience, and page experience needs a Lighthouse run or field data against a live host this session
+cannot reach — SEO-008, owner action O-8. Nothing in the crawl half remains open.
 
 Findings fixed in earlier passes and re-confirmed still fixed: the malformed `nonocache` robots directive;
 the `/history` and `/checkout/success` canonical conflict; sitemap/registry drift; the three dead
@@ -674,8 +728,10 @@ and it is noted here rather than fixed because the fix is a judgement about whic
 
 ### 11.3 Handoffs — work SEO deliberately did not do
 
-Statuses below are as of 2026-08-26 (third pass). H-1, H-2, H-3 and H-4 are **done**; they are kept here
-with what was actually built, because the acceptance criteria in Sections 11 and 6 point at them.
+Statuses below are as of 2026-08-27 (fourth pass). H-1, H-2, H-3, H-4, H-7 and H-8 are **done**; they are
+kept here with what was actually built, because the acceptance criteria in Sections 11 and 6 point at them.
+**H-5 and H-6 are the only two still open, and both wait on something no amount of writing produces:** a
+purchase observed end to end, and a rewrite engine that is not the substitution baseline.
 
 - **H-1 — Adopt the shared metadata helper in `app/page.tsx`. Done 2026-08-26.** The route is split.
   `app/page.tsx` is a server component that exports `generateMetadata()` and renders
@@ -757,7 +813,9 @@ with what was actually built, because the acceptance criteria in Sections 11 and
   end on the production host. Sign-in shipping does not close this; a completed purchase does.
 
 - **H-6 — No new content page was published in this pass either, on purpose, and for the same reason.**
-  Declined a third time, and re-verified rather than carried forward. `src/lib/humanization/deterministic-provider.ts`
+  **Declined a fourth time on 2026-08-27**, and re-verified rather than carried forward. The one-line
+  version: *the Claude provider is merged, `HUMANIZATION_PROVIDER` still selects deterministic, so nothing
+  the mode pages would describe has changed.* `src/lib/humanization/deterministic-provider.ts`
   still distinguishes Professional from the other modes by exactly three regular-expression substitutions
   (`a lot of` -> `many`, `kind of` -> `somewhat`, `get the ball rolling` -> `begin`) layered on a shared
   table; Academic and Casual are three each on the same table. A mode page (SEO-017, SEO-018) would have to
@@ -780,23 +838,38 @@ with what was actually built, because the acceptance criteria in Sections 11 and
   **no customer-facing UI**. Do not write page copy, metadata, or structured data implying a customer can
   edit or regenerate an individual sentence today.
 
-- **H-7 — Give the three private surfaces a top-level heading. Still open, DESIGN/COPY-owned.** `/signin`,
-  `/history` and `/checkout/success` render zero `<h1>`; each opens with an `<h2>` inside `<main>` (finding
-  F3). Section 6 requires one clear H1 per page, and a screen-reader user navigating by heading level finds
-  no top-level heading on any of them. The fix is a one-element change per page, but the heading is visible
-  copy and those files are DESIGN's, so SEO did not make it. Note that the metadata gate in
-  `tests/metadata-contract.test.mjs` enforces exactly-one-H1 only for **sitemap** URLs, and
-  `tests/page-quality-gate.test.mjs` only for **registered public** pages; if these three pages get an H1,
-  extend the private-surface test to hold them to it too. Re-measured on 2026-08-26 across all four host
-  profiles and unchanged. `npm run seo:crawl` reports it, so it will not go quiet.
+- **H-7 — Give the three private surfaces a top-level heading. Done 2026-08-27**, by the auth-surface
+  design pass rather than by SEO, which is how it was meant to go: the heading is visible copy in files
+  DESIGN owns. `/signin`, `/history` and `/checkout/success` each render exactly one `<h1>` naming the
+  page's state, and `tests/private-surface-quality.test.mjs` holds them to it — the gap this handoff
+  flagged was that `tests/metadata-contract.test.mjs` enforces one-H1 only for **sitemap** URLs and
+  `tests/page-quality-gate.test.mjs` only for **registered public** pages, so neither reached these three.
+  That extension is what closed the gap rather than the heading alone. Finding F3 is closed.
 
-- **H-8 — Give a genuine 404 an explicit `cache-control`. New, ENG-owned.** Finding F6. It is the only HTML
-  response in the application with no cache directive at all, so a shared cache may apply heuristic
-  freshness and keep serving a 404 after the URL becomes a real page. The header on the 200 routes comes
-  from the framework's dynamic-render path, and the 404 does not go through it, so the fix belongs wherever
-  `worker/index.ts` finishes a response rather than in `app/not-found.tsx`. `no-store` or a short
-  `max-age` are both defensible; the choice is ENG's. `tests/discovery-privacy.test.mjs` carries the
-  exclusion and the reason, so closing this means deleting one `continue` and watching the test pass.
+- **H-8 — Give a genuine 404 an explicit `cache-control`. Done 2026-08-27.** Finding F6. It was the only
+  HTML response in the application with no cache directive at all, so a shared cache could apply heuristic
+  freshness and keep serving a 404 after the URL became a real page. The header on the 200 routes comes
+  from the framework's dynamic-render path and the 404 does not go through it, so the fix went where
+  `worker/index.ts` finishes a response rather than into `app/not-found.tsx`, exactly as this handoff said
+  it should.
+
+  **The choice was `no-store, must-revalidate`, not a short `max-age`,** and the reason is not caution. A
+  short `max-age` would have been defensible on its own terms, but it would have left the application with
+  two cache postures for HTML and a footnote explaining which response gets which. One directive for every
+  HTML response is a single sentence a test can hold: *every HTML response this Worker emits is
+  `no-store, must-revalidate`*, with no exceptions in it.
+
+  `applyDefaultHtmlCacheControl()` is **absent-only and HTML-only**, and both halves are load-bearing.
+  Absent-only means it fills a silence rather than overruling a route that chose for itself, so
+  `/robots.txt` and `/sitemap.xml` keep the `public, max-age=3600` they set, and a future HTML page that
+  genuinely wants to be cached can say so without fighting the Worker. HTML-only means hashed static assets
+  are never swept into `no-store` if the asset pipeline ever stops labelling one of them.
+
+  `tests/discovery-privacy.test.mjs` dropped the `continue` that recorded the finding, and added both
+  halves as their own tests. Both were mutated first: removing the call fails with *"/this-page-does-not-exist
+  may be retained by a shared cache"*, and turning it into a blanket `headers.set()` fails with
+  *"/robots.txt lost the cache directive it sets for itself"* — which is the regression a careless version
+  of this fix would have shipped silently.
 
 ### 11.4 Owner actions index
 
@@ -853,6 +926,20 @@ titles, descriptions and social cards are enforced separately by `tests/metadata
 - **Performance.** SEO-008 needs field data or a Lighthouse run against a host this repository cannot
   reach. Owner action O-8.
 
+**Three gates were added on 2026-08-27, and it is worth being equally exact about what they do not reach.**
+
+- `tests/claims-standard.test.mjs` (SEO-011) proves `docs/CLAIMS.md` and the page gate list the same
+  forbidden shapes, and that the document does not claim an approval. It does not prove any sentence on any
+  page complies with the standard — that is Section 5 of `docs/CLAIMS.md`, and it is a human review.
+- `tests/meaning-preservation.test.mjs` (SEO-019) proves the checklist covers every protected class the
+  code defines and quotes the verifier's real constants. It does not prove the checklist's advice is good,
+  and it says nothing at all about how well the engine preserves meaning — the checklist deliberately makes
+  no such claim.
+- `tests/agent-readability.test.mjs` (SEO-025) proves the controls are real elements, the facts agree
+  between the page and its structured data, and the errors are sentences. It cannot prove an error is
+  *accurate*, or that a control is *discoverable*, or that a model driving the flow actually completes it.
+  The nearest available evidence for that last one is `tests/e2e/**`.
+
 ## 12. Operating cadence and decision rules
 
 ### Weekly
@@ -866,7 +953,10 @@ titles, descriptions and social cards are enforced separately by `tests/metadata
 - Score each cluster on qualified impressions, product starts, paid/assisted conversions, second use, links/citations, and maintenance cost.
 - Improve evidence before increasing page count.
 - Review link profile and disavow only when there is a documented manual-action or substantial manipulative-link risk; random spam alone is not a reason for routine disavowal.
-- Recheck public claims, prices, schema, examples, benchmark versions, and competitor facts.
+- Recheck public claims, prices, schema, examples, benchmark versions, and competitor facts, against
+  `docs/CLAIMS.md`.
+- Run the content pruning review defined in **Section 15**: every page in `src/lib/public-pages.ts` gets
+  one of keep/improve/merge/retire, written down with the evidence that produced it.
 
 ### Stop rules
 
@@ -892,6 +982,7 @@ Pause publishing and investigate when any of these occurs:
 | Mass content is tempting for this category | Doorway/scaled-content penalties and brand dilution | Enforce query-to-page rule, velocity caps, and pruning cadence |
 | AI referral reporting is incomplete across platforms | GEO performance can be overclaimed | Use Search Console's available reporting, referrer data, third-party citation logs, and clearly label inference |
 | `billingEnabled` is `true` and a priced `Offer` is emitted before any purchase has been evidenced | The markup truthfully reflects the configured catalog and the visible price, but a crawler-visible `Offer` implies a purchase path nobody has yet watched a customer walk to the end. The `SoftwareApplication` block carrying it is now emitted on the canonical host only (finding F4, fixed 2026-08-26), so the exposure is bounded to the one host where the offer is real | Keep checkout readiness fail-closed; re-validate the live catalog, Stripe binding, and visible price before any acquisition spend; owner action O-7 remains the only thing that closes the gap between a published `Offer` and an observed purchase |
+| The responsible claims standard is drafted but unapproved (new 2026-08-27) | `docs/CLAIMS.md` is now the single allowed/forbidden list, and everything in it is traceable to a rule already in this repository — but an agent wrote it. A team treating a drafted standard as an approved one is how a claim ships on the authority of a document nobody signed | Use it as the working floor; `tests/claims-standard.test.mjs` fails the build if the file ever records an approval it was not given. SEO-011 stays *Partial* until Legal fills in Section 7 of that file |
 | `/privacy` and `/terms` contain substantive terms but are explicitly not counsel-approved | Complete-looking draft language can be mistaken for legal release approval | Treat M4-03 as a release blocker; LEGAL must approve processor, retention/deletion, subscription, cancellation/refund, and prohibited-claim disclosures before real customer charges |
 
 ## 14. Reference policy baseline
@@ -903,3 +994,191 @@ Pause publishing and investigate when any of these occurs:
 - [FTC: Disclosures 101 for social media influencers](https://www.ftc.gov/business-guidance/resources/disclosures-101-social-media-influencers)
 
 Review this baseline quarterly and whenever Search Console, Google Search Central, Bing Webmaster, or applicable advertising/endorsement rules materially change.
+
+## 15. Content pruning cadence (SEO-023)
+
+**Status:** the process is defined and in force from the date its first input exists. The first *run* needs
+60 days of traffic on a page-set larger than three, and neither exists yet.
+
+### Why this is written now, before the data
+
+SEO-023's acceptance is a *review process*, not a report: a monthly review that labels each page
+keep/improve/merge/retire, preserves redirects, and ties each label to traffic, conversion, or citation
+evidence. The cadence and its rules can be settled today; only the evidence to run it is missing. Defining
+it now is not premature — it is the only order that works. A pruning rule invented after a page has
+disappointed is a rule written to justify a decision already made. Section 13 lists *mass content* as a
+standing risk, and Section 7's velocity caps assume something downstream removes what does not earn its
+place. This is that something.
+
+### Inputs, and where each comes from
+
+| Input | Source | Available today |
+|---|---|---|
+| Impressions, clicks, average position, per page, 28-day window | Google Search Console performance export | **Owner-reported.** No agent in this project can reach GSC (Section 11.1). The export has to be attached to the review by a human. |
+| Product starts, previews, checkout starts, paid unlocks, attributed to a landing page | `/api/events` joined to a landing page | **No.** `app/api/events/route.ts` validates every event and returns 204 without forwarding or storing it. SEO-010 is the blocker, and until it closes this column is empty rather than estimated. |
+| Citations and links earned by the page | `docs/BACKLINKS.md`'s prospect and outcome records | Partly. Recorded by hand. |
+| Maintenance cost | The reviewer's judgement, recorded as low/medium/high | Yes |
+| Duplication pressure | Section 3's query-to-page rule: does this page's declared `intent` in `src/lib/public-pages.ts` stay 60% distinct from every other page's? | Yes — the registry declares one distinct intent per page and `tests/page-quality-gate.test.mjs` fails a build where two pages cannot state different ones |
+
+### When it runs
+
+**Monthly**, in the same session as Section 12's monthly cluster scoring, on the first working day of the
+month. It reviews **every** indexable page in `src/lib/public-pages.ts` — there is no sampling, because the
+registry is the whole list and skipping a page is how a bad page survives by being boring.
+
+A page is **exempt from a retire or merge label**, but not from review, for its first **90 days** after
+first indexation. Below that age there is no evidence, only impatience.
+
+### The four labels, and what earns each
+
+Every page gets exactly one label per review, and the label is written down with the evidence that produced
+it. "No change" is not a label; **keep** is, and it is a decision.
+
+| Label | Earned by | Action |
+|---|---|---|
+| **Keep** | Qualified impressions are stable or rising, the page's intent is still distinct, and nothing below is true. | Record and move on. |
+| **Improve** | The page ranks (average position inside the top 30) but converts or engages poorly; or it earns impressions for a query its content does not answer; or its evidence has gone stale — a benchmark version, a price, a competitor fact, a dated example. | One named owner, one dated action, re-reviewed next month. Two consecutive *improve* labels with no measurable movement become *merge* or *retire* at the third review. |
+| **Merge** | Two pages compete for the same intent, or one page's declared intent is no longer 60% distinct from another's (Section 3). Also: a page whose only value is one section another page should own. | Move the content that earns its place into the surviving page, then 301 the retired URL to it. The surviving page's `intent` and `lastModified` in the registry are updated in the same change. |
+| **Retire** | Zero qualified impressions over two consecutive 28-day windows *and* no citations *and* no assisted conversions, at over 90 days old. Or: the page can no longer be made true — see the stop rule below. | 301 to the nearest genuinely relevant page, never to `/` as a default. Remove from `src/lib/public-pages.ts` in the same change, which removes it from the sitemap automatically. |
+
+### Rules that bind the labels
+
+1. **A retirement is a redirect, not a deletion.** Every retired or merged URL leaves a 301 to a
+   specifically relevant destination. A blanket redirect to the homepage is a soft 404 that Google treats
+   as one, and it throws away every link the page earned. If no relevant destination exists, the page stays
+   up and is labelled *improve* instead.
+2. **Redirects are permanent and are never re-pointed twice.** If a merged page's target is later retired,
+   the first redirect is updated to the final destination, so no chain longer than one hop is ever created.
+   `scripts/seo-crawl.mts` already reports a chain longer than one hop as a finding.
+3. **Registry and sitemap move together.** A page leaves `src/lib/public-pages.ts` in the same commit that
+   redirects it. `tests/metadata-contract.test.mjs` fails the build if the sitemap lists a URL that does not
+   return 200, so a half-done retirement cannot ship.
+4. **A label without evidence is not a label.** Each one records the numbers or the named absence of them.
+   *"No conversion data — SEO-010 is open"* is a legitimate entry; a guessed conversion rate is not.
+5. **Never retire a page for underperforming a claim it was never allowed to make.** If a page underperforms
+   because `docs/CLAIMS.md` forbids the copy that would convert, the finding belongs to Product, not to the
+   pruning review.
+6. **Never retire a legal page.** `/privacy` and `/terms` are reviewed for accuracy, never for traffic.
+
+### The first run
+
+The first review that can produce a label other than *keep* needs all three of: 60 days of Search Console
+data on the page in question, a page-set larger than the current three, and — for any *improve* label based
+on conversion — SEO-010's destination. Until then, the review runs on `/`, `/privacy` and `/terms`,
+records *keep* for all three with the reason "legal page" or "the product", and takes ten minutes. That is
+the correct outcome, and running it anyway is what stops the cadence from being invented under pressure
+later.
+
+## 16. Localization decision: defer (SEO-024)
+
+**Decision: do not localize. Defer indefinitely, with one named condition that reverses it.**
+**Decided:** 2026-08-27, SEO/GEO Agent. **Reversal owner:** Product, with SEO.
+
+SEO-024's acceptance is a decision memo documenting demand, product support, translation and review
+ownership, hreflang design, and why each proposed locale is genuinely useful. This is that memo. The answer
+is no, and the value of the memo is that the next person to propose localization inherits the reasoning
+instead of re-deriving it.
+
+### 1. Demand evidence: none, and that is a measurement of this project, not of the market
+
+There is **no demand evidence for any locale, in either direction.** This is stated plainly because the
+tempting move is to substitute a plausible story — "Spanish and Portuguese are large markets" — for
+evidence this project does not have.
+
+What is actually available:
+
+- **Search Console** holds a country and query breakdown, and the owner has it. No agent in this project
+  can reach it (Section 11.1), and no export has been attached to this document. It is the single most
+  useful input and it is one export away.
+- **Analytics** cannot answer it at all. `/api/events` validates every event and discards it (SEO-010), so
+  there is no session-level country, language, or funnel data anywhere.
+- **Customer data** does not exist in a usable form: no purchase has been evidenced end to end on
+  production (owner action O-7), so there is no paying population whose language could be looked at.
+- **The site itself** has three indexable pages and declares `inLanguage: "en"`. It has never given a
+  non-English speaker a reason to arrive.
+
+Absence of evidence here is not evidence of absence. It is the reason the decision is *defer* rather than
+*never*.
+
+### 2. Product support: the product cannot do the job in another language today
+
+This is the decisive finding, and it holds independently of demand.
+
+- The rewrite engine deployed today is the deterministic substitution baseline —
+  `HUMANIZATION_PROVIDER` is unset and `resolveHumanizationProvider()` fails closed
+  (`src/lib/humanization/provider-config.ts`). Its substitution tables are **English phrases**:
+  `a lot of` → `many`, `kind of` → `somewhat`. Against Spanish or German input it would perform
+  approximately no rewriting at all.
+- The verifier's stop-word list, negation list (`no, not, never, neither, without, cannot` and English
+  contractions) and canonicalisation table in `src/lib/humanization/verification.ts` are English. Its
+  negation check — the one that catches the most damaging class of meaning failure — would silently pass
+  everything in a language whose negations it does not know.
+- The protected-content extractor in `src/lib/humanization/protected-content.ts` is partly
+  language-independent (URLs, DOIs, digits, code) and partly not: month names, titles (Dr., Prof., Mr.),
+  reporting verbs (*said, wrote, argued*), corporate suffixes (Inc., LLC, PLC) and the technical-term
+  vocabulary are all English. Protection would degrade, quietly, in exactly the classes a non-English user
+  would most need.
+
+**A localized page would therefore sell a product that does not work in that language.** That is the
+claim failure `docs/CLAIMS.md` Section 1 test 4 is written to catch. Translating the marketing before the
+engine is the wrong order, and shipping it would be the first genuinely dishonest thing on this site.
+
+### 3. Translation and review ownership: unowned
+
+No named translator, no reviewer, no in-language support. This matters more than usual for this product:
+
+- Support is a single English address (`src/config/product.ts`). A customer who arrives through a
+  translated page and writes in Portuguese has nowhere to land.
+- `/privacy` and `/terms` have not been reviewed by counsel even in English (SEO-026, M4-03). A translated
+  legal page is a second unreviewed legal document, in a jurisdiction nobody has looked at, and consumer
+  law is not translatable by substitution.
+- Machine-translated pages at scale are squarely inside Google's scaled-content-abuse policy, and Section 1
+  forbids publishing automated drafts without expert review and a named accountable owner. The registry in
+  `src/lib/public-pages.ts` requires a `contentOwner` per page for exactly this reason, and there is no
+  role that could honestly own a locale.
+
+### 4. hreflang design, if the decision is ever reversed
+
+Recorded now so the reversal is an implementation rather than a redesign. The mistakes below are the ones
+that are expensive to undo after indexation.
+
+- **Subdirectories on the apex** — `ownword.pro/es/`, not a subdomain and not a ccTLD. This product has one
+  brand, one host gate, and one authority to consolidate; `www` has already been redirected to the apex for
+  the same reason (finding F5). A ccTLD split would be a second domain to earn authority for, and a
+  subdomain a third canonical host to gate.
+- **Reciprocal `hreflang` in the sitemap**, not in `<head>`. `app/sitemap.xml/route.ts` already generates
+  from `src/lib/public-pages.ts`, so the alternates would be generated from the registry and stay
+  consistent by construction. Google requires reciprocity: if `es` points at `en`, `en` must point back, and
+  a hand-maintained head-tag set drifts on the first page that forgets.
+- **`x-default` points at the English page**, which is the fallback for any locale not published.
+- **`hreflang` and `canonical` do different jobs and must not be confused.** Every localized page
+  self-canonicalizes to its own URL. A localized page canonicalizing to the English one removes itself from
+  the index, which is the single most common way this is got wrong.
+- **`<html lang>` and the JSON-LD `inLanguage` must match the page's actual language**, both currently
+  hard-coded to `en` (`app/layout.tsx`, `src/lib/site-structured-data.ts`).
+- **Locale must not be inferred from IP and must never redirect automatically.** Googlebot crawls
+  predominantly from the US; an automatic redirect makes every non-English page uncrawlable. Offer a
+  visible language control that links, and remember the choice.
+- **A locale is a whole surface, not a page.** Product UI strings, error messages, transactional email,
+  Stripe Checkout locale, currency presentation, and `/privacy` and `/terms`. A translated landing page in
+  front of an English product is worse than no translation, because it converts someone into a dead end.
+
+**No locale is proposed.** Naming candidates without demand evidence would be the invented-precision failure
+this document forbids elsewhere; the first locale should be whatever the Search Console country report
+actually shows, if anything.
+
+### 5. The condition that reverses this decision
+
+Localization is reconsidered when **all three** hold:
+
+1. **Demand:** the Search Console country/query report shows a single non-English-speaking country
+   contributing a material and sustained share of qualified impressions over 90 days — attached to this
+   document as an export, not asserted.
+2. **Product:** a rewrite provider is selected (`HUMANIZATION_PROVIDER` set to something that is not the
+   deterministic baseline) that genuinely handles the target language, *and* the verifier's negation and
+   stop-word handling has been extended to it. Without the second half the safety check is decorative.
+3. **Ownership:** a named human owns translation, a second named human owns in-language review, support can
+   answer in the language, and Legal has approved the translated `/privacy` and `/terms`.
+
+Any one of the three missing means the answer is still defer. Condition 2 is the one that cannot be bought
+quickly, and it is the reason this is a deferral rather than a schedule.
