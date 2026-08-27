@@ -27,7 +27,7 @@ export const pricingConfig = {
     pro: {
       id: "pro",
       name: "Pro",
-      monthlyPrice: 19,
+      monthlyPrice: 39.99,
       interval: "month",
       availability: "active",
       wordLimit: 200_000,
