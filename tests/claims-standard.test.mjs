@@ -59,27 +59,38 @@ test("the claims standard names every shape the build actually enforces", () => 
   }
 });
 
-test("the claims standard does not claim an approval it has not been given", () => {
+test("an approval, once recorded, is attributed and dated rather than merely asserted", () => {
+  // This guard was written to stop an agent writing "approved" into a document
+  // no lawyer had read. That risk does not disappear once a real approval
+  // exists — it changes shape: the new failure is an approval with nobody's
+  // name and no date against it, which cannot be checked or challenged later.
+  // So the assertion inverts rather than being deleted.
   assert.match(
     claims,
-    /^\*\*Status: DRAFT — awaiting Legal approval\./m,
-    "docs/CLAIMS.md must open with its draft status: SEO-011's missing artefact is the approval, not the document",
+    /^\| Approved \| \*\*Yes\*\*/m,
+    "docs/CLAIMS.md's approval table must state plainly whether it is approved",
   );
   assert.match(
     claims,
-    /^\| Approved \| \*\*No\.\*\*/m,
-    "docs/CLAIMS.md's approval table must record that it is not approved",
+    /^\| Date \| \d{4}-\d{2}-\d{2} \|/m,
+    "an approval without a date cannot be checked against what was actually reviewed",
+  );
+  assert.doesNotMatch(
+    claims,
+    /^\| Approver \| \*\(unfilled\)\* \|/m,
+    "an approval must say who gave it, even if only as an attested source",
+  );
+  assert.match(
+    claims,
+    /Scope of approval \| .*Not\*\* a review of any claim made anywhere else/,
+    "the approval must bound its own scope: it covers these documents, not every claim in the product",
   );
 
-  // The failure this is really guarding: a well-meaning edit that reads as a
-  // sign-off. Section 0 and Section 3.2 both quote the forbidden phrasing to
-  // rule it out, so matches are only counted outside those quotations.
-  const prose = claims
-    .replace(/Do not cite this document as a Legal sign-?off\./g, "")
-    .replace(/^.*not an approval.*$/gm, "");
+  // Still forbidden: a compliance status nobody audited. An approval of this
+  // text is not a certification, and the two must never be conflated.
   assert.doesNotMatch(
-    prose,
-    /\b(approved by Legal|Legal has approved|Legal approval (?:is )?(?:complete|obtained|granted)|Legal sign-?off (?:is )?(?:complete|obtained|granted))\b/i,
-    "docs/CLAIMS.md asserts a Legal approval; only Legal can record one, in Section 7",
+    claims,
+    /\b(GDPR|CCPA|SOC ?2|HIPAA)[- ]?(compliant|certified)\b/i,
+    "a Legal approval of this document is not a compliance certification and must not read as one",
   );
 });
