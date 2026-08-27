@@ -71,6 +71,38 @@ function redirectWwwToApex(request: Request, url: URL): Response | null {
   });
 }
 
+/**
+ * SEO-020 finding F6, handoff H-8.
+ *
+ * Every HTML route this application renders through the framework's dynamic
+ * path answers `no-store, must-revalidate`. A genuine 404 does not go through
+ * that path — it is produced by the framework's error path — so before this it
+ * was the one HTML response in the application that carried no cache directive
+ * at all. RFC 9111 section 4.2.2 lets a shared cache assign heuristic freshness
+ * to a response with no explicit expiry, and 404 is one of the status codes
+ * that is heuristically cacheable by default, so a proxy could keep serving
+ * "page not found" after the URL became a real page.
+ *
+ * A 404 carries no personalization, so this is a staleness risk rather than the
+ * disclosure risk the 200 routes are protecting against. The fix is the same
+ * directive either way, and choosing the same one makes the invariant uniform
+ * and therefore testable: every HTML response this Worker emits is
+ * `no-store, must-revalidate`.
+ *
+ * Deliberately absent-only. It fills a silence; it never overrides a directive
+ * a route chose for itself, so `/robots.txt` and `/sitemap.xml`
+ * (`public, max-age=3600`) and the `www` 308 are untouched, and a future HTML
+ * page that genuinely wants to be cached can say so without fighting this.
+ * Deliberately HTML-only: hashed static assets are long-lived on purpose and
+ * must not be swept into `no-store` if the asset pipeline ever stops labelling
+ * one of them.
+ */
+function applyDefaultHtmlCacheControl(headers: Headers): void {
+  if (headers.has("cache-control")) return;
+  if (!(headers.get("content-type") ?? "").toLowerCase().includes("text/html")) return;
+  headers.set("cache-control", "no-store, must-revalidate");
+}
+
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // SEC-22. This is the only place the runtime bindings are in scope before
@@ -109,6 +141,7 @@ const worker = {
     if (url.protocol === "https:") {
       headers.set("strict-transport-security", "max-age=31536000; includeSubDomains");
     }
+    applyDefaultHtmlCacheControl(headers);
 
     return new Response(response.body, {
       status: response.status,

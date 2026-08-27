@@ -64,6 +64,8 @@ const ROUTES = [
 type Rendered = {
   status: number;
   location: string | null;
+  contentType: string;
+  cacheControl: string | null;
   title: string | null;
   description: string | null;
   robots: string[];
@@ -89,10 +91,17 @@ async function render(path: string, host: string, method = "GET"): Promise<Rende
     { waitUntil() {}, passThroughOnException() {} },
   );
   const body = await response.text();
-  return { ...parse(body), status: response.status, location: response.headers.get("location"), body };
+  return {
+    ...parse(body),
+    status: response.status,
+    location: response.headers.get("location"),
+    contentType: response.headers.get("content-type") ?? "",
+    cacheControl: response.headers.get("cache-control"),
+    body,
+  };
 }
 
-function parse(html: string): Omit<Rendered, "status" | "location" | "body"> {
+function parse(html: string): Omit<Rendered, "status" | "location" | "body" | "contentType" | "cacheControl"> {
   const one = (pattern: RegExp) => (html.match(pattern) ?? [])[1] ?? null;
   const named = (prefix: "name" | "property", filter: RegExp) => {
     const found: Record<string, string> = {};
@@ -137,9 +146,17 @@ const strip = (value: string) => value.replace(/<[^>]*>/g, "").replace(/\s+/g, "
 const findings: string[] = [];
 const note = (line: string) => findings.push(line);
 
-/** robots.txt and sitemap.xml are not HTML, and a redirect has no head. */
-const isHtml = (path: string, page: Rendered) =>
-  page.status === 200 && !path.startsWith("/robots.txt") && !path.startsWith("/sitemap.xml");
+/**
+ * Whether this response is an HTML document, read from what it says it is.
+ *
+ * This used to be `status === 200`, which quietly excluded the 404 page from
+ * every check below it - and the 404 is an HTML document that a crawler renders
+ * and a cache stores like any other. Finding F6 (a 404 with no cache directive)
+ * lived in that gap for two passes. A redirect has no body to parse and is
+ * excluded by its status.
+ */
+const isHtml = (_path: string, page: Rendered) =>
+  page.contentType.toLowerCase().includes("text/html") && !(page.status >= 300 && page.status < 400);
 
 function reportRow(host: string, path: string, page: Rendered) {
   const flags = isHtml(path, page)
@@ -148,6 +165,7 @@ function reportRow(host: string, path: string, page: Rendered) {
         page.canonical ? `canonical=${page.canonical}` : "no-canonical",
         page.jsonLd.types.length ? `ld:${page.jsonLd.types.join("+")}` : "no-ld",
         `h1=${page.h1.length}`,
+        `cache=${page.cacheControl ?? "(none)"}`,
       ]
     : [page.location ? `-> ${page.location}` : "(not html)"];
   console.log(`  ${String(page.status).padEnd(3)} ${path.padEnd(46)} ${flags.join("  ")}`);
@@ -179,7 +197,14 @@ async function main() {
       if (html && onCanonical && !isPublic && (page.description || Object.keys(page.og).length)) {
         note(`${host}${path}: private/error surface carries a description or a social card`);
       }
-      if ((html || page.status === 404) && page.h1.length !== 1) {
+      // SEO-020 finding F6. A shared cache may assign heuristic freshness to a
+      // response that declares none, and a cached 404 outlives the URL becoming
+      // a real page. worker/index.ts fills the silence for every HTML response;
+      // this is the sweep that would have found the gap.
+      if (html && !page.cacheControl) {
+        note(`${host}${path}: HTML response with no cache-control, so a shared cache may guess`);
+      }
+      if (html && page.h1.length !== 1) {
         note(`${host}${path}: ${page.h1.length} <h1> elements (expected exactly 1)`);
       }
       const skipped = page.headingOrder.findIndex(
