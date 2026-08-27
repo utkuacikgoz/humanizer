@@ -188,7 +188,7 @@ test("a customer signs in by link, rewrites, reads it in history, deletes it, an
   ]);
   assert.equal(deleteResponse.status(), 200, "deleting an owned rewrite was refused");
 
-  await page.locator(".surface-notice, .copy-status").filter({ hasText: /deleted/i }).first().waitFor({ timeout: 30_000 });
+  await page.locator(".surface-notice").filter({ hasText: /deleted/i }).first().waitFor({ timeout: 30_000 });
   await page.waitForFunction(() => document.querySelectorAll(".history-list .history-item").length === 0, null, { timeout: 30_000 });
 
   // Inaccessible: the owner's own detail request now answers the same 404 a
