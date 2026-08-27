@@ -236,11 +236,11 @@ test("the history list can be traversed, opened and deleted with the keyboard al
   // Delete it, by Tab and Enter, through the confirmation step.
   await tabTo(page, (focused) => /^delete$/i.test(focused.name), "the delete control");
   await page.keyboard.press("Enter");
-  await page.locator(".history-warning").first().waitFor({ timeout: 30_000 });
+  await page.locator(".history-confirm").first().waitFor({ timeout: 30_000 });
 
   // The confirmation must be announced, not merely drawn.
   assert.equal(
-    await page.locator(".history-warning").first().getAttribute("role"),
+    await page.locator(".history-confirm").first().getAttribute("role"),
     "status",
     "the destructive-action warning is not in a live region, so a screen-reader user is not told it appeared",
   );
@@ -257,7 +257,7 @@ test("the history list can be traversed, opened and deleted with the keyboard al
   assert.equal(deleteResponse.status(), 200, "deleting from the keyboard was refused");
 
   await page.waitForFunction(() => document.querySelectorAll(".history-list .history-item").length === 0, null, { timeout: 30_000 });
-  const notice = page.locator(".copy-status").filter({ hasText: /deleted/i }).first();
+  const notice = page.locator(".surface-notice").filter({ hasText: /deleted/i }).first();
   await notice.waitFor({ timeout: 30_000 });
   assert.equal(
     await notice.getAttribute("aria-live"),
@@ -335,7 +335,7 @@ test("deleting the last history item does not strand keyboard focus", { skip: bl
 
   await tabTo(page, (focused) => /^delete$/i.test(focused.name), "the delete control");
   await page.keyboard.press("Enter");
-  await page.locator(".history-warning").first().waitFor({ timeout: 30_000 });
+  await page.locator(".history-confirm").first().waitFor({ timeout: 30_000 });
   await tabTo(page, (focused) => /delete permanently/i.test(focused.name), "the delete confirmation");
   await Promise.all([
     page.waitForResponse(
@@ -345,7 +345,7 @@ test("deleting the last history item does not strand keyboard focus", { skip: bl
     page.keyboard.press("Enter"),
   ]);
   await page.waitForFunction(() => document.querySelectorAll(".history-list .history-item").length === 0, null, { timeout: 30_000 });
-  await page.locator(".copy-status").filter({ hasText: /deleted/i }).first().waitFor({ timeout: 30_000 });
+  await page.locator(".surface-notice").filter({ hasText: /deleted/i }).first().waitFor({ timeout: 30_000 });
 
   // The control the customer pressed has just been unmounted along with the
   // row it lived in. Something has to catch the focus it was holding — the

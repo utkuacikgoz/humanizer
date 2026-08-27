@@ -10,6 +10,23 @@
 // address has an account. The server never tells it, because the server does
 // not look: the account is created when a link is redeemed, not when one is
 // requested. See src/lib/magic-link.ts.
+//
+// DESIGN. This is the gate every paying customer passes through, so it is
+// built from the landing page's own vocabulary rather than a second one: the
+// two-column stage, the argument on the left set in the hero's type, the one
+// control on the right. What it deliberately does NOT carry:
+//
+//   - A step number. `.step-number` encodes position in a real sequence (01
+//     paste, 02 read, 03 pay). Signing in is not step 00 of anything, and
+//     app/globals.css already refuses to number the four reasons in `.why`
+//     for exactly this reason: numbering claims an order that is not real.
+//   - A rule between every pair of elements. There is one rule in the card,
+//     and only when there is something genuinely different in kind on the
+//     other side of it: an existing session above, a fresh sign-in below.
+//   - A status line before anything has happened. The live regions are in the
+//     DOM from first paint, because a region inserted together with its
+//     message is not announced — but they are empty, and an empty region
+//     paints nothing.
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { productConfig } from "@/src/config/product";
@@ -55,6 +72,7 @@ export default function SignInPage() {
   const serviceUnavailable = linkError === "unavailable";
   const [dismissedLinkError, setDismissedLinkError] = useState(false);
   const linkFailed = linkErrored && !dismissedLinkError;
+  const serviceFailed = serviceUnavailable && !dismissedLinkError;
   // One implementation of "who is signed in", shared with the header
   // indicator every other surface now carries. Two copies of this fetch is
   // how the two states drift.
@@ -101,6 +119,22 @@ export default function SignInPage() {
     }
   }
 
+  // One string per outcome, read by one region. The error region is separate
+  // and assertive because a failure has to interrupt; both exist from first
+  // paint and are empty until there is something true to say.
+  const liveStatus = status === "working"
+    ? "Sending your sign-in link."
+    : status === "sent"
+      ? message
+      : "";
+  const liveError = status === "error"
+    ? message
+    : linkFailed
+      ? "That sign-in link has expired or has already been used. Each link works once and lasts 15 minutes. Ask for a new one above."
+      : serviceFailed
+        ? "We could not complete your sign-in just now. This is a problem on our side and your link may still be good. Try opening it again in a moment, or ask for a new link above."
+        : "";
+
   return (
     <main>
       <header className="site-header">
@@ -108,100 +142,97 @@ export default function SignInPage() {
           <span>{productConfig.productName}</span>
         </Link>
         <nav aria-label="Primary navigation">
-          <Link className="sign-in" href="/">Back to the rewriter</Link>
+          <Link href="/">Back to the rewriter</Link>
         </nav>
       </header>
 
-      <div className="stage stage-single">
-        <section className="workspace" aria-labelledby="signin-title">
-          <div className="workspace-topline">
-            <div>
-              <span className="step-number">00</span>
-              <h2 id="signin-title">Sign in</h2>
-            </div>
+      {/* One column, centred and vertically settled. An earlier pass gave this
+          page the landing hero's two-column split; with one field and one
+          button to place, that left half the viewport empty and made the card
+          read as incidental. The card is the centre of gravity, the heading
+          sits above it at the width of the thing it introduces, and the legal
+          line sits outside the card because it is not part of the task. */}
+      <div className="stage stage-auth">
+        <div className="auth-column">
+          <div className="auth-intro">
+            <h1 id="signin-title">Sign in</h1>
+            <p>
+              Type the address you already read mail at. We send one link, and opening it signs you
+              in. The link works once and expires 15 minutes after it is sent.
+            </p>
           </div>
 
-          {session.kind === "signed-in" ? (
-            <p className="status-line" role="status" style={{ borderTop: "none" }}>
-              You are signed in as {session.email}.{" "}
-              <Link href={returnTo}>Continue</Link>, or sign out below.
-            </p>
-          ) : null}
+          <div className="auth-card">
+            {session.kind === "signed-in" ? (
+              <div className="auth-session">
+                <p>
+                  This browser is signed in as <b>{session.email}</b>.
+                </p>
+                <div className="auth-session-actions">
+                  <Link className="next-action" href={returnTo}>Continue</Link>
+                  {/*
+                    A real form POST, not a link: signing out changes state, and
+                    a GET sign-out would be triggered by any prefetcher or
+                    third-party page. The route also refuses a cross-site Origin.
+                  */}
+                  <form action="/api/auth/signout" method="post">
+                    <button className="auth-quiet" type="submit">Sign out</button>
+                  </form>
+                </div>
+              </div>
+            ) : null}
 
-          {linkFailed ? (
-            <p className="error" role="alert" style={{ borderTop: "none" }}>
-              That sign-in link has expired or has already been used. Each link works once and lasts
-              15 minutes. Request a new one below.
-            </p>
-          ) : null}
+            <form className="auth-form" onSubmit={requestLink} aria-labelledby="signin-title">
+              {session.kind === "signed-in" ? (
+                <p className="auth-switch">Or send a link to a different address.</p>
+              ) : null}
 
-          {serviceUnavailable && !dismissedLinkError ? (
-            <p className="error" role="alert" style={{ borderTop: "none" }}>
-              We could not complete your sign-in just now. This is a problem on our side and your link
-              may still be good. Try opening it again in a moment, or request a new one below.
-            </p>
-          ) : null}
+              <div className="auth-field">
+                <label htmlFor="signin-email">Email address</label>
+                <input
+                  className="signin-input"
+                  id="signin-email"
+                  name="email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+              </div>
 
-          <form onSubmit={requestLink}>
-            <p className="signin-copy">
-              Enter your email and we will send you a link that signs you in. No password to remember.
-            </p>
-            <label className="signin-label" htmlFor="signin-email">Email address</label>
-            <input
-              className="signin-input"
-              id="signin-email"
-              name="email"
-              type="email"
-              inputMode="email"
-              autoComplete="email"
-              autoCapitalize="none"
-              spellCheck={false}
-              placeholder="you@example.com"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
+              <button className="auth-submit" type="submit" aria-disabled={status === "working"}>
+                {status === "working" ? (
+                  <>
+                    <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span>
+                    Sending
+                  </>
+                ) : (
+                  "Email me a link"
+                )}
+              </button>
 
-            <div className="editor-footer">
-              <p className="signin-note">
+              {/* Both regions are present before there is anything to announce.
+                  They paint nothing while empty. */}
+              <p className="auth-status" role="status" aria-live="polite">{liveStatus}</p>
+              <p className="auth-alert" role="alert">{liveError}</p>
+
+              <p className="auth-note">
                 {status === "sent"
-                  ? "The link expires in 15 minutes and works once."
+                  ? "Nothing arrived? Check the spam folder, then request another link."
                   : "We only use your address to sign you in and to send receipts."}
               </p>
-              <button className="humanize-button" type="submit" aria-disabled={status === "working"}>
-                {status === "working" ? "Sending" : "Email me a link"}
-              </button>
-            </div>
-          </form>
-
-          {status === "working" ? (
-            <p className="status-line" role="status">
-              <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span>
-              {" "}Sending your sign-in link.
-            </p>
-          ) : null}
-
-          {status === "sent" ? (
-            <p className="status-line" role="status">{message}</p>
-          ) : null}
-
-          {status === "error" ? (
-            <p className="error" role="alert">{message}</p>
-          ) : null}
-
-          {session.kind === "signed-in" ? (
-            // A real form POST, not a link: signing out changes state, and a
-            // GET sign-out would be triggered by any prefetcher or third-party
-            // page. The route also refuses a cross-site Origin.
-            <form className="signin-signout" action="/api/auth/signout" method="post">
-              <button className="history-cancel" type="submit">Sign out</button>
             </form>
-          ) : null}
+          </div>
 
-          <p className="signin-legal">
+          <p className="auth-legal">
             By signing in you agree to the <Link href="/terms">terms</Link> and the{" "}
             <Link href="/privacy">privacy notice</Link>.
           </p>
-        </section>
+        </div>
       </div>
     </main>
   );
