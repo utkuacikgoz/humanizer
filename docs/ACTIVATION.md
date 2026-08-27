@@ -66,9 +66,12 @@ Status meanings:
 
 The ACT-01 through ACT-16 program is complete. The product is not commercially released. The remaining release work is tracked in `PRODUCT.md` and `AGENTS.md`:
 
-- **no purchase has ever completed end to end.** Sign-in reaches the mail provider and the send is
-  being rejected there, so nobody has yet signed in, bought, and unlocked on the production host.
-  This is the single item every commercial claim in this document waits on;
+- **no purchase has ever completed end to end.** Sign-in itself is now verified working on the
+  production host (2026-08-27, owner-confirmed): the mail provider accepts the send, the link
+  arrives, and it signs the customer in. The earlier rejections were an unverified sending domain
+  and are resolved. What remains unproven is everything after sign-in, which is checkout, payment,
+  unlock, and the rewrite reaching history. This is still the single item every commercial claim in
+  this document waits on;
 - select and benchmark the production humanization provider. A Claude provider is implemented but
   **not active**: `HUMANIZATION_PROVIDER` still selects the deterministic baseline, no real API call
   has ever been made, and the cost of one is modelled rather than measured;
