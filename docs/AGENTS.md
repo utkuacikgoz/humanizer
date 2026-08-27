@@ -252,7 +252,7 @@ PO's decision.
 |---|---|---|---|---|
 | M4-01 | HE | Run frozen production benchmark | M1-13, M3-03 | Production provider/config meets every blocking threshold; report includes per-category regressions and cost/latency. |
 | M4-02 | SEC | Run final threat, RLS, dependency, and secret review | M3-10 | No critical/high vulnerability, cross-user access, exposed secret, spoofable webhook, unbounded abuse path, or sensitive-text logging remains. |
-| M4-03 | LEGAL | Approve customer disclosures | M3-05 | Terms, privacy, provider disclosure, retention/deletion, recurring billing, cancellation, refund/support route, and prohibited-claim review are complete. |
+| M4-03 | LEGAL | Approve customer disclosures | M3-05 | **Approved 2026-08-27** (owner-attested; counsel not named in the record). Covers `/terms`, `/privacy` and `docs/CLAIMS.md` as they stood that day, including the third-party AI provider disclosure written the same day. Explicitly not a compliance certification, and not a review of claims made elsewhere in the product. A new model provider is a material change and requires re-review. |
 | M4-04 | AQA | Run release suite in production-like environment | M4-01, M4-02 | Build/lint/type/unit/contract/integration/E2E/billing/benchmark suites pass; artifacts and version identifiers are retained. |
 | M4-05 | MQA | Execute production smoke and rollback drill | M4-04 | Preview, test purchase, webhook, unlock, copy, second use, cancel, and purge are verified; rollback/reconciliation owners can execute runbooks. |
 | M4-06 | MON | Audit revenue leakage and dark patterns | M4-05 | Locked data is not leaked, entitlements/quotas are correct, pricing is consistent, cancellation is clear, and no unavailable feature or artificial urgency is implied. |
