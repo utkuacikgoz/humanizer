@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { POST } from "../app/api/checkout/route";
+import { readFile } from "node:fs/promises";
 import { STRIPE_PRICE_ENV_KEYS } from "../src/config/stripe";
 
 // Presence of a session cookie is what gets past the cheap signed-out check;
@@ -80,5 +81,27 @@ test("accepts every plan the catalog sells, Pro included", async () => {
   for (const planId of Object.keys(STRIPE_PRICE_ENV_KEYS)) {
     const response = await POST(request({ capability: validCapability, planId }, AUTH_HEADERS));
     assert.notEqual(response.status, 400, `${planId} must pass the plan gate`);
+  }
+});
+
+test("discounts are Stripe's to validate, and no amount ever comes from the client", async () => {
+  // A promotion code is entered on Stripe's own Checkout page and validated by
+  // Stripe. What matters here is that enabling them did not open a path for a
+  // caller to influence what they are charged: this route must still send a
+  // price ID it resolved server-side and must never read an amount, a
+  // discount, or a coupon from the request body.
+  const source = await readFile(new URL("../app/api/checkout/route.ts", import.meta.url), "utf8");
+
+  assert.match(
+    source,
+    /allow_promotion_codes:\s*true/,
+    "checkout must let Stripe collect and validate a promotion code, rather than this application owning discounts",
+  );
+
+  for (const forbidden of ["unit_amount", "amount_total", "body.coupon", "body.discount", "body.price", "discounts:"]) {
+    assert.ok(
+      !source.includes(forbidden),
+      `checkout must not read or send ${forbidden}: price and discount are Stripe's, and a client-supplied amount is the exact path docs/SECURITY.md verified does not exist`,
+    );
   }
 });
