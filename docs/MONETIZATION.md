@@ -350,3 +350,36 @@ sure the number is known before the choice is made.
   and the input bill roughly tripled — not a price.
 
 None of these change a price. They make sure a price is never wrong silently.
+
+## Discounts and promotion codes
+
+Discounts belong to Stripe, not to this application. `/api/checkout` sets
+`allow_promotion_codes: true`, so a customer enters a code on Stripe's own
+Checkout page and Stripe validates it. This application continues to send only
+a price ID it resolved server-side from the catalog, and never sends, accepts,
+or reads an amount, a discount, or a coupon from the request body.
+
+That boundary is the point. A coupon table of our own would mean redemption
+tracking, race conditions on limited-use codes, and a path by which a request
+could influence what a customer is charged — which is precisely the path
+`docs/SECURITY.md` verified does not exist. `tests/checkout.test.mts` fails if
+`unit_amount`, `amount_total`, `discounts:`, or a coupon read from the body
+ever appears in that route.
+
+**Creating codes.** Stripe dashboard, Product catalogue, Coupons, then create a
+promotion code against the coupon. A coupon can be restricted to one price, so
+a Starter-only or Pro-only code is a dashboard setting rather than code.
+
+**Testing the paid journey without moving money.** A 100%-off coupon is the
+supported way to exercise the whole path: real Checkout, real webhook, real
+entitlement projection, real unlock, real history row. Note that Stripe may
+skip payment-method collection entirely for a fully discounted subscription,
+so a 100%-off run proves the entitlement path but does **not** prove card
+capture. Run at least one small real charge before launch.
+
+**A discount does not change the allowance.** Word limits come from
+`src/config/pricing.ts` and are keyed to the plan, not to what was paid. A
+customer on a 50%-off Starter code still gets 50,000 words, and the cost guard
+still measures real cost against the catalogue's undiscounted rate, so a
+heavily discounted cohort will look worse against the ceiling than it should.
+That is worth remembering before running a broad promotion.

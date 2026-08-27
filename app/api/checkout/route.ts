@@ -132,6 +132,18 @@ export async function POST(request: Request) {
       {
         mode: "subscription",
         line_items: [{ price: priceId, quantity: 1 }],
+        // Discounts are Stripe's to own, not ours. Letting the customer enter
+        // a promotion code Stripe validates keeps every discount decision on
+        // Stripe's side of the boundary: this application still sends only a
+        // price ID it resolved server-side from the catalog, and still never
+        // sends, accepts, or trusts an amount. A homegrown coupon table would
+        // have reintroduced exactly the client-influenced-price path
+        // docs/SECURITY.md verified does not exist.
+        //
+        // Coupons are created in the Stripe dashboard. A 100%-off code is the
+        // supported way to exercise the full paid journey — real Checkout,
+        // real webhook, real entitlement, real unlock — without moving money.
+        allow_promotion_codes: true,
         client_reference_id: userId,
         // Opaque internal references only — never writing, capability
         // tokens, or sensitive attributes (D-005).
