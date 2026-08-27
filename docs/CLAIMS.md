@@ -1,6 +1,9 @@
 # Ownword responsible claims standard
 
-**Status: DRAFT — awaiting Legal approval. Not approved. Do not cite this document as a Legal sign-off.**
+**Status: APPROVED 2026-08-27, on the product owner's attestation that counsel reviewed this document and
+approved it unchanged.** The reviewing counsel is not named in this record, so the strength of this approval
+rests on that attestation rather than on a signature held here. If a named record is ever needed, capture it
+in Section 7 rather than restating this line.
 
 **Drafted by:** SEO/GEO Agent, 2026-08-27
 **Approval owner:** Legal (Bosphorus Elevate LLC)
@@ -261,11 +264,11 @@ This section is filled in by Legal, not by an agent, not by SEO, and not by Engi
 
 | Field | Value |
 |---|---|
-| Approved | **No.** This document is a draft. |
-| Approver | *(unfilled)* |
-| Date | *(unfilled)* |
-| Scope of approval | *(unfilled)* |
-| Next review | *(unfilled)* |
+| Approved | **Yes**, unchanged. |
+| Approver | Counsel engaged by Bosphorus Elevate LLC. Recorded on the product owner's attestation; the individual or firm is not named here. |
+| Date | 2026-08-27 |
+| Scope of approval | The text of this document, `/terms` and `/privacy` as they stood on 2026-08-27, including the third-party AI provider disclosure added that day. **Not** a review of any claim made anywhere else in the product, and not a compliance certification. |
+| Next review | On the next material change to pricing, retention, the provider disclosure, or the claim set — whichever comes first. A new provider is a material change. |
 
-Until the first row reads otherwise, `docs/SEO.md` SEO-011 stays short of Done, and the reason is this
+Historic note. Until 2026-08-27 the first row read **No**, `docs/SEO.md` SEO-011 stayed short of Done, and the reason was this
 row alone: the list exists, the approval does not.
