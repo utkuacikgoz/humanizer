@@ -60,21 +60,51 @@ test("no route's server-rendered HTML names an account or an address", async () 
 
 // A personalized render in a shared cache is the same disclosure as an
 // unauthorized response, arriving one hop later.
+//
+// The 404 used to be excluded here, and the exclusion was a finding rather
+// than a shrug: it was the one HTML response the framework emitted with no
+// `cache-control` at all (SEO-020 finding F6, handoff H-8). It is now covered,
+// on the same directive as everything else. It carries no personalization, so
+// what it is protected from is staleness rather than disclosure - a
+// heuristically cached 404 outliving the URL becoming a real page - but the
+// invariant is stronger for having no exceptions in it:
+// `applyDefaultHtmlCacheControl()` in worker/index.ts fills the silence for
+// every HTML response the framework hands back without one.
 test("no HTML route is storable by a shared cache", async () => {
   for (const path of ROUTES) {
     if (path.startsWith("/robots.txt") || path.startsWith("/sitemap.xml")) continue;
-    // The 404 is excluded on purpose, and the exclusion is a finding, not a
-    // shrug: it is the one HTML response the framework emits with no
-    // `cache-control` at all (SEO-020 finding F6). It carries no
-    // personalization, so it is outside what this test is protecting, but a
-    // heuristically cached 404 outlives the URL becoming a real page. Recorded
-    // in docs/SEO.md Section 11.2 as ENG-owned.
-    if (path === "/this-page-does-not-exist") continue;
     const response = await render(path);
     assert.match(
       response.headers.get("cache-control") ?? "",
       /no-store/,
       `${path} may be retained by a shared cache`,
+    );
+  }
+});
+
+// The 404 is the specific case H-8 named, so it is pinned by status as well as
+// by membership in the sweep above: a regression that turned the 404 into a
+// 200 would otherwise keep this file green.
+test("a genuine 404 is a 404 and declares its own freshness", async () => {
+  const response = await render("/this-page-does-not-exist");
+  assert.equal(response.status, 404, "an unknown path must not answer 200");
+  assert.equal(
+    response.headers.get("cache-control"),
+    "no-store, must-revalidate",
+    "a 404 with no cache directive can be heuristically cached and outlive the URL becoming a real page",
+  );
+});
+
+// The other half of the rule, and the half a blanket `headers.set()` would
+// have broken silently: the default fills a silence, it does not overrule a
+// route that chose its own directive.
+test("the HTML cache default does not overwrite a directive a route chose", async () => {
+  for (const path of ["/robots.txt", "/sitemap.xml"]) {
+    const response = await render(path);
+    assert.equal(
+      response.headers.get("cache-control"),
+      "public, max-age=3600",
+      `${path} lost the cache directive it sets for itself`,
     );
   }
 });
