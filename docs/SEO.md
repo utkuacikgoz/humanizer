@@ -506,9 +506,10 @@ agent can close it, because it needs a login, a DNS record, or a human decision.
 more than a *Done* nobody can support; do not upgrade a row without evidence named in the row itself.
 
 **Every row that is not Done now names the single missing input and who owns it**, rather than saying
-*Open*. That is the difference between a backlog and a list of things nobody has got to: eight of these
-wait on one login, one purchase, one Legal signature, one analytics destination, or one provider selection,
-and reading the row should tell you which. Where the answer is *nothing an agent can do*, the row says so
+*Open*. That is the difference between a backlog and a list of things nobody has got to: most of these
+wait on exactly one thing — a console login, an observed purchase, a Legal signature, an analytics
+destination, or a provider selection — and reading the row should tell you which one, without counting
+anything nobody has counted. Where the answer is *nothing an agent can do*, the row says so
 in those words rather than implying unstarted work.
 
 | ID | Pri | Task | Owner | Depends on | Status | Acceptance criteria |
