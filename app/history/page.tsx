@@ -236,7 +236,7 @@ export default function HistoryPage() {
                 politely and drawn as the way in, not as an error. */}
             {list.kind === "signed-out" ? (
               <div className="surface-gate" role="status">
-                <p>Your rewrites are kept under your account. Nothing is stored under one until you sign in and unlock a rewrite.</p>
+                <p>Sign in to see the rewrites saved to your account.</p>
                 <Link className="next-action" href={SIGN_IN_HREF}>Sign in</Link>
               </div>
             ) : null}

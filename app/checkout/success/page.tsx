@@ -38,8 +38,8 @@ const STATUS_HEADINGS = {
 // One line under the heading in every state, so the surface says what is
 // happening and what to expect rather than showing a title over empty ground.
 const STATUS_SUBHEADS = {
-  confirming: "Stripe is answering. Nothing else is needed from you.",
-  unlocked: "Every change is marked against your original, and it is saved to your account.",
+  confirming: "Stripe usually answers within a few seconds. Nothing else is needed from you.",
+  unlocked: "Every change is marked against your original, and the rewrite is saved to your account.",
   delayed: "Your payment went through. Only the confirmation is slow.",
   missing: "This page needs the reference that came with your rewrite.",
   "signed-out": "Your result is held under the account that paid for it.",
@@ -155,13 +155,12 @@ export default function CheckoutSuccessPage() {
           {visibleStatus === "confirming" ? (
             <p className="surface-note" role="status">
               <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span>
-              {" "}We&apos;re confirming your payment with Stripe. This usually takes a few seconds.
+              {" "}Waiting for Stripe.
             </p>
           ) : null}
 
           {visibleStatus === "delayed" ? (
             <p className="surface-note" role="status">
-              Your payment is still being confirmed. This can take a little longer than usual.
               Refresh this page in a moment, or check{" "}
               <Link href="/">the homepage</Link>. You will not be charged again, and nothing is lost.
             </p>
@@ -171,7 +170,7 @@ export default function CheckoutSuccessPage() {
               drawn as a gate with the action in it rather than as an error. */}
           {visibleStatus === "signed-out" ? (
             <div className="surface-gate" role="status">
-              <p>Your rewrite is unlocked and waiting. Sign in with the address you paid with to read it.</p>
+              <p>Sign in with the address you paid with, and your rewrite opens here.</p>
               <Link className="next-action" href="/signin?return_to=%2Fcheckout%2Fsuccess">Sign in</Link>
             </div>
           ) : null}

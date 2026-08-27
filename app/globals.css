@@ -411,18 +411,28 @@ nav a:not(.sign-in):hover::after { right: 0; }
 
 /* The one control is narrow, so the argument gets the wide column —
    the reverse of the landing stage, where the product is the wide half. */
+/* One centred column. `main` is a full-height flex column and this is its
+   only band, so it takes the leftover height and settles in the middle of it
+   rather than sitting in the top third of a screen of empty ground. */
 .stage-auth {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 404px);
-  /* `main` is a full-height column; this is its only band, so it takes the
-     leftover height and centres in it. Without this the card sat near the top
-     of a screen of empty ground with nothing holding it there. */
-  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
   align-content: center;
-  padding-top: var(--s8);
-  padding-bottom: var(--s9);
+  flex: 1 1 auto;
+  padding-top: var(--s7);
+  padding-bottom: var(--s7);
 }
-.auth-intro h1 { font-size: var(--t-3xl); }
-.auth-intro .hero-copy { max-width: 42ch; margin-bottom: 0; }
+/* No ambient glow behind a one-field form: the landing stage's blur is
+   scenery for a hero, and here it was a stray circle in the corner. */
+.stage-auth::before { display: none; }
+.auth-column { width: 100%; max-width: 430px; display: grid; gap: var(--s5); }
+.auth-intro h1 {
+  font-size: var(--t-2xl); line-height: 1.05; letter-spacing: -.04em; font-weight: 600;
+}
+.auth-intro > p {
+  margin: var(--s3) 0 0; max-width: 46ch;
+  color: var(--ink-2); font-size: var(--t-sm); line-height: 1.6;
+}
 
 
 .hero { position: relative; }

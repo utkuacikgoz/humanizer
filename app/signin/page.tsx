@@ -146,82 +146,87 @@ export default function SignInPage() {
         </nav>
       </header>
 
+      {/* One column, centred and vertically settled. An earlier pass gave this
+          page the landing hero's two-column split; with one field and one
+          button to place, that left half the viewport empty and made the card
+          read as incidental. The card is the centre of gravity, the heading
+          sits above it at the width of the thing it introduces, and the legal
+          line sits outside the card because it is not part of the task. */}
       <div className="stage stage-auth">
-        <div className="hero auth-intro">
-          <h1 id="signin-title">
-            Sign in
-            <em>No password to remember.</em>
-          </h1>
-          <p className="hero-copy">
-            Type the address you already read mail at. We send one link, and opening it signs you
-            in. The link works once and expires 15 minutes after it is sent.
-          </p>
-        </div>
+        <div className="auth-column">
+          <div className="auth-intro">
+            <h1 id="signin-title">Sign in</h1>
+            <p>
+              Type the address you already read mail at. We send one link, and opening it signs you
+              in. The link works once and expires 15 minutes after it is sent.
+            </p>
+          </div>
 
-        <div className="auth-card">
-          {session.kind === "signed-in" ? (
-            <div className="auth-session">
-              <p>
-                This browser is signed in as <b>{session.email}</b>.
-              </p>
-              <div className="auth-session-actions">
-                <Link className="next-action" href={returnTo}>Continue</Link>
-                {/*
-                  A real form POST, not a link: signing out changes state, and
-                  a GET sign-out would be triggered by any prefetcher or
-                  third-party page. The route also refuses a cross-site Origin.
-                */}
-                <form action="/api/auth/signout" method="post">
-                  <button className="auth-quiet" type="submit">Sign out</button>
-                </form>
-              </div>
-            </div>
-          ) : null}
-
-          <form className="auth-form" onSubmit={requestLink} aria-labelledby="signin-title">
+          <div className="auth-card">
             {session.kind === "signed-in" ? (
-              <p className="auth-switch">Or send a link to a different address.</p>
+              <div className="auth-session">
+                <p>
+                  This browser is signed in as <b>{session.email}</b>.
+                </p>
+                <div className="auth-session-actions">
+                  <Link className="next-action" href={returnTo}>Continue</Link>
+                  {/*
+                    A real form POST, not a link: signing out changes state, and
+                    a GET sign-out would be triggered by any prefetcher or
+                    third-party page. The route also refuses a cross-site Origin.
+                  */}
+                  <form action="/api/auth/signout" method="post">
+                    <button className="auth-quiet" type="submit">Sign out</button>
+                  </form>
+                </div>
+              </div>
             ) : null}
 
-            <div className="auth-field">
-              <label htmlFor="signin-email">Email address</label>
-              <input
-                className="signin-input"
-                id="signin-email"
-                name="email"
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                autoCapitalize="none"
-                spellCheck={false}
-                placeholder="you@example.com"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-              />
-            </div>
+            <form className="auth-form" onSubmit={requestLink} aria-labelledby="signin-title">
+              {session.kind === "signed-in" ? (
+                <p className="auth-switch">Or send a link to a different address.</p>
+              ) : null}
 
-            <button className="auth-submit" type="submit" aria-disabled={status === "working"}>
-              {status === "working" ? (
-                <>
-                  <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span>
-                  Sending
-                </>
-              ) : (
-                "Email me a link"
-              )}
-            </button>
+              <div className="auth-field">
+                <label htmlFor="signin-email">Email address</label>
+                <input
+                  className="signin-input"
+                  id="signin-email"
+                  name="email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+              </div>
 
-            {/* Both regions are present before there is anything to announce.
-                They paint nothing while empty. */}
-            <p className="auth-status" role="status" aria-live="polite">{liveStatus}</p>
-            <p className="auth-alert" role="alert">{liveError}</p>
+              <button className="auth-submit" type="submit" aria-disabled={status === "working"}>
+                {status === "working" ? (
+                  <>
+                    <span className="dot-loader" aria-hidden="true"><span /><span /><span /></span>
+                    Sending
+                  </>
+                ) : (
+                  "Email me a link"
+                )}
+              </button>
 
-            <p className="auth-note">
-              {status === "sent"
-                ? "Nothing arrived? Check the spam folder, then request another link."
-                : "We only use your address to sign you in and to send receipts."}
-            </p>
-          </form>
+              {/* Both regions are present before there is anything to announce.
+                  They paint nothing while empty. */}
+              <p className="auth-status" role="status" aria-live="polite">{liveStatus}</p>
+              <p className="auth-alert" role="alert">{liveError}</p>
+
+              <p className="auth-note">
+                {status === "sent"
+                  ? "Nothing arrived? Check the spam folder, then request another link."
+                  : "We only use your address to sign you in and to send receipts."}
+              </p>
+            </form>
+          </div>
 
           <p className="auth-legal">
             By signing in you agree to the <Link href="/terms">terms</Link> and the{" "}
