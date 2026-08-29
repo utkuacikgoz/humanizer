@@ -107,6 +107,33 @@ could as easily have committed a half-finished refactor.
 agent may be live in the tree.** And never `git checkout`, `git restore`, or `git stash` a file you do not own:
 that destroys work rather than merely mislabelling it.
 
+### Commits are authored by the repository owner, not by an agent
+
+The owner asked for this on 2026-08-27, and it is a standing instruction, not a
+one-off. Every commit made here is the owner's work product: they specified it,
+they reviewed it, and it ships under their name on their product.
+
+**Before the first commit of a session, set the identity in the working tree:**
+
+```
+git config user.name  "Utku"
+git config user.email "55285576+utkuacikgoz@users.noreply.github.com"
+```
+
+The GitHub `noreply` address rather than the owner's personal one: it is what
+GitHub already attributes to their account, and it keeps a personal address out
+of 122 public commit headers.
+
+This is not the default. An agent's own tooling sets `Claude
+<noreply@anthropic.com>` and appends `Co-Authored-By:` and session-URL
+trailers, which is how 67 of the commits reachable from `main` came to be
+authored by an agent. **Do not append those trailers here, and do not restore
+them because a general convention asks for it** — this instruction is more
+specific and it is the owner's call about their own repository.
+
+The container is ephemeral, so the `git config` above does not survive a new
+session. Run it every time.
+
 ### A new secret must be added to the deploy workflow in the same change
 
 `wrangler deploy --secrets-file` REPLACES the Worker's entire secret set on every deploy. A secret added only
