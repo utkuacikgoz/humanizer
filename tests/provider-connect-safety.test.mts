@@ -100,6 +100,9 @@ test("SEC-26: the claim of no third-party provider survives only where it is tru
     { HUMANIZATION_PROVIDER: "claude" },
     { HUMANIZATION_PROVIDER: "claude", ANTHROPIC_API_KEY: "   " },
     { HUMANIZATION_PROVIDER: "gpt-9", ANTHROPIC_API_KEY: "k" },
+    // A model typo fails the whole selection closed rather than silently
+    // serving the provider's default — the most expensive model — under it.
+    { HUMANIZATION_PROVIDER: "claude", ANTHROPIC_API_KEY: "k", HUMANIZATION_MODEL: "claude-sonnet-4-6" },
   ] satisfies Array<HumanizationProviderEnv | undefined>) {
     const disclosure = humanizationDisclosure(env);
     assert.equal(resolveHumanizationProvider(env).provider, "deterministic");

@@ -281,6 +281,12 @@ thinking tokens, about $0.086 at 3,000. Against a full Starter allowance that
 is $2.25, $9.75 and $17.25 of inference against $9.99 of revenue. Against a
 full Pro allowance it is $9.00, $39.00 and $69.00 against $19.00.
 
+**Measured 2026-08-30** (docs/BENCHMARKS.md, "Measured: Sonnet 5"): Sonnet 5
+at `low` effort costs $0.0425/1k words — $2.12 of inference against Starter's
+$9.99 and $8.49 against Pro's $39.99 at full consumption, 78.8% worst-case
+gross margin on both. The paragraph below predates the measurement and is
+retained for the reasoning; the measured table supersedes its figures.
+
 **Those are modelled figures, not measurements.** `npm run measure:cost`
 replaces them with real ones: mean and p95 thinking, input, output and cached
 tokens from provider-reported usage, measured cost per rewrite, the

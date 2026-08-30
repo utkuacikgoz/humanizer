@@ -407,6 +407,28 @@ test("claude is selected only when it is asked for and a key exists", () => {
   });
 });
 
+test("the serving model is opt-in, validated, and a typo fails the whole selection closed", () => {
+  // Without HUMANIZATION_MODEL the single-model path served the provider's
+  // default — claude-opus-5 — with no way to deploy anything else. The
+  // 2026-08-30 measurement priced Sonnet 5 at low effort at 78.8% worst-case
+  // gross margin; this variable is how that result reaches production.
+  const sonnet = resolveHumanizationProvider({
+    HUMANIZATION_PROVIDER: "claude",
+    ANTHROPIC_API_KEY: "k",
+    HUMANIZATION_MODEL: " claude-sonnet-5 ",
+  });
+  assert.deepEqual(sonnet, { provider: "claude", apiKey: "k", routing: false, model: "claude-sonnet-5" });
+
+  // Not a fallback to the default: a typo that silently serves the most
+  // expensive model is the misconfiguration the resolver exists to name.
+  const typo = resolveHumanizationProvider({
+    HUMANIZATION_PROVIDER: "claude",
+    ANTHROPIC_API_KEY: "k",
+    HUMANIZATION_MODEL: "claude-sonnet-5-20260101",
+  });
+  assert.deepEqual(typo, { provider: "deterministic", reason: "unknown-model" });
+});
+
 test("effort is opt-in and validated", () => {
   const tuned = resolveHumanizationProvider({
     HUMANIZATION_PROVIDER: "claude",

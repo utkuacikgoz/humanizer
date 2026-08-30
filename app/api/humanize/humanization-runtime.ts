@@ -93,7 +93,7 @@ async function build(maxInputCharacters: number): Promise<HumanizationRuntime> {
   );
 
   if (choice.provider === "deterministic") {
-    if (choice.reason === "missing-api-key" || choice.reason === "unknown-provider") {
+    if (choice.reason === "missing-api-key" || choice.reason === "unknown-provider" || choice.reason === "unknown-model") {
       // Content-free by construction: a reason code and a variable name, never
       // a key and never customer text. Worth saying out loud — an operator who
       // believes a model is running while substitution-table output ships is
@@ -120,6 +120,10 @@ async function build(maxInputCharacters: number): Promise<HumanizationRuntime> {
       })
     : new ClaudeHumanizationProvider({
         client,
+        // Without this the single-model path always served the provider's
+        // default, claude-opus-5 — there was no way to deploy the model the
+        // measurement actually priced.
+        ...(choice.model ? { model: choice.model } : {}),
         ...(choice.effort ? { effort: choice.effort } : {}),
       });
 

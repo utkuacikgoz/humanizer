@@ -532,6 +532,39 @@ full on every request and the input side roughly triples. And it says nothing
 about retries: a rewrite that fails verification and is resampled costs twice,
 and an escalated routed rewrite costs both rungs.
 
+### Measured: Sonnet 5, 2026-08-30
+
+The measurement has now run — GitHub Actions run 33325420913, dispatched via
+`.github/workflows/measure-cost.yml`, 10 composed documents (183–241 words,
+median 202) per effort level on `claude-sonnet-5`, `natural` mode, real
+provider-reported usage. 29 of 30 rewrites succeeded; the one failure was a
+verification rejection at `medium`, not a provider error.
+
+| effort | cost/rewrite (mean) | cost/1k words | thinking tokens (mean) | rejection rate | mean latency | Starter $9.99 inference | gross margin |
+|---|---|---|---|---|---|---|---|
+| low | $0.0086 | $0.0425 | 3 | 14.3% | 5.7s | $2.12 | **78.8%** |
+| medium | $0.0099 | $0.0488 | 179 | 13.3% | 6.4s | $2.44 | 75.6% |
+| high | $0.0259 | $0.1278 | 1,857 | 8.3% | 19.6s | $6.39 | 36.1% |
+
+Pro's margin is identical per effort because both plans price at $0.20/1k
+words. The projection is a floor at full-allowance consumption; most
+subscribers use a fraction. Cached-input share held at ~64% across all three
+levels, so the byte-stable prefix is doing its job.
+
+What the numbers say, without deciding anything (D-014's line): `low` is the
+serving candidate — the cheapest level, a rejection rate within a point of
+`medium`, near-zero thinking, and a quarter of `high`'s latency. `high` buys
+its lower rejection rate at three times the cost and 20-second responses,
+which is a poor trade for a product whose verifier already rejects and
+resamples. The modelled section below is retained for the reasoning shape,
+but this table supersedes its figures.
+
+Getting here took three runs and two fixes worth remembering: the first run
+failed 30/30 **silently** (the report printed zeros and exited 0 — fixed, it
+now exits 1 and prints per-effort failure reasons), and the cause was
+`fallbacks: "default"` being sent to a model that rejects it (fixed via
+`serverFallbacks` in `CLAUDE_MODEL_CAPABILITIES`).
+
 ### `npm run measure:cost` — replacing the model with a measurement
 
 Added 2026-08-26. Sweeps every effort level against real API calls and prints,

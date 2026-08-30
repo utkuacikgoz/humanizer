@@ -42,6 +42,12 @@ jobs:
       # Optional, and deliberately not gated: absent means "deterministic",
       # which is a valid configuration.
       HUMANIZATION_PROVIDER: ${{ secrets.HUMANIZATION_PROVIDER }}
+      # Optional. The single-model serving model; absent keeps the provider's
+      # default (claude-opus-5). The 2026-08-30 measurement priced Sonnet 5 at
+      # low effort at 78.8% worst-case gross margin, so a production flip is
+      # expected to set this to claude-sonnet-5. An unrecognised value fails
+      # closed to deterministic with a logged reason (provider-config.ts).
+      HUMANIZATION_MODEL: ${{ secrets.HUMANIZATION_MODEL }}
       # Optional. Defaults to no-reply@<configured domain>; set it only when
       # the verified sending identity differs (e.g. a mail subdomain).
       AUTH_EMAIL_FROM: ${{ secrets.AUTH_EMAIL_FROM }}
@@ -88,6 +94,7 @@ jobs:
           RESEND_API_KEY: ""
           ANTHROPIC_API_KEY: ""
           HUMANIZATION_PROVIDER: ""
+          HUMANIZATION_MODEL: ""
           AUTH_EMAIL_FROM: ""
 
       - name: Resolve the account that owns D1
@@ -160,6 +167,9 @@ jobs:
           fi
           if [ -n "$HUMANIZATION_PROVIDER" ]; then
             printf '%s\n' "HUMANIZATION_PROVIDER=$HUMANIZATION_PROVIDER" >> "$secrets_file"
+          fi
+          if [ -n "$HUMANIZATION_MODEL" ]; then
+            printf '%s\n' "HUMANIZATION_MODEL=$HUMANIZATION_MODEL" >> "$secrets_file"
           fi
           npx wrangler deploy --config dist/server/wrangler.json --secrets-file "$secrets_file"
         env:
