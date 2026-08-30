@@ -37,6 +37,12 @@ declare namespace Cloudflare {
     ANTHROPIC_API_KEY?: string;
     /** Optional depth control: low | medium | high | xhigh | max. Defaults to medium. */
     HUMANIZATION_EFFORT?: string;
+    /**
+     * Optional single-model serving model: claude-opus-5 | claude-sonnet-5 |
+     * claude-haiku-4-5. Unset keeps the provider default (claude-opus-5); an
+     * unrecognised value fails closed to deterministic with a logged reason.
+     */
+    HUMANIZATION_MODEL?: string;
     /** Set to `production`, `development`, `local`, or `test`. */
     ENVIRONMENT?: string;
   }

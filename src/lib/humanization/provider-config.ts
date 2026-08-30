@@ -23,16 +23,29 @@ export interface HumanizationProviderEnv {
   HUMANIZATION_MODEL_LADDER?: string;
   /** Depth control passed through to the model: low | medium | high | xhigh | max. */
   HUMANIZATION_EFFORT?: string;
+  /**
+   * The single-model path's serving model. Without this variable there was no
+   * way to choose one: the provider's own default is claude-opus-5, and the
+   * 2026-08-30 measurement (run 33325420913) priced Opus-class serving out of
+   * the plans while Sonnet 5 at low effort measured $0.042/1k words — 78.8%
+   * gross margin worst-case. An unset value keeps the provider default; an
+   * INVALID value fails closed to deterministic with a reason, because a typo
+   * silently serving the most expensive model at three times the measured
+   * cost is exactly the kind of misconfiguration this resolver exists to name.
+   */
+  HUMANIZATION_MODEL?: string;
 }
 
 export type HumanizationProviderChoice =
-  | { provider: "deterministic"; reason?: "not-configured" | "missing-api-key" | "unknown-provider" }
+  | { provider: "deterministic"; reason?: "not-configured" | "missing-api-key" | "unknown-provider" | "unknown-model" }
   | {
       provider: "claude";
       apiKey: string;
       /** True only when routing was explicitly turned on. Single-model is the default path. */
       routing: boolean;
       ladder?: readonly [ClaudeModelId, ClaudeModelId];
+      /** The single-model path's serving model; the routing path takes its models from the ladder. */
+      model?: ClaudeModelId;
       effort?: "low" | "medium" | "high" | "xhigh" | "max";
     };
 
@@ -81,11 +94,17 @@ export function resolveHumanizationProvider(env: HumanizationProviderEnv | undef
   const effort = normalize(env?.HUMANIZATION_EFFORT);
   const routing = normalize(env?.HUMANIZATION_MODEL_ROUTING) === "on";
   const ladder = routing ? parseLadder(env?.HUMANIZATION_MODEL_LADDER) : undefined;
+  // A model id we do not recognise fails the whole selection closed, exactly
+  // like an unknown provider: the alternative is silently serving the
+  // provider's default — the most expensive model — under an operator's typo.
+  const model = normalize(env?.HUMANIZATION_MODEL);
+  if (model && !MODELS.has(model)) return { provider: "deterministic", reason: "unknown-model" };
   return {
     provider: "claude",
     apiKey,
     routing,
     ...(ladder ? { ladder } : {}),
+    ...(model ? { model: model as ClaudeModelId } : {}),
     ...(EFFORTS.has(effort) ? { effort: effort as "low" | "medium" | "high" | "xhigh" | "max" } : {}),
   };
 }
