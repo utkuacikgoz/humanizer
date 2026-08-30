@@ -114,6 +114,20 @@ test("server-side refusal fallbacks are enabled by default, with the header that
   assert.equal(params.fallbacks, "default", "'default' routes by refusal category, so there is no model list to maintain");
 });
 
+test("models that reject the fallbacks parameter are never sent it, nor its beta", async () => {
+  // Not hypothetical: the provider's first three real API calls ever — the
+  // 2026-08-30 measurement run — ALL failed with `'claude-sonnet-5' does not
+  // support the `fallbacks` parameter`, because this parameter alone skipped
+  // the capabilities table every other model-gated parameter goes through.
+  for (const model of ["claude-sonnet-5", "claude-haiku-4-5"] as const) {
+    const client = fakeClient([reply()]);
+    await new ClaudeHumanizationProvider({ client, model }).rewrite(request());
+    const [params] = client.calls;
+    assert.equal("fallbacks" in params, false, `${model} rejects the fallbacks parameter with a 400`);
+    assert.deepEqual(params.betas, [], `${model} must not carry the fallback beta header either`);
+  }
+});
+
 test("the cached prefix is byte-stable: two different documents produce identical system blocks", async () => {
   const client = fakeClient([reply(), reply()]);
   const provider = new ClaudeHumanizationProvider({ client });

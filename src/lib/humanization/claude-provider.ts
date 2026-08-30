@@ -247,7 +247,13 @@ export class ClaudeHumanizationProvider implements HumanizationProvider {
     this.effort = options.effort ?? DEFAULT_EFFORT;
     this.maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
     this.name = options.name ?? `claude-${this.model}`;
-    this.betas = [FALLBACK_BETA, ...(options.extraBetas ?? [])];
+    // The fallback beta joins only on models that accept the parameter it
+    // pairs with — a beta header for a parameter the model rejects is at
+    // best noise and at worst its own 400.
+    this.betas = [
+      ...(CLAUDE_MODEL_CAPABILITIES[this.model].serverFallbacks ? [FALLBACK_BETA] : []),
+      ...(options.extraBetas ?? []),
+    ];
   }
 
   /**
@@ -282,7 +288,11 @@ export class ClaudeHumanizationProvider implements HumanizationProvider {
             format: { type: "json_schema" as const, schema: REWRITE_OUTPUT_SCHEMA },
           },
           betas: this.betas,
-          fallbacks: "default",
+          // Opus-tier only; Sonnet 5 rejects the parameter outright with a
+          // 400 (see ModelRequestCapabilities.serverFallbacks). On models
+          // without it a refusal simply stops, which the pipeline already
+          // handles as non-retryable.
+          ...(capabilities.serverFallbacks ? { fallbacks: "default" as const } : {}),
           // Order is tools -> system -> messages. Both system blocks are
           // byte-stable, so the breakpoints land on a prefix that repeats
           // across every request; the customer's text is in the user turn,

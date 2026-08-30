@@ -45,12 +45,20 @@ export interface ModelRequestCapabilities {
   adaptiveThinking: boolean;
   /** `output_config.effort` — current-generation models only. */
   effort: boolean;
+  /**
+   * `fallbacks: "default"` plus its beta header — Opus-tier only. Sonnet 5
+   * answers `'claude-sonnet-5' does not support the `fallbacks` parameter`
+   * with a 400: the Claude provider's first three real API calls ever all
+   * failed on exactly this, because the parameter was sent unconditionally
+   * while every other model-gated parameter already ran through this table.
+   */
+  serverFallbacks: boolean;
 }
 
 export const CLAUDE_MODEL_CAPABILITIES: Record<ClaudeModelId, ModelRequestCapabilities> = {
-  "claude-opus-5": { adaptiveThinking: true, effort: true },
-  "claude-sonnet-5": { adaptiveThinking: true, effort: true },
-  "claude-haiku-4-5": { adaptiveThinking: false, effort: false },
+  "claude-opus-5": { adaptiveThinking: true, effort: true, serverFallbacks: true },
+  "claude-sonnet-5": { adaptiveThinking: true, effort: true, serverFallbacks: false },
+  "claude-haiku-4-5": { adaptiveThinking: false, effort: false, serverFallbacks: false },
 };
 
 export interface TokenCounts {
