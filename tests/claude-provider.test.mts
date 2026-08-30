@@ -257,6 +257,12 @@ test("a mapped error never carries the provider's response body or a cause chain
   const mapped = mapAnthropicError(leaky);
   assert.equal(mapped.message.includes("API limit is 42"), false, "the pipeline copies this message into its retry context");
   assert.equal(mapped.cause, undefined, "an SDK error's cause chain can carry the request body");
+  // The API's account of a 400 DOES survive — in the operator-only
+  // diagnostic channel, which the pipeline never copies into a prompt. The
+  // first real measurement run failed 30/30 with no way to learn why;
+  // deleting this field brings that blindness back.
+  assert.equal(typeof mapped.diagnostic, "string", "a 400 without its API message is undiagnosable");
+  assert.ok((mapped.diagnostic ?? "").length <= 300, "diagnostics are destined for logs and stay capped");
 });
 
 test("a truncated or unparseable response is retried rather than sold half-finished", async () => {

@@ -119,13 +119,16 @@ export class HumanizationFailedError extends Error {
   readonly metrics: UsageMetrics;
   readonly verification?: VerificationResult;
   readonly evaluation?: EvaluationResult;
+  /** The provider's own account of a refusal, for operator tooling only — see ProviderErrorOptions.diagnostic. */
+  readonly diagnostic?: string;
 
-  constructor(message: string, metrics: UsageMetrics, verification?: VerificationResult, evaluation?: EvaluationResult) {
+  constructor(message: string, metrics: UsageMetrics, verification?: VerificationResult, evaluation?: EvaluationResult, diagnostic?: string) {
     super(message);
     this.name = "HumanizationFailedError";
     this.metrics = metrics;
     this.verification = verification;
     this.evaluation = evaluation;
+    this.diagnostic = diagnostic;
   }
 }
 
@@ -247,11 +250,15 @@ export class HumanizationPipeline {
         // ProviderError can say which it is, so anything else keeps the
         // historical retry behaviour.
         if (error instanceof ProviderError && !error.retryable) {
+          // The ProviderError's message and operator diagnostic survive into
+          // this error: reducing them to a kind is what made a 30/30 failure
+          // of the first real measurement run undiagnosable from its report.
           throw new HumanizationFailedError(
-            `The ${this.humanizationProvider.name} provider rejected the request (${error.kind}).`,
+            `The ${this.humanizationProvider.name} provider rejected the request (${error.kind}): ${error.message}`,
             this.usageMetrics(attemptedWords, attempt, startedAt, estimatedTokens, estimatedCostUsd, totals),
             lastVerification,
             lastEvaluation,
+            error.diagnostic,
           );
         }
         previousFailures = [{ kind: "changed-meaning", message: error instanceof Error ? error.message : "Rewrite provider failed." }];

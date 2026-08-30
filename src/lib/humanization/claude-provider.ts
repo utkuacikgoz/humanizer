@@ -172,7 +172,16 @@ export function mapAnthropicError(error: unknown): ProviderError {
     return new ProviderError("The rewrite provider rejected these credentials.", { kind: "invalid-request" });
   }
   if (error instanceof Anthropic.BadRequestError || error instanceof Anthropic.NotFoundError) {
-    return new ProviderError(`The rewrite provider rejected the request (${error.status}).`, { kind: "invalid-request" });
+    // `message` stays this engine's prose: the test below this mapping proves
+    // an SDK 400 message can echo the customer's document, and the pipeline
+    // copies `message` into the retry context that reaches the next prompt.
+    // The API's own account — which names the offending parameter and is the
+    // only way to diagnose a 400 — rides in the operator-only `diagnostic`
+    // channel instead, capped because it is destined for logs.
+    return new ProviderError(`The rewrite provider rejected the request (${error.status}).`, {
+      kind: "invalid-request",
+      diagnostic: error.message.slice(0, 300),
+    });
   }
   if (error instanceof Anthropic.APIError) {
     const status = typeof error.status === "number" ? error.status : 0;
