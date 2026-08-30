@@ -231,6 +231,11 @@ interface EffortResult {
   effort: Effort;
   samples: Sample[];
   failures: number;
+  /** Distinct failure messages -> occurrence count. The first real run of
+   *  this script failed 30/30 and reported nothing but the count; a
+   *  measurement that cannot say WHY it measured nothing is not a
+   *  measurement. */
+  failureReasons: Map<string, number>;
   verdicts: number;
   rejections: number;
 }
@@ -254,6 +259,7 @@ for (const effort of efforts) {
 
   const samples: Sample[] = [];
   let failures = 0;
+  const failureReasons = new Map<string, number>();
   for (const document of corpus) {
     try {
       const result = await pipeline.humanize({ text: document.text, mode });
@@ -272,6 +278,10 @@ for (const effort of efforts) {
       });
     } catch (error) {
       failures += 1;
+      const reason = error instanceof HumanizationFailedError && error.diagnostic
+        ? `${error.message} — ${error.diagnostic}`
+        : error instanceof Error ? error.message : String(error);
+      failureReasons.set(reason, (failureReasons.get(reason) ?? 0) + 1);
       // Cost is still real on a failure; the pipeline does not surface usage
       // from a rewrite it could not return, so it is absent here rather than
       // guessed. Noted in the report.
@@ -284,7 +294,7 @@ for (const effort of efforts) {
     process.stderr.write(".");
   }
   process.stderr.write("\n");
-  results.push({ effort, samples, failures, verdicts: verifier.verdicts, rejections: verifier.rejections });
+  results.push({ effort, samples, failures, failureReasons, verdicts: verifier.verdicts, rejections: verifier.rejections });
 }
 
 const starter = pricingConfig.plans.starter;
@@ -311,6 +321,12 @@ for (const result of results) {
 
   write();
   write(`  effort=${result.effort}`);
+  if (result.failureReasons.size) {
+    write("  failure reasons:");
+    for (const [reason, count] of result.failureReasons) {
+      write(`    ${count}x ${reason}`);
+    }
+  }
   write(JSON.stringify({
     rewrites: samples.length,
     failures: result.failures,
@@ -358,3 +374,13 @@ write("  * These numbers do not choose an effort, a model, a price or an allowan
 write("    docs/MONETIZATION.md for what each outcome implies and whose decision it is.");
 
 process.stdout.write(`${lines.join("\n")}\n`);
+
+// A run that measured nothing is a failed run, whatever the process above
+// printed. Real money was spent on calls that produced no sample, and a green
+// exit here is how the first run of this script turned 30 straight failures
+// into a passing CI job.
+const measured = results.reduce((sum, result) => sum + result.samples.length, 0);
+if (measured === 0) {
+  process.stderr.write("\nmeasure:cost measured nothing: every rewrite failed. The failure reasons are in the report above.\n");
+  process.exit(1);
+}
