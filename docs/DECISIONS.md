@@ -1,6 +1,6 @@
 # Decision Log
 
-Last updated: 2026-08-25
+Last updated: 2026-08-30
 
 Accepted decisions are durable until replaced by a new dated entry. Implementation discoveries should amend this log rather than silently diverge.
 
@@ -231,3 +231,24 @@ production host, and no adversarial pass has been run against the new scheme.
 - Depending on a single LLM SDK throughout the application.
 - Requiring signup before the first preview.
 - Advertising guaranteed detector evasion.
+
+## D-020 — Positioning: sell the market's job honestly, with proof (2026-08-30)
+
+Decision: Ownword competes in the AI-humanizer market on the same mechanisms that demonstrably convert there
+— a third-party detector evidence panel, a real free tier, comparison content, annual pricing — while
+refusing the market's central claim. Output verdicts from external detectors are shown as dated results
+("checked today: X% AI"), never as guarantees. "Guaranteed undetectable", "bypass Turnitin" and their
+equivalents stay forbidden by docs/CLAIMS.md, unchanged.
+
+Reason: the owner reviewed the competitive brief of 2026-08-30 (StealthGPT at a founder-reported ~$190k MRR;
+Undetectable.ai leading the market at the segment's highest per-word price) and chose this position over
+chasing "undetectable" head-on. The brief's finding stands: none of the four mechanisms that convert requires
+the unsubstantiable claim, and in a market where every competitor's guarantee quietly fails as detectors
+retrain, never having made it is the durable brand.
+
+Consequence: the engine work is sequenced first — measure:cost, then HUMANIZATION_PROVIDER=claude on a
+Sonnet-class serving model (Opus-class is modelled underwater at market prices once thinking runs). Then, in
+order: one proven end-to-end purchase, the detector evidence panel, a signed-in daily free tier replacing the
+one-shot preview, annual Stripe prices, and honestly-tested comparison pages. Marketing copy may name the
+audience (professionals, non-native English writers, false-positive victims) and may state measured detector
+results; it may not promise future detector behaviour.

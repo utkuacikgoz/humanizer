@@ -1,0 +1,101 @@
+name: Measure cost
+
+# M4-02. Turns docs/BENCHMARKS.md's modelled cost table into a measured one,
+# without the Anthropic key ever leaving GitHub's secret store. The owner (or
+# a session acting for them) dispatches this; the report lands in the job
+# summary and the log, and docs/MONETIZATION.md says what each outcome means.
+#
+# This workflow spends real money on real API calls — that is its entire
+# point. The defaults keep one run to ~30 calls on ~200-word documents
+# (cents on Sonnet, low dollars on Opus). It deploys nothing, migrates
+# nothing, and touches no Cloudflare or Stripe credential.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Serving model to measure
+        type: choice
+        default: claude-sonnet-5
+        options:
+          - claude-sonnet-5
+          - claude-haiku-4-5
+          - claude-opus-5
+      efforts:
+        description: Comma-separated effort levels to sweep
+        type: string
+        default: low,medium,high
+      samples:
+        description: Documents per effort level (calls = samples x efforts)
+        type: string
+        default: "10"
+      corpus:
+        description: composed (200-300 word documents, the honest default) or raw
+        type: choice
+        default: composed
+        options:
+          - composed
+          - raw
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # The same environment gate as deploy.yml: whatever protection the owner
+    # configures on `production` also guards the credential this job reads.
+    environment: production
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22.13.0"
+          cache: npm
+
+      # SEC-08's rule holds here too: no dependency lifecycle script runs in
+      # a job that can read a production credential. The key is deliberately
+      # NOT job-level env — it exists only on the one step that measures.
+      - run: npm ci --ignore-scripts
+
+      # Inputs reach the script as environment variables, never by string
+      # interpolation into the shell: `${{ inputs.x }}` inside `run:` is the
+      # classic Actions injection. Dispatch already requires write access,
+      # but the safe pattern costs nothing.
+      - name: Measure
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MEASURE_MODEL: ${{ inputs.model }}
+          MEASURE_EFFORTS: ${{ inputs.efforts }}
+          MEASURE_SAMPLES: ${{ inputs.samples }}
+          MEASURE_CORPUS: ${{ inputs.corpus }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY is not available to this workflow. Add it as a secret on the production environment (or repository) before dispatching."
+            exit 1
+          fi
+          set -o pipefail
+          node --import tsx scripts/measure-cost.mts \
+            --model="$MEASURE_MODEL" \
+            --efforts="$MEASURE_EFFORTS" \
+            --samples="$MEASURE_SAMPLES" \
+            --corpus="$MEASURE_CORPUS" \
+            --betas=thinking-token-count-2026-05-13 \
+            | tee measure-cost-report.txt
+
+      - name: Publish report to the job summary
+        if: always()
+        env:
+          MEASURE_MODEL: ${{ inputs.model }}
+        run: |
+          if [ -f measure-cost-report.txt ]; then
+            {
+              echo "## measure:cost — $MEASURE_MODEL"
+              echo
+              echo '```'
+              cat measure-cost-report.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
