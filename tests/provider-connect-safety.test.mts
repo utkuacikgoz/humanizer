@@ -443,7 +443,7 @@ test("SEC-25: the route admits against the budget before it calls the provider, 
   // A terminal answer, not a 500 and not a silent success.
   assert.match(code, /MeteredSpendExhaustedError/);
   assert.match(code, /status:\s*503,[\s\S]{0,200}"retry-after":\s*String\(error\.retryAfterSeconds\)/);
-  assert.match(code, /No usage was charged/);
+  assert.match(code, /Nothing was charged/, "the terminal message must tell the customer what it cost them: nothing");
 });
 
 // ---------------------------------------------------------------------------

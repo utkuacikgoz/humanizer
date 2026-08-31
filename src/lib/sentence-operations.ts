@@ -164,7 +164,7 @@ function notFound() {
 
 function unavailable() {
   return Response.json(
-    { error: "Sentence editing is unavailable right now. No usage was charged." },
+    { error: "Sentence editing is unavailable right now. Nothing was charged." },
     { status: 503, headers: { ...NO_STORE, "retry-after": "2" } },
   );
 }
@@ -304,14 +304,14 @@ async function runSentenceOperation(
   if (kind === "regenerate") {
     if (usedForSentence >= MAX_REGENERATIONS_PER_SENTENCE) {
       return error(
-        `You can regenerate one sentence ${MAX_REGENERATIONS_PER_SENTENCE} times. No usage was charged.`,
+        `Each sentence can be regenerated ${MAX_REGENERATIONS_PER_SENTENCE} times, and this one has had them. Nothing was charged.`,
         429,
         { limit: "sentence", regenerationsUsedForSentence: usedForSentence, regenerationsUsedForJob: usedForJob },
       );
     }
     if (usedForJob >= MAX_REGENERATIONS_PER_JOB) {
       return error(
-        `You can regenerate ${MAX_REGENERATIONS_PER_JOB} sentences in one rewrite. No usage was charged.`,
+        `Up to ${MAX_REGENERATIONS_PER_JOB} sentences can be regenerated in one rewrite, and this one has had them. Nothing was charged.`,
         429,
         { limit: "job", regenerationsUsedForSentence: usedForSentence, regenerationsUsedForJob: usedForJob },
       );

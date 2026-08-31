@@ -552,7 +552,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof QuotaExceededError) {
       return Response.json(
-        { error: "You have used this month's word allowance.", usage: error.usage },
+        { error: "You have used all of this month's included words. They refresh when your billing month renews.", usage: error.usage },
         { status: 429, headers: { "cache-control": "no-store" } },
       );
     }
@@ -563,7 +563,7 @@ export async function POST(request: Request) {
       // The wording says what happened and what it cost the customer, which
       // is nothing.
       return Response.json(
-        { error: "Rewrites are briefly paused while we catch up with demand. No usage was charged; please try again shortly." },
+        { error: "Rewrites are briefly paused while we catch up with demand. Nothing was charged. Please try again in a moment." },
         {
           status: 503,
           headers: { "cache-control": "no-store", "retry-after": String(error.retryAfterSeconds) },
@@ -572,16 +572,16 @@ export async function POST(request: Request) {
     }
     if (error instanceof PaidUsageUnavailableError) {
       return Response.json(
-        { error: "Paid usage could not be verified. No usage was charged; please try again." },
+        { error: "We could not confirm your subscription usage just now. Nothing was charged. Please try again." },
         { status: 503, headers: { "cache-control": "no-store", "retry-after": "2" } },
       );
     }
     if (error instanceof DOMException && error.name === "TimeoutError") {
-      return Response.json({ error: "The preview took too long. No usage was charged; please try again." }, { status: 504, headers: { "cache-control": "no-store" } });
+      return Response.json({ error: "That one took longer than we allow, so we stopped it. Nothing was charged. Please try again." }, { status: 504, headers: { "cache-control": "no-store" } });
     }
     const message = error instanceof HumanizationFailedError
-      ? "We could not verify this rewrite without changing the meaning. No usage was charged."
-      : "The rewrite could not be completed.";
+      ? "Your meaning comes first: every version we tried drifted from it, so we kept none of them. Nothing was charged. Run it again, or paste a fuller paragraph. Short fragments are the hardest to rewrite faithfully."
+      : "Something went wrong on our side and this rewrite did not finish. Nothing was charged. Please try again.";
     return Response.json({ error: message }, { status: 422, headers: { "cache-control": "no-store" } });
   }
 }
